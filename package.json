@@ -16,6 +16,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "prepare": "npm run build",
     "test": "node --test dist/*.test.js",
     "typecheck": "tsc --noEmit"
   },
