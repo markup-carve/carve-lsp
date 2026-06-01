@@ -1,9 +1,9 @@
 import {
   DiagnosticSeverity,
   DocumentSymbol,
-  Range,
   SymbolKind,
   type Diagnostic,
+  type Range,
 } from 'vscode-languageserver/node.js'
 import {
   djotMigrationWarnings,
@@ -14,6 +14,7 @@ import {
   type Heading,
   type InlineNode,
 } from '@markup-carve/carve'
+import { migrationFixes } from './migration-actions.js'
 
 export interface Analysis {
   diagnostics: Diagnostic[]
@@ -35,13 +36,21 @@ export function analyzeCarve(source: string): Analysis {
     })
   }
 
+  const fixes = migrationFixes(source)
   for (const warning of djotMigrationWarnings(source)) {
-    diagnostics.push({
-      severity: DiagnosticSeverity.Warning,
-      range: {
+    const range =
+      fixes.find(
+        (fix) =>
+          fix.rule === warning.rule &&
+          fix.range.start.line === warning.line - 1 &&
+          fix.range.start.character === warning.column - 1,
+      )?.range ?? {
         start: { line: warning.line - 1, character: warning.column - 1 },
         end: { line: warning.line - 1, character: warning.column },
-      },
+      }
+    diagnostics.push({
+      severity: DiagnosticSeverity.Warning,
+      range,
       source: 'carve',
       code: warning.rule,
       message: `${warning.message} Suggestion: ${warning.suggestion}`,
@@ -100,7 +109,10 @@ function headingSymbol(heading: Heading): DocumentSymbol {
         start: { line: heading.pos.startLine - 1, character: 0 },
         end: { line: heading.pos.endLine - 1, character: 200 },
       }
-    : Range.create(0, 0, 0, 0)
+    : {
+        start: { line: 0, character: 0 },
+        end: { line: 0, character: 0 },
+      }
   return {
     name: plainText(heading.children) || `Heading ${heading.level}`,
     kind: SymbolKind.String,
@@ -129,5 +141,8 @@ function rangeAt(source: string, index: number, length: number): Range {
   const line = before.split('\n').length - 1
   const lastNewline = before.lastIndexOf('\n')
   const character = index - lastNewline - 1
-  return Range.create(line, character, line, character + length)
+  return {
+    start: { line, character },
+    end: { line, character: character + length },
+  }
 }
