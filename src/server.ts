@@ -3,11 +3,13 @@ import {
   createConnection,
   DocumentSymbolRequest,
   ProposedFeatures,
+  SemanticTokensRequest,
   TextDocuments,
   TextDocumentSyncKind,
 } from 'vscode-languageserver/node.js'
 import { TextDocument } from 'vscode-languageserver-textdocument'
 import { analyzeCarve } from './analyze.js'
+import { buildSemanticTokens, semanticTokenModifiers, semanticTokenTypes } from './semantic.js'
 
 const connection = createConnection(ProposedFeatures.all)
 const documents = new TextDocuments(TextDocument)
@@ -16,6 +18,13 @@ connection.onInitialize(() => ({
   capabilities: {
     textDocumentSync: TextDocumentSyncKind.Incremental,
     documentSymbolProvider: true,
+    semanticTokensProvider: {
+      legend: {
+        tokenTypes: [...semanticTokenTypes],
+        tokenModifiers: [...semanticTokenModifiers],
+      },
+      full: true,
+    },
   },
 }))
 
@@ -28,6 +37,11 @@ documents.onDidClose((event) => {
 connection.onRequest(DocumentSymbolRequest.type, (params) => {
   const document = documents.get(params.textDocument.uri)
   return document ? analyzeCarve(document.getText()).symbols : []
+})
+
+connection.onRequest(SemanticTokensRequest.type, (params) => {
+  const document = documents.get(params.textDocument.uri)
+  return document ? buildSemanticTokens(document.getText()) : { data: [] }
 })
 
 function validate(document: TextDocument) {
