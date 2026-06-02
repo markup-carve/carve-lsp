@@ -1,4 +1,12 @@
 import { SemanticTokensBuilder, type SemanticTokens } from 'vscode-languageserver/node.js'
+import {
+  parse,
+  resolve,
+  type BlockNode,
+  type Document,
+  type InlineNode,
+  type Position,
+} from '@markup-carve/carve'
 
 export const semanticTokenTypes = [
   'keyword',
@@ -42,6 +50,181 @@ export function buildSemanticTokens(source: string): SemanticTokens {
 }
 
 export function semanticTokens(source: string): Token[] {
+  try {
+    return astSemanticTokens(resolve(parse(source)), source)
+  } catch {
+    return lexicalSemanticTokens(source)
+  }
+}
+
+function astSemanticTokens(doc: Document, source: string): Token[] {
+  const tokens: Token[] = []
+  const lines = source.replace(/\r\n?/g, '\n').split('\n')
+  for (const node of doc.children) collectBlock(tokens, lines, node)
+  return withoutOverlaps(
+    tokens.sort((a, b) => a.line - b.line || a.character - b.character || b.length - a.length),
+  )
+}
+
+function collectBlock(tokens: Token[], lines: string[], node: BlockNode): void {
+  switch (node.type) {
+    case 'heading':
+      pushLinePrefix(tokens, lines, node.pos, /^#{1,6}/, 'operator')
+      pushHeadingTitle(tokens, lines, node.pos)
+      collectInline(tokens, lines, node.children)
+      break
+    case 'paragraph':
+      collectInline(tokens, lines, node.children)
+      break
+    case 'code-block':
+    case 'raw-block':
+      pushPosition(tokens, lines, node.pos, 'string')
+      break
+    case 'comment':
+      pushPosition(tokens, lines, node.pos, 'comment')
+      break
+    case 'blockquote':
+      pushLinePrefix(tokens, lines, node.pos, /^\s*>+/, 'operator')
+      for (const child of node.children) collectBlock(tokens, lines, child)
+      break
+    case 'list':
+      pushLinePrefix(tokens, lines, node.pos, /^\s*(?:[-+*]|\(?[0-9A-Za-z]+[.)])/, 'operator')
+      for (const item of node.items) {
+        for (const child of item.children) collectBlock(tokens, lines, child)
+      }
+      break
+    case 'admonition':
+      pushLinePrefix(tokens, lines, node.pos, /^\s*:{3,}\s*[A-Za-z][\w-]*/, 'type')
+      for (const child of node.children) collectBlock(tokens, lines, child)
+      if (node.title) collectInline(tokens, lines, node.title)
+      break
+    case 'div':
+      pushLinePrefix(tokens, lines, node.pos, /^\s*:{3,}/, 'operator')
+      for (const child of node.children) collectBlock(tokens, lines, child)
+      break
+    case 'definition-list':
+      for (const item of node.items) {
+        for (const term of item.terms) collectInline(tokens, lines, term)
+        for (const definition of item.definitions) {
+          for (const child of definition) collectBlock(tokens, lines, child)
+        }
+      }
+      break
+    case 'figure':
+      collectFigureTarget(tokens, lines, node.target)
+      collectInline(tokens, lines, node.caption)
+      break
+    case 'table':
+      pushPosition(tokens, lines, node.pos, 'string')
+      if (node.caption) collectInline(tokens, lines, node.caption)
+      for (const row of node.rows) {
+        for (const cell of row.cells) collectInline(tokens, lines, cell.children)
+      }
+      break
+    case 'image':
+      pushPosition(tokens, lines, node.pos, 'string')
+      break
+    case 'thematic-break':
+      pushPosition(tokens, lines, node.pos, 'operator')
+      break
+    case 'abbreviation-def':
+      pushPosition(tokens, lines, node.pos, 'property')
+      break
+  }
+}
+
+function collectFigureTarget(tokens: Token[], lines: string[], node: BlockNode): void {
+  if (node.type === 'image') pushPosition(tokens, lines, node.pos, 'string')
+  else collectBlock(tokens, lines, node)
+}
+
+function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[]): void {
+  for (const node of nodes) {
+    switch (node.type) {
+      case 'text':
+      case 'soft-break':
+      case 'hard-break':
+        break
+      case 'code':
+      case 'math':
+      case 'raw-inline':
+      case 'link':
+      case 'image':
+      case 'autolink':
+      case 'crossref':
+        pushPosition(tokens, lines, node.pos, 'string')
+        break
+      case 'mention':
+      case 'tag':
+      case 'emoji':
+      case 'footnote':
+      case 'abbreviation':
+        pushPosition(tokens, lines, node.pos, 'variable', ['readonly'])
+        break
+      case 'span':
+      case 'extension':
+        pushPosition(tokens, lines, node.pos, 'property')
+        break
+      default:
+        pushPosition(tokens, lines, node.pos, 'keyword')
+        break
+    }
+
+    const children = (node as { children?: InlineNode[] }).children
+    if (Array.isArray(children)) collectInline(tokens, lines, children)
+    const content = (node as { content?: InlineNode[] }).content
+    if (Array.isArray(content)) collectInline(tokens, lines, content)
+  }
+}
+
+function pushPosition(
+  tokens: Token[],
+  lines: string[],
+  pos: Position | undefined,
+  type: TokenType,
+  modifiers: TokenModifier[] = [],
+): void {
+  if (
+    pos?.startLine === undefined ||
+    pos.endLine === undefined ||
+    pos.startColumn === undefined ||
+    pos.endColumn === undefined
+  ) {
+    return
+  }
+  for (let line = pos.startLine; line <= pos.endLine; line++) {
+    const text = lines[line - 1] ?? ''
+    const startColumn = line === pos.startLine ? pos.startColumn : 1
+    const endColumn = line === pos.endLine ? pos.endColumn : text.length + 1
+    push(tokens, line - 1, startColumn - 1, Math.max(0, endColumn - startColumn), type, modifiers)
+  }
+}
+
+function pushLinePrefix(
+  tokens: Token[],
+  lines: string[],
+  pos: Position | undefined,
+  pattern: RegExp,
+  type: TokenType,
+): void {
+  if (!pos?.startLine) return
+  const line = lines[pos.startLine - 1] ?? ''
+  const match = pattern.exec(line)
+  if (!match) return
+  push(tokens, pos.startLine - 1, match.index, match[0].length, type)
+}
+
+function pushHeadingTitle(tokens: Token[], lines: string[], pos: Position | undefined): void {
+  if (!pos?.startLine) return
+  const line = lines[pos.startLine - 1] ?? ''
+  const match = /^(#{1,6})(\s+)(.*)$/.exec(line)
+  if (!match) return
+  push(tokens, pos.startLine - 1, match[1]!.length + match[2]!.length, match[3]!.length, 'type', [
+    'definition',
+  ])
+}
+
+function lexicalSemanticTokens(source: string): Token[] {
   const tokens: Token[] = []
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   let inFence: { marker: string; type: 'string' | 'comment' } | undefined

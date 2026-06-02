@@ -21,7 +21,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@markup-carve/carve": "git+https://github.com/markup-carve/carve-js.git",
+    "@markup-carve/carve": "github:markup-carve/carve-js",
     "vscode-languageserver": "^9.0.1",
     "vscode-languageserver-textdocument": "^1.0.12"
   },

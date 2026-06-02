@@ -59,7 +59,6 @@ test('returns semantic tokens for headings and inline markup', () => {
       [0, 2, 5, 'type'],
       [2, 3, 6, 'keyword'],
       [2, 10, 5, 'variable'],
-      [2, 16, 5, 'property'],
     ],
   )
 })
@@ -70,8 +69,7 @@ test('returns semantic tokens for fenced blocks', () => {
   assert.deepEqual(
     result.map((token) => [token.line, token.character, token.length, token.type]),
     [
-      [0, 0, 3, 'operator'],
-      [0, 4, 2, 'type'],
+      [0, 0, 6, 'string'],
       [1, 0, 11, 'string'],
       [2, 0, 3, 'string'],
     ],
