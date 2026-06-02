@@ -1,22 +1,29 @@
 #!/usr/bin/env node
 import {
   CodeActionRequest,
+  CodeLensRequest,
   CompletionRequest,
   createConnection,
   DocumentFormattingRequest,
   DocumentSymbolRequest,
+  FoldingRangeRequest,
   HoverRequest,
+  PrepareRenameRequest,
   ProposedFeatures,
+  RenameRequest,
   SemanticTokensRequest,
   TextDocuments,
   TextDocumentSyncKind,
 } from 'vscode-languageserver/node.js'
 import { TextDocument } from 'vscode-languageserver-textdocument'
 import { analyzeCarve } from './analyze.js'
+import { codeLenses } from './codelens.js'
 import { completionAt } from './completion.js'
+import { foldingRanges } from './folding.js'
 import { formatDocument } from './format.js'
 import { hoverAt } from './hover.js'
 import { migrationCodeActions } from './migration-actions.js'
+import { prepareRename, renameEdits } from './rename.js'
 import { buildSemanticTokens, semanticTokenModifiers, semanticTokenTypes } from './semantic.js'
 
 const connection = createConnection(ProposedFeatures.all)
@@ -29,6 +36,9 @@ connection.onInitialize(() => ({
     hoverProvider: true,
     codeActionProvider: true,
     documentFormattingProvider: true,
+    foldingRangeProvider: true,
+    renameProvider: { prepareProvider: true },
+    codeLensProvider: { resolveProvider: false },
     completionProvider: {
       triggerCharacters: [':', '#', '^', '['],
     },
@@ -87,6 +97,26 @@ connection.onRequest(DocumentFormattingRequest.type, (params) => {
       newText: formatted,
     },
   ]
+})
+
+connection.onRequest(FoldingRangeRequest.type, (params) => {
+  const document = documents.get(params.textDocument.uri)
+  return document ? foldingRanges(document.getText()) : []
+})
+
+connection.onRequest(PrepareRenameRequest.type, (params) => {
+  const document = documents.get(params.textDocument.uri)
+  return document ? prepareRename(document.getText(), params.position) : null
+})
+
+connection.onRequest(RenameRequest.type, (params) => {
+  const document = documents.get(params.textDocument.uri)
+  return document ? renameEdits(params.textDocument.uri, document.getText(), params.position, params.newName) : null
+})
+
+connection.onRequest(CodeLensRequest.type, (params) => {
+  const document = documents.get(params.textDocument.uri)
+  return document ? codeLenses(document.getText()) : []
 })
 
 function validate(document: TextDocument) {
