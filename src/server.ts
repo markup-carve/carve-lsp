@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import {
   CodeActionRequest,
+  CompletionRequest,
   createConnection,
+  DocumentFormattingRequest,
   DocumentSymbolRequest,
   HoverRequest,
   ProposedFeatures,
@@ -11,6 +13,8 @@ import {
 } from 'vscode-languageserver/node.js'
 import { TextDocument } from 'vscode-languageserver-textdocument'
 import { analyzeCarve } from './analyze.js'
+import { completionAt } from './completion.js'
+import { formatDocument } from './format.js'
 import { hoverAt } from './hover.js'
 import { migrationCodeActions } from './migration-actions.js'
 import { buildSemanticTokens, semanticTokenModifiers, semanticTokenTypes } from './semantic.js'
@@ -24,6 +28,10 @@ connection.onInitialize(() => ({
     documentSymbolProvider: true,
     hoverProvider: true,
     codeActionProvider: true,
+    documentFormattingProvider: true,
+    completionProvider: {
+      triggerCharacters: [':', '#', '^', '['],
+    },
     semanticTokensProvider: {
       legend: {
         tokenTypes: [...semanticTokenTypes],
@@ -60,6 +68,25 @@ connection.onRequest(CodeActionRequest.type, (params) => {
 connection.onRequest(SemanticTokensRequest.type, (params) => {
   const document = documents.get(params.textDocument.uri)
   return document ? buildSemanticTokens(document.getText()) : { data: [] }
+})
+
+connection.onRequest(CompletionRequest.type, (params) => {
+  const document = documents.get(params.textDocument.uri)
+  return document ? completionAt(document.getText(), params.position) : []
+})
+
+connection.onRequest(DocumentFormattingRequest.type, (params) => {
+  const document = documents.get(params.textDocument.uri)
+  if (!document) return []
+  const text = document.getText()
+  const formatted = formatDocument(text)
+  if (formatted === text) return []
+  return [
+    {
+      range: { start: document.positionAt(0), end: document.positionAt(text.length) },
+      newText: formatted,
+    },
+  ]
 })
 
 function validate(document: TextDocument) {
