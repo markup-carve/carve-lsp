@@ -61,6 +61,12 @@ function astSemanticTokens(doc: Document, source: string): Token[] {
   const tokens: Token[] = []
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   for (const node of doc.children) collectBlock(tokens, lines, node)
+  for (let i = 0; i < lines.length; i++) {
+    const commentStart = findTrailingComment(lines[i]!)
+    if (commentStart !== -1) {
+      push(tokens, i, commentStart, lines[i]!.length - commentStart, 'comment')
+    }
+  }
   return withoutOverlaps(
     tokens.sort((a, b) => a.line - b.line || a.character - b.character || b.length - a.length),
   )
@@ -260,7 +266,13 @@ function lexicalSemanticTokens(source: string): Token[] {
       continue
     }
 
-    const codeFence = /^(\s*)(`{3,}|~{3,})(?:\s+([A-Za-z0-9_-]+))?/.exec(text)
+    const trailingCommentStart = findTrailingComment(text)
+    const scanText = trailingCommentStart !== -1 ? text.slice(0, trailingCommentStart) : text
+    if (trailingCommentStart !== -1) {
+      push(tokens, line, trailingCommentStart, text.length - trailingCommentStart, 'comment')
+    }
+
+    const codeFence = /^(\s*)(`{3,}|~{3,})(?:\s+([A-Za-z0-9_-]+))?/.exec(scanText)
     if (codeFence) {
       push(tokens, line, codeFence[1]!.length, codeFence[2]!.length, 'operator')
       if (codeFence[3]) {
@@ -270,7 +282,7 @@ function lexicalSemanticTokens(source: string): Token[] {
       continue
     }
 
-    const rawFence = /^(\s*)(%{3,})(?:\s+([A-Za-z0-9_-]+))?/.exec(text)
+    const rawFence = /^(\s*)(%{3,})(?:\s+([A-Za-z0-9_-]+))?/.exec(scanText)
     if (rawFence) {
       push(tokens, line, rawFence[1]!.length, rawFence[2]!.length, 'operator')
       if (rawFence[3]) {
@@ -280,30 +292,30 @@ function lexicalSemanticTokens(source: string): Token[] {
       continue
     }
 
-    const heading = /^(#{1,6})(\s+)(.+)$/.exec(text)
+    const heading = /^(#{1,6})(\s+)(.+)$/.exec(scanText)
     if (heading) {
       push(tokens, line, 0, heading[1]!.length, 'operator')
       push(tokens, line, heading[1]!.length + heading[2]!.length, heading[3]!.length, 'type', ['definition'])
-      scanInline(tokens, line, text)
+      scanInline(tokens, line, scanText)
       continue
     }
 
-    const div = /^(\s*)(:{3,})(?:\s+([A-Za-z][\w-]*))?/.exec(text)
+    const div = /^(\s*)(:{3,})(?:\s+([A-Za-z][\w-]*))?/.exec(scanText)
     if (div) {
       push(tokens, line, div[1]!.length, div[2]!.length, 'operator')
       if (div[3]) push(tokens, line, div[0].lastIndexOf(div[3]), div[3].length, 'type')
     }
 
-    const list = /^(\s*)([-+*]|\(?[0-9]+[.)]|\(?[A-Za-z][.)])\s+(\[[ xX]\]\s+)?/.exec(text)
+    const list = /^(\s*)([-+*]|\(?[0-9]+[.)]|\(?[A-Za-z][.)])\s+(\[[ xX]\]\s+)?/.exec(scanText)
     if (list) {
       push(tokens, line, list[1]!.length, list[2]!.length, 'operator')
       if (list[3]) push(tokens, line, list[1]!.length + list[2]!.length + 1, list[3].trimEnd().length, 'keyword')
     }
 
-    const quote = /^(\s*>+)\s?/.exec(text)
+    const quote = /^(\s*>+)\s?/.exec(scanText)
     if (quote) push(tokens, line, quote[1]!.search(/>/), quote[1]!.trimStart().length, 'operator')
 
-    scanInline(tokens, line, text)
+    scanInline(tokens, line, scanText)
   }
 
   return withoutOverlaps(
@@ -362,6 +374,36 @@ function modifierMask(modifiers: TokenModifier[]): number {
     if (index !== undefined) mask |= 1 << index
   }
   return mask
+}
+
+/**
+ * Returns the index of the first trailing `%%` comment marker on a line, or -1.
+ *
+ * A trailing comment is triggered when `%%` is preceded by a space or tab
+ * (not other whitespace), is not escaped by a backslash, and is not inside
+ * an inline backtick code span.
+ */
+function findTrailingComment(text: string): number {
+  let inCode = false
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!
+    if (ch === '`') {
+      inCode = !inCode
+      continue
+    }
+    if (inCode) continue
+    if (ch === '\\') {
+      i++ // skip the escaped character
+      continue
+    }
+    if (ch === '%' && text[i + 1] === '%') {
+      const prev = i > 0 ? text[i - 1] : ''
+      if (prev === ' ' || prev === '\t') {
+        return i
+      }
+    }
+  }
+  return -1
 }
 
 function escapeRegExp(value: string): string {
