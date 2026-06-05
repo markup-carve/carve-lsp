@@ -61,11 +61,28 @@ function astSemanticTokens(doc: Document, source: string): Token[] {
   const tokens: Token[] = []
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   for (const node of doc.children) collectBlock(tokens, lines, node)
+
+  // Emit frontmatter tokens. The AST stores the parsed YAML in doc.frontmatter
+  // but has no position info for the --- delimiters, so we walk source lines.
+  let inFrontmatter = doc.frontmatter !== undefined && lines[0]?.trim() === '---'
+
   for (let i = 0; i < lines.length; i++) {
-    const commentStart = findTrailingComment(lines[i]!)
-    if (commentStart !== -1) {
-      push(tokens, i, commentStart, lines[i]!.length - commentStart, 'comment')
+    const text = lines[i]!
+
+    if (inFrontmatter) {
+      const close = i > 0 && text.trim() === '---'
+      pushRun(tokens, i, text, 'string')
+      if (close) inFrontmatter = false
+      continue
     }
+
+    const commentStart = findTrailingComment(text)
+    if (commentStart !== -1) {
+      push(tokens, i, commentStart, text.length - commentStart, 'comment')
+    }
+    // Scan lines for constructs that the AST resolves away or treats as plain text.
+    const scanText = commentStart !== -1 ? text.slice(0, commentStart) : text
+    scanAstGaps(tokens, i, scanText)
   }
   return withoutOverlaps(
     tokens.sort((a, b) => a.line - b.line || a.character - b.character || b.length - a.length),
@@ -171,6 +188,16 @@ function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[]): v
       case 'extension':
         pushPosition(tokens, lines, node.pos, 'property')
         break
+      case 'critic-insert':
+        pushPosition(tokens, lines, node.pos, 'type')
+        break
+      case 'critic-delete':
+      case 'critic-comment':
+        pushPosition(tokens, lines, node.pos, 'comment')
+        break
+      case 'critic-substitute':
+        pushPosition(tokens, lines, node.pos, 'keyword')
+        break
       default:
         pushPosition(tokens, lines, node.pos, 'keyword')
         break
@@ -228,6 +255,42 @@ function pushHeadingTitle(tokens: Token[], lines: string[], pos: Position | unde
   push(tokens, pos.startLine - 1, match[1]!.length + match[2]!.length, match[3]!.length, 'type', [
     'definition',
   ])
+}
+
+/**
+ * Scan a single line for constructs the AST path misses:
+ * - Reference definitions [label]: url  (resolved away, never appear in children)
+ * - Footnote definitions  [^label]: ... (same)
+ * - {= ... =} critic annotation (parsed as plain text by the AST)
+ * - $...$ and $$...$$ math (parsed as plain text by the AST)
+ *
+ * Called from astSemanticTokens after AST tokens are already collected;
+ * withoutOverlaps will drop any that land on already-covered spans.
+ */
+function scanAstGaps(tokens: Token[], line: number, text: string): void {
+  // footnote definition: [^label]: content — must be checked before reference def
+  const fnDef = /^(\[\^)([^\]\n]+)(\]:\s*)(.*)/.exec(text)
+  if (fnDef) {
+    push(tokens, line, fnDef.index, 2, 'operator')
+    push(tokens, line, fnDef.index + 2, fnDef[2]!.length, 'type')
+    push(tokens, line, fnDef.index + 2 + fnDef[2]!.length, fnDef[3]!.length, 'operator')
+    return
+  }
+
+  // reference definition: [label]: url
+  const refDef = /^(\[)([^\]\n]+)(\]:\s*)(\S+)/.exec(text)
+  if (refDef) {
+    push(tokens, line, refDef.index, 1, 'operator')
+    push(tokens, line, refDef.index + 1, refDef[2]!.length, 'type')
+    push(tokens, line, refDef.index + 1 + refDef[2]!.length, refDef[3]!.length, 'operator')
+    push(tokens, line, refDef.index + refDef[0].length - refDef[4]!.length, refDef[4]!.length, 'string')
+    return
+  }
+
+  // inline patterns the AST treats as plain text
+  scan(tokens, line, text, /\{=[^=\n]*=\}/g, 'keyword')
+  scan(tokens, line, text, /\$\$[^$\n]+\$\$/g, 'string')
+  scan(tokens, line, text, /\$[^$\n]+\$/g, 'string')
 }
 
 function lexicalSemanticTokens(source: string): Token[] {
@@ -315,6 +378,34 @@ function lexicalSemanticTokens(source: string): Token[] {
     const quote = /^(\s*>+)\s?/.exec(scanText)
     if (quote) push(tokens, line, quote[1]!.search(/>/), quote[1]!.trimStart().length, 'operator')
 
+    // footnote definition: [^label]: content — must be checked before reference def
+    const fnDef = /^(\[\^)([^\]\n]+)(\]:\s*)(.*)/.exec(scanText)
+    if (fnDef) {
+      push(tokens, line, fnDef.index, 2, 'operator')
+      push(tokens, line, fnDef.index + 2, fnDef[2]!.length, 'type')
+      push(tokens, line, fnDef.index + 2 + fnDef[2]!.length, fnDef[3]!.length, 'operator')
+      continue
+    }
+
+    // reference definition: [label]: url
+    const refDef = /^(\[)([^\]\n]+)(\]:\s*)(\S+)/.exec(scanText)
+    if (refDef) {
+      push(tokens, line, refDef.index, 1, 'operator')
+      push(tokens, line, refDef.index + 1, refDef[2]!.length, 'type')
+      push(tokens, line, refDef.index + 1 + refDef[2]!.length, refDef[3]!.length, 'operator')
+      push(tokens, line, refDef.index + refDef[0].length - refDef[4]!.length, refDef[4]!.length, 'string')
+      continue
+    }
+
+    // abbreviation definition: *[ABBR]: expansion
+    const abbrDef = /^(\*\[)([^\]\n]+)(\]:\s*)(.*)/.exec(scanText)
+    if (abbrDef) {
+      push(tokens, line, abbrDef.index, 2, 'operator')
+      push(tokens, line, abbrDef.index + 2, abbrDef[2]!.length, 'property')
+      push(tokens, line, abbrDef.index + 2 + abbrDef[2]!.length, abbrDef[3]!.length, 'operator')
+      continue
+    }
+
     scanInline(tokens, line, scanText)
   }
 
@@ -325,6 +416,8 @@ function lexicalSemanticTokens(source: string): Token[] {
 
 function scanInline(tokens: Token[], line: number, text: string): void {
   scan(tokens, line, text, /`[^`\n]+`/g, 'string')
+  // display math $$...$$ must come before single-$ inline math
+  scan(tokens, line, text, /\$\$[^$\n]+\$\$/g, 'string')
   scan(tokens, line, text, /\$[^$\n]+\$/g, 'string')
   scan(tokens, line, text, /!\[[^\]\n]*\]\([^\s)]+(?:\s+"[^"]*")?\)/g, 'string')
   scan(tokens, line, text, /\[[^\]\n]+\]\([^\s)]+(?:\s+"[^"]*")?\)/g, 'string')
@@ -332,6 +425,12 @@ function scanInline(tokens: Token[], line: number, text: string): void {
   scan(tokens, line, text, /(?<![\w.])@[A-Za-z0-9_][A-Za-z0-9_-]*/g, 'variable', ['readonly'])
   scan(tokens, line, text, /(?<!\w)#[A-Za-z0-9_][A-Za-z0-9_-]*/g, 'variable', ['readonly'])
   scan(tokens, line, text, /:[A-Za-z0-9_+-]+:/g, 'variable')
+  // critic/editorial markup — more specific patterns before the generic {…} catch-all
+  scan(tokens, line, text, /\{\+[^+\n]*\+\}/g, 'type')
+  scan(tokens, line, text, /\{-[^-\n]*-\}/g, 'comment')
+  scan(tokens, line, text, /\{~[^~\n]*~>[^~\n]*~\}/g, 'keyword')
+  scan(tokens, line, text, /\{=[^=\n]*=\}/g, 'keyword')
+  scan(tokens, line, text, /\{#[^#\n]*#\}/g, 'comment')
   scan(tokens, line, text, /\{[^}\n]+\}/g, 'property')
   scan(tokens, line, text, /\\./g, 'operator')
   scan(tokens, line, text, /(\*\*\*[^*\n]+\*\*\*|\*[^*\n]+\*|\/[^/\n]+\/|_[^_\n]+_|~[^~\n]+~|\+\+[^+\n]+\+\+|--[^-\n]+--|==[^=\n]+==|\^[^^\n]+\^|,,[^,\n]+,,)/g, 'keyword')
