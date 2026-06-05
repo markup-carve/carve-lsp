@@ -114,3 +114,104 @@ test('returns semantic tokens for fenced blocks', () => {
     ],
   )
 })
+
+test('returns semantic tokens for critic insert markup', () => {
+  const result = semanticTokens('{+ inserted text +}')
+  assert.deepEqual(
+    result.map((token) => [token.line, token.character, token.length, token.type]),
+    [[0, 0, 19, 'type']],
+  )
+})
+
+test('returns semantic tokens for critic delete markup', () => {
+  const result = semanticTokens('{- removed text -}')
+  assert.deepEqual(
+    result.map((token) => [token.line, token.character, token.length, token.type]),
+    [[0, 0, 18, 'comment']],
+  )
+})
+
+test('returns semantic tokens for critic substitute markup', () => {
+  const result = semanticTokens('{~ old ~>new ~}')
+  assert.deepEqual(
+    result.map((token) => [token.line, token.character, token.length, token.type]),
+    [[0, 0, 15, 'keyword']],
+  )
+})
+
+test('returns semantic tokens for critic annotation markup', () => {
+  const result = semanticTokens('{= highlight =}')
+  assert.deepEqual(
+    result.map((token) => [token.line, token.character, token.length, token.type]),
+    [[0, 0, 15, 'keyword']],
+  )
+})
+
+test('returns semantic tokens for critic comment markup', () => {
+  const result = semanticTokens('{# a note #}')
+  assert.deepEqual(
+    result.map((token) => [token.line, token.character, token.length, token.type]),
+    [[0, 0, 12, 'comment']],
+  )
+})
+
+test('returns semantic tokens for display math', () => {
+  const result = semanticTokens('$$E=mc2$$')
+  assert.deepEqual(
+    result.map((token) => [token.line, token.character, token.length, token.type]),
+    [[0, 0, 9, 'string']],
+  )
+})
+
+test('returns semantic tokens for inline math', () => {
+  const result = semanticTokens('$x=1$')
+  assert.deepEqual(
+    result.map((token) => [token.line, token.character, token.length, token.type]),
+    [[0, 0, 5, 'string']],
+  )
+})
+
+test('returns semantic tokens for reference definition', () => {
+  const result = semanticTokens('[carve]: https://example.com')
+  assert.deepEqual(
+    result.map((token) => [token.line, token.character, token.length, token.type]),
+    [
+      [0, 0, 1, 'operator'],
+      [0, 1, 5, 'type'],
+      [0, 6, 3, 'operator'],
+      [0, 9, 19, 'string'],
+    ],
+  )
+})
+
+test('returns semantic tokens for footnote definition', () => {
+  const result = semanticTokens('[^fn]: footnote text')
+  assert.deepEqual(
+    result.map((token) => [token.line, token.character, token.length, token.type]),
+    [
+      [0, 0, 2, 'operator'],
+      [0, 2, 2, 'type'],
+      [0, 4, 3, 'operator'],
+    ],
+  )
+})
+
+test('returns semantic tokens for abbreviation definition', () => {
+  const result = semanticTokens('*[HTML]: HyperText Markup Language')
+  assert.deepEqual(
+    result.map((token) => [token.line, token.character, token.length, token.type]),
+    [[0, 0, 34, 'property']],
+  )
+})
+
+test('returns semantic tokens for YAML frontmatter', () => {
+  const result = semanticTokens('---\ntitle: Test\n---\n')
+  assert.deepEqual(
+    result.map((token) => [token.line, token.character, token.length, token.type]),
+    [
+      [0, 0, 3, 'string'],
+      [1, 0, 11, 'string'],
+      [2, 0, 3, 'string'],
+    ],
+  )
+})
