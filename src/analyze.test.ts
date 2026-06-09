@@ -27,7 +27,8 @@ test('returns quick fixes for migration warnings', () => {
   const diagnostics = analyzeCarve(source).diagnostics
   const actions = migrationCodeActions('file:///demo.crv', source, diagnostics)
 
-  assert.equal(actions.length, 2)
+  // Two per-diagnostic quick fixes, plus the document-wide "fix all" action.
+  assert.equal(actions.length, 3)
   assert.equal(actions[0]!.title, 'Convert to Carve syntax: /italic/')
   assert.deepEqual(actions[0]!.edit?.changes?.['file:///demo.crv']?.[0], {
     range: {
@@ -35,6 +36,26 @@ test('returns quick fixes for migration warnings', () => {
       end: { line: 0, character: 8 },
     },
     newText: '/italic/',
+  })
+
+  const fixAll = actions.find((action) => action.title.startsWith('Fix all'))
+  assert.ok(fixAll)
+  assert.equal(
+    fixAll.edit?.changes?.['file:///demo.crv']?.[0]?.newText,
+    '/italic/ and *bold*',
+  )
+})
+
+test('offers a quick fix for + bullets (was missing from the old span map)', () => {
+  const source = '+ item'
+  const diagnostics = analyzeCarve(source).diagnostics
+  assert.equal(diagnostics[0]!.code, 'djot-plus-bullet')
+  const actions = migrationCodeActions('file:///demo.crv', source, diagnostics)
+  const quickFix = actions.find((a) => a.title === 'Convert to Carve syntax: -')
+  assert.ok(quickFix)
+  assert.deepEqual(quickFix.edit?.changes?.['file:///demo.crv']?.[0], {
+    range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+    newText: '-',
   })
 })
 

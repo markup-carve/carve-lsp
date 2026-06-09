@@ -14,7 +14,6 @@ import {
   type Heading,
   type InlineNode,
 } from '@markup-carve/carve'
-import { migrationFixes } from './migration-actions.js'
 
 export interface Analysis {
   diagnostics: Diagnostic[]
@@ -36,21 +35,18 @@ export function analyzeCarve(source: string): Analysis {
     })
   }
 
-  const fixes = migrationFixes(source)
+  // warning.start/end are offsets into the line-ending-normalized source;
+  // positionAt over that same text yields the precise multi-character range
+  // for every rule (including `+` bullets, which the old fix-range lookup
+  // could not cover).
+  const norm = source.replace(/\r\n?/g, '\n')
   for (const warning of djotMigrationWarnings(source)) {
-    const range =
-      fixes.find(
-        (fix) =>
-          fix.rule === warning.rule &&
-          fix.range.start.line === warning.line - 1 &&
-          fix.range.start.character === warning.column - 1,
-      )?.range ?? {
-        start: { line: warning.line - 1, character: warning.column - 1 },
-        end: { line: warning.line - 1, character: warning.column },
-      }
     diagnostics.push({
       severity: DiagnosticSeverity.Warning,
-      range,
+      range: {
+        start: positionAt(norm, warning.start),
+        end: positionAt(norm, warning.end),
+      },
       source: 'carve',
       code: warning.rule,
       message: `${warning.message} Suggestion: ${warning.suggestion}`,
@@ -134,6 +130,16 @@ function plainText(nodes: InlineNode[]): string {
     else if (node.type === 'tag') out += `#${node.name}`
   }
   return out.trim()
+}
+
+function positionAt(source: string, offset: number) {
+  const before = source.slice(0, offset)
+  const line = before.split('\n').length - 1
+  const lastNewline = before.lastIndexOf('\n')
+  return {
+    line,
+    character: offset - lastNewline - 1,
+  }
 }
 
 function rangeAt(source: string, index: number, length: number): Range {
