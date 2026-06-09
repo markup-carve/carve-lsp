@@ -198,6 +198,12 @@ function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[]): v
       case 'critic-substitute':
         pushPosition(tokens, lines, node.pos, 'keyword')
         break
+      case 'comment':
+        // An inline (trailing `%%`) comment node. Its span includes the
+        // consumed separator whitespace; the line scan (findTrailingComment)
+        // already emits the `%% ...` comment token from the marker, so defer to
+        // it here rather than emitting an overlapping (and mistyped) token.
+        break
       default:
         pushPosition(tokens, lines, node.pos, 'keyword')
         break
