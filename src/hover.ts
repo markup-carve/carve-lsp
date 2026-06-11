@@ -35,8 +35,8 @@ const rules: HoverRule[] = [
     contents: '**Strikethrough**\n\nCarve uses tildes for strikethrough: `~removed~`.',
   },
   {
-    pattern: /,,[^,\n]+,,/g,
-    contents: '**Subscript**\n\nCarve subscript uses double commas: `,,2,,`.',
+    pattern: /(?<![\w,]),(?=\S)[^,\n]+?(?<=\S),(?![\w,])/g,
+    contents: '**Subscript**\n\nCarve subscript is a single comma: `,2,` (use the forced form `{,2,}` intraword, e.g. `H{,2,}O`).',
   },
   {
     pattern: /\{[^}\n]+\}/g,
@@ -205,11 +205,11 @@ function inlineContents(node: InlineNode): string | null {
     case 'strike':
       return '**Strikethrough**\n\nCarve uses tildes for strikethrough: `~removed~`.'
     case 'sub':
-      return '**Subscript**\n\nCarve subscript uses double commas: `,,2,,`.'
+      return '**Subscript**\n\nCarve subscript is a single comma: `,2,` (use the forced form `{,2,}` intraword, e.g. `H{,2,}O`).'
     case 'super':
-      return '**Superscript**\n\nCarve superscript uses carets: `^2^`.'
+      return '**Superscript**\n\nCarve superscript is a single caret: `^2^` (use the forced form `{^2^}` intraword, e.g. `E=mc{^2^}`).'
     case 'highlight':
-      return '**Highlight**\n\nCarve highlight uses double equals: `==marked==`.'
+      return '**Highlight**\n\nCarve highlight is a single equals: `=marked=` (use the forced form `{=marked=}` intraword).'
     case 'code':
       return '**Inline Code**\n\nBackticks mark inline code spans.'
     case 'link':

@@ -439,7 +439,7 @@ function scanInline(tokens: Token[], line: number, text: string): void {
   scan(tokens, line, text, /\{#[^#\n]*#\}/g, 'comment')
   scan(tokens, line, text, /\{[^}\n]+\}/g, 'property')
   scan(tokens, line, text, /\\./g, 'operator')
-  scan(tokens, line, text, /(\*\*\*[^*\n]+\*\*\*|\*[^*\n]+\*|\/[^/\n]+\/|_[^_\n]+_|~[^~\n]+~|\+\+[^+\n]+\+\+|--[^-\n]+--|==[^=\n]+==|\^[^^\n]+\^|,,[^,\n]+,,)/g, 'keyword')
+  scan(tokens, line, text, /(\*\*\*[^*\n]+\*\*\*|\*[^*\n]+\*|\/[^/\n]+\/|_[^_\n]+_|~[^~\n]+~|\+\+[^+\n]+\+\+|--[^-\n]+--|(?<![\w=])=(?=\S)[^=\n]+?(?<=\S)=(?![\w=])|\^[^^\n]+\^|(?<![\w,]),(?=\S)[^,\n]+?(?<=\S),(?![\w,]))/g, 'keyword')
 }
 
 function scan(
