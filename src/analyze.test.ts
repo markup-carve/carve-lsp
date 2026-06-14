@@ -22,6 +22,14 @@ test('reports migration warnings', () => {
   })
 })
 
+test('surfaces lintCarve silent-failure warnings as diagnostics', () => {
+  const result = analyzeCarve('# Intro\n\nSee </#nope>.')
+  const lint = result.diagnostics.find((d) => d.code === 'broken-crossref')
+  assert.ok(lint, 'expected a broken-crossref diagnostic')
+  assert.equal(lint.source, 'carve')
+  assert.equal(lint.range.start.line, 2)
+})
+
 test('returns quick fixes for migration warnings', () => {
   const source = '_italic_ and **bold**'
   const diagnostics = analyzeCarve(source).diagnostics
