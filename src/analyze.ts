@@ -7,6 +7,7 @@ import {
 } from 'vscode-languageserver/node.js'
 import {
   djotMigrationWarnings,
+  lintCarve,
   parse,
   resolve,
   type BlockNode,
@@ -54,6 +55,23 @@ export function analyzeCarve(source: string): Analysis {
       source: 'carve',
       code: warning.rule,
       message: `${warning.message} Suggestion: ${warning.suggestion}`,
+    })
+  }
+
+  // Silent-failure lint: markup that parses but renders as the wrong thing
+  // (broken cross-references, duplicate heading ids, trailing heading
+  // attributes, legacy raw fences, leaked block markers).
+  for (const warning of lintCarve(source)) {
+    const len = Math.max(1, warning.end - warning.start)
+    diagnostics.push({
+      severity: DiagnosticSeverity.Warning,
+      range: {
+        start: { line: warning.line - 1, character: warning.column - 1 },
+        end: { line: warning.line - 1, character: warning.column - 1 + len },
+      },
+      source: 'carve',
+      code: warning.rule,
+      message: warning.message,
     })
   }
 
