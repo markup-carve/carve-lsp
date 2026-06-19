@@ -88,6 +88,10 @@ test('returns semantic tokens for headings and inline markup', () => {
       [0, 2, 5, 'type'],
       [2, 3, 6, 'keyword'],
       [2, 10, 5, 'variable'],
+      // carve-js parses the trailing `{#id}` here as a literal `#id` hashtag
+      // (tag node) rather than an attribute attachment, so it surfaces as a
+      // `variable` token like any other hashtag.
+      [2, 17, 3, 'variable'],
     ],
   )
 })

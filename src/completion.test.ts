@@ -13,7 +13,8 @@ test('suggests admonition kinds after a colon fence', () => {
 
 test('suggests heading ids for a cross-reference', () => {
   const source = '# Hello World\n\n</#'
-  assert.deepEqual(labels(source, 2, 3), ['hello-world'])
+  // carve-js derives case-preserving heading ids (spaces -> hyphens).
+  assert.deepEqual(labels(source, 2, 3), ['Hello-World'])
 })
 
 test('suggests defined footnote labels', () => {
