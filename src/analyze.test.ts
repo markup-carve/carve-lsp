@@ -54,6 +54,42 @@ test('returns quick fixes for migration warnings', () => {
   )
 })
 
+test('migration quick fixes use canonical single-char Carve delimiters', () => {
+  // Guards the delimiter targets the carve-js library hands the LSP through
+  // `warning.suggestion`. Carve highlight is a single `=` and subscript a
+  // single `,`; a *doubled* `==x==` / `,,x,,` is literal text by the
+  // same-delimiter-adjacency rule (carve spec docs/examples.md:203-212 for
+  // highlight, :33 and :4007-4018 for subscript). Intraword positions need
+  // the brace-forced form, so the suggestions are `{=x=}` and `{,x,}`
+  // (docs/examples.md:175, :222), never the literal doubled forms.
+  const cases: Array<{ source: string; code: string; newText: string }> = [
+    // Djot highlight `{=x=}` is also valid Carve highlight: kept as the
+    // identity brace form, NOT reduced to a doubled `==x==` (which is literal).
+    { source: '{=mark=}', code: 'djot-highlight-braces', newText: '{=mark=}' },
+    // Djot subscript `~x~` would render as Carve strikethrough; the gated
+    // `djot-subscript-tilde` rule rewrites it to the brace-forced subscript.
+    { source: 'H~2~O', code: 'djot-subscript-tilde', newText: '{,2,}' },
+  ]
+
+  for (const { source, code, newText } of cases) {
+    const diagnostics = analyzeCarve(source).diagnostics
+    assert.equal(
+      diagnostics.find((d) => d.code === code)?.code,
+      code,
+      `expected a ${code} diagnostic for ${JSON.stringify(source)}`,
+    )
+    const actions = migrationCodeActions('file:///demo.crv', source, diagnostics)
+    const quickFix = actions.find(
+      (a) => a.title === `Convert to Carve syntax: ${newText}`,
+    )
+    assert.ok(quickFix, `expected a quick fix producing ${newText}`)
+    const edit = quickFix.edit?.changes?.['file:///demo.crv']?.[0]
+    assert.equal(edit?.newText, newText)
+    // Never emit the literal doubled delimiter forms.
+    assert.doesNotMatch(edit?.newText ?? '', /==|,,/)
+  }
+})
+
 test('offers a quick fix for + bullets (was missing from the old span map)', () => {
   const source = '+ item'
   const diagnostics = analyzeCarve(source).diagnostics
