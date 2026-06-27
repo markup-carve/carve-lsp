@@ -4,12 +4,14 @@ import {
   CodeLensRequest,
   CompletionRequest,
   createConnection,
+  DefinitionRequest,
   DocumentFormattingRequest,
   DocumentSymbolRequest,
   FoldingRangeRequest,
   HoverRequest,
   PrepareRenameRequest,
   ProposedFeatures,
+  ReferencesRequest,
   RenameRequest,
   SemanticTokensRequest,
   TextDocuments,
@@ -17,6 +19,8 @@ import {
 } from 'vscode-languageserver/node.js'
 import { TextDocument } from 'vscode-languageserver-textdocument'
 import { analyzeCarve } from './analyze.js'
+import { definitionAt } from './definition.js'
+import { referencesAt } from './references.js'
 import { codeLenses } from './codelens.js'
 import { completionAt } from './completion.js'
 import { foldingRanges } from './folding.js'
@@ -37,6 +41,8 @@ connection.onInitialize(() => ({
     codeActionProvider: true,
     documentFormattingProvider: true,
     foldingRangeProvider: true,
+    definitionProvider: true,
+    referencesProvider: true,
     renameProvider: { prepareProvider: true },
     codeLensProvider: { resolveProvider: false },
     completionProvider: {
@@ -117,6 +123,18 @@ connection.onRequest(RenameRequest.type, (params) => {
 connection.onRequest(CodeLensRequest.type, (params) => {
   const document = documents.get(params.textDocument.uri)
   return document ? codeLenses(document.getText()) : []
+})
+
+connection.onRequest(DefinitionRequest.type, (params) => {
+  const document = documents.get(params.textDocument.uri)
+  return document ? definitionAt(params.textDocument.uri, document.getText(), params.position) : null
+})
+
+connection.onRequest(ReferencesRequest.type, (params) => {
+  const document = documents.get(params.textDocument.uri)
+  return document
+    ? referencesAt(params.textDocument.uri, document.getText(), params.position, params.context)
+    : null
 })
 
 function validate(document: TextDocument) {
