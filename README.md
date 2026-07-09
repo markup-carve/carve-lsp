@@ -1,7 +1,7 @@
 # carve-lsp
 
 Language server (LSP) for [Carve](https://markup-carve.github.io/carve/) markup documents.
-Provides editor intelligence for `.carve` / `.crv` files via the
+Provides editor intelligence for `.crv` files via the
 [Language Server Protocol](https://microsoft.github.io/language-server-protocol/).
 
 ## Install
@@ -87,13 +87,12 @@ end
 lspconfig.carve_lsp.setup({})
 ```
 
-Add a filetype detection entry if your Neovim does not already recognise `.carve` / `.crv`:
+Add a filetype detection entry if your Neovim does not already recognize `.crv`:
 
 ```lua
 vim.filetype.add({
   extension = {
-    carve = 'carve',
-    crv   = 'carve',
+    crv = 'carve',
   },
 })
 ```
@@ -103,7 +102,7 @@ vim.filetype.add({
 Any editor with LSP support can start the server as an external process:
 
 - **Command:** `carve-lsp --stdio`
-- **File extensions / language IDs:** `carve`, `crv`
+- **File extension:** `.crv` (language ID: `carve`)
 - **Root pattern:** `.git` or the project root
 
 ## Development
