@@ -143,7 +143,7 @@ function plainText(nodes: InlineNode[]): string {
     else if ('children' in node && Array.isArray(node.children)) {
       out += plainText(node.children as InlineNode[])
     } else if (node.type === 'code') out += node.value
-    else if (node.type === 'emoji') out += `:${node.name}:`
+    else if (node.type === 'symbol') out += `:${node.name}:`
     else if (node.type === 'mention') out += `@${node.user}`
     else if (node.type === 'tag') out += `#${node.name}`
   }

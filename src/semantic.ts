@@ -179,7 +179,7 @@ function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[]): v
         break
       case 'mention':
       case 'tag':
-      case 'emoji':
+      case 'symbol':
       case 'footnote':
       case 'abbreviation':
         pushPosition(tokens, lines, node.pos, 'variable', ['readonly'])
