@@ -35,10 +35,6 @@ const rules: HoverRule[] = [
     contents: '**Strikethrough**\n\nCarve uses tildes for strikethrough: `~removed~`.',
   },
   {
-    pattern: /(?<![\w,]),(?=\S)[^,\n]+?(?<=\S),(?![\w,])/g,
-    contents: '**Subscript**\n\nCarve subscript is a single comma: `,2,` (use the forced form `{,2,}` intraword, e.g. `H{,2,}O`).',
-  },
-  {
     pattern: /\{[^}\n]+\}/g,
     contents: '**Attributes**\n\nAttach IDs, classes, and key/value pairs with `{#id .class key=value}`.',
   },
@@ -205,9 +201,9 @@ function inlineContents(node: InlineNode): string | null {
     case 'strike':
       return '**Strikethrough**\n\nCarve uses tildes for strikethrough: `~removed~`.'
     case 'sub':
-      return '**Subscript**\n\nCarve subscript is a single comma: `,2,` (use the forced form `{,2,}` intraword, e.g. `H{,2,}O`).'
+      return '**Subscript**\n\nCarve subscript uses the braced form `{,text,}`, e.g. `H{,2,}O`. A bare comma is literal text.'
     case 'super':
-      return '**Superscript**\n\nCarve superscript is a single caret: `^2^` (use the forced form `{^2^}` intraword, e.g. `E=mc{^2^}`).'
+      return '**Superscript**\n\nCarve superscript uses the braced form `{^text^}`, e.g. `E=mc{^2^}`. A bare caret is literal text.'
     case 'highlight':
       return '**Highlight**\n\nCarve highlight is a single equals: `=marked=` (use the forced form `{=marked=}` intraword).'
     case 'code':

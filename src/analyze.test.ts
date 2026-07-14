@@ -56,12 +56,12 @@ test('returns quick fixes for migration warnings', () => {
 
 test('migration quick fixes use canonical single-char Carve delimiters', () => {
   // Guards the delimiter targets the carve-js library hands the LSP through
-  // `warning.suggestion`. Carve highlight is a single `=` and subscript a
-  // single `,`; a *doubled* `==x==` / `,,x,,` is literal text by the
-  // same-delimiter-adjacency rule (carve spec docs/examples.md:203-212 for
-  // highlight, :33 and :4007-4018 for subscript). Intraword positions need
-  // the brace-forced form, so the suggestions are `{=x=}` and `{,x,}`
-  // (docs/examples.md:175, :222), never the literal doubled forms.
+  // `warning.suggestion`. Carve highlight is a single `=`, and a *doubled*
+  // `==x==` is literal text by the same-delimiter-adjacency rule. Subscript
+  // and superscript are braced-only: there is no bare `,x,` / `^x^` form (a
+  // bare comma or caret is always literal text), so the only spelling is the
+  // brace-forced `{,x,}` / `{^x^}`. Suggestions are therefore `{=x=}` and
+  // `{,x,}`, never a bare or doubled delimiter form.
   const cases: Array<{ source: string; code: string; newText: string }> = [
     // Djot highlight `{=x=}` is also valid Carve highlight: kept as the
     // identity brace form, NOT reduced to a doubled `==x==` (which is literal).
