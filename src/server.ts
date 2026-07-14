@@ -13,7 +13,6 @@ import {
   ProposedFeatures,
   ReferencesRequest,
   RenameRequest,
-  SemanticTokensRequest,
   TextDocuments,
   TextDocumentSyncKind,
 } from 'vscode-languageserver/node.js'
@@ -28,7 +27,6 @@ import { formatDocument } from './format.js'
 import { hoverAt } from './hover.js'
 import { migrationCodeActions } from './migration-actions.js'
 import { prepareRename, renameEdits } from './rename.js'
-import { buildSemanticTokens, semanticTokenModifiers, semanticTokenTypes } from './semantic.js'
 
 const connection = createConnection(ProposedFeatures.all)
 const documents = new TextDocuments(TextDocument)
@@ -48,13 +46,11 @@ connection.onInitialize(() => ({
     completionProvider: {
       triggerCharacters: [':', '#', '^', '['],
     },
-    semanticTokensProvider: {
-      legend: {
-        tokenTypes: [...semanticTokenTypes],
-        tokenModifiers: [...semanticTokenModifiers],
-      },
-      full: true,
-    },
+    // Semantic tokens are intentionally NOT advertised. Editor colouring is owned by the
+    // TextMate grammar (carve-grammars / the intellij-carve bundle); a second semantic-token
+    // layer over the same text only duplicated and fought it - clients merged the two and
+    // painted partial/incorrect ranges (a `{#top}` id showing as a hashtag, etc.). The
+    // builder in ./semantic.ts is kept (and tested) for any consumer that opts in explicitly.
   },
 }))
 
@@ -79,11 +75,6 @@ connection.onRequest(CodeActionRequest.type, (params) => {
   return document
     ? migrationCodeActions(params.textDocument.uri, document.getText(), params.context.diagnostics)
     : []
-})
-
-connection.onRequest(SemanticTokensRequest.type, (params) => {
-  const document = documents.get(params.textDocument.uri)
-  return document ? buildSemanticTokens(document.getText()) : { data: [] }
 })
 
 connection.onRequest(CompletionRequest.type, (params) => {
