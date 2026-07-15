@@ -41,7 +41,14 @@ export function analyzeCarve(source: string): Analysis {
   // for every rule (including `+` bullets, which the old fix-range lookup
   // could not cover).
   const norm = source.replace(/\r\n?/g, '\n')
+  // Diagnostics target hand-written Carve, so surface only the migration
+  // constructs that actually mis-render in Carve (`carve-breakage`). Djot
+  // semantic shifts that are valid Carve — `_x_` (underline), `~x~`
+  // (strikethrough), `{=x=}` (highlight) — are intentional here, not mistakes,
+  // so they must not raise editor diagnostics. Their quick fixes remain
+  // available through `migrationCodeActions` for anyone migrating from Djot.
   for (const warning of djotMigrationWarnings(source)) {
+    if (warning.category !== 'carve-breakage') continue
     diagnostics.push({
       severity: DiagnosticSeverity.Warning,
       range: {

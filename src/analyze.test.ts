@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { analyzeCarve } from './analyze.js'
 import { hoverAt } from './hover.js'
-import { migrationCodeActions } from './migration-actions.js'
+import { migrationCodeActions, migrationFixes } from './migration-actions.js'
 import { semanticTokens } from './semantic.js'
 
 test('returns heading document symbols', () => {
@@ -12,14 +12,27 @@ test('returns heading document symbols', () => {
   assert.equal(result.symbols[0]!.children?.[0]?.name, 'Two')
 })
 
-test('reports migration warnings', () => {
-  const result = analyzeCarve('_italic_')
+test('reports carve-breakage migration warnings', () => {
+  const result = analyzeCarve('**bold**')
   assert.equal(result.diagnostics.length, 1)
-  assert.equal(result.diagnostics[0]!.code, 'djot-emphasis-underscore')
+  assert.equal(result.diagnostics[0]!.code, 'markdown-strong-double-star')
   assert.deepEqual(result.diagnostics[0]!.range, {
     start: { line: 0, character: 0 },
     end: { line: 0, character: 8 },
   })
+})
+
+test('does not diagnose djot-shift constructs (valid Carve)', () => {
+  // `_x_` (underline), `~x~` (strikethrough) and `{=x=}` (highlight) are valid
+  // Carve; on a hand-written document they are intentional, not mistakes, so
+  // they raise no diagnostic. See carve lint's default --from-djot gate.
+  for (const src of ['_italic_', 'H~2~O', '{=mark=}']) {
+    assert.equal(
+      analyzeCarve(src).diagnostics.length,
+      0,
+      `expected no diagnostic for ${JSON.stringify(src)}`,
+    )
+  }
 })
 
 test('surfaces lintCarve silent-failure warnings as diagnostics', () => {
@@ -31,26 +44,26 @@ test('surfaces lintCarve silent-failure warnings as diagnostics', () => {
 })
 
 test('returns quick fixes for migration warnings', () => {
-  const source = '_italic_ and **bold**'
+  const source = '**bold** and ~~strike~~'
   const diagnostics = analyzeCarve(source).diagnostics
   const actions = migrationCodeActions('file:///demo.crv', source, diagnostics)
 
   // Two per-diagnostic quick fixes, plus the document-wide "fix all" action.
   assert.equal(actions.length, 3)
-  assert.equal(actions[0]!.title, 'Convert to Carve syntax: /italic/')
+  assert.equal(actions[0]!.title, 'Convert to Carve syntax: *bold*')
   assert.deepEqual(actions[0]!.edit?.changes?.['file:///demo.crv']?.[0], {
     range: {
       start: { line: 0, character: 0 },
       end: { line: 0, character: 8 },
     },
-    newText: '/italic/',
+    newText: '*bold*',
   })
 
   const fixAll = actions.find((action) => action.title.startsWith('Fix all'))
   assert.ok(fixAll)
   assert.equal(
     fixAll.edit?.changes?.['file:///demo.crv']?.[0]?.newText,
-    '/italic/ and *bold*',
+    '*bold* and ~strike~',
   )
 })
 
@@ -71,22 +84,16 @@ test('migration quick fixes use canonical single-char Carve delimiters', () => {
     { source: 'H~2~O', code: 'djot-subscript-tilde', newText: '{,2,}' },
   ]
 
+  // These are djot-shift constructs, so `analyzeCarve` raises no diagnostic for
+  // them by default. The suggestion text they carry still has to be canonical,
+  // so assert it on `migrationFixes` (the full rule set) directly — that is
+  // what feeds the --from-djot quick fixes.
   for (const { source, code, newText } of cases) {
-    const diagnostics = analyzeCarve(source).diagnostics
-    assert.equal(
-      diagnostics.find((d) => d.code === code)?.code,
-      code,
-      `expected a ${code} diagnostic for ${JSON.stringify(source)}`,
-    )
-    const actions = migrationCodeActions('file:///demo.crv', source, diagnostics)
-    const quickFix = actions.find(
-      (a) => a.title === `Convert to Carve syntax: ${newText}`,
-    )
-    assert.ok(quickFix, `expected a quick fix producing ${newText}`)
-    const edit = quickFix.edit?.changes?.['file:///demo.crv']?.[0]
-    assert.equal(edit?.newText, newText)
+    const fix = migrationFixes(source).find((f) => f.rule === code)
+    assert.ok(fix, `expected a ${code} fix for ${JSON.stringify(source)}`)
+    assert.equal(fix.suggestion, newText)
     // Never emit the literal doubled delimiter forms.
-    assert.doesNotMatch(edit?.newText ?? '', /==|,,/)
+    assert.doesNotMatch(fix.suggestion, /==|,,/)
   }
 })
 
