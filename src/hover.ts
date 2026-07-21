@@ -113,7 +113,7 @@ function collectBlock(
     case 'paragraph':
       collectInline(matches, node.children, position)
       break
-    case 'blockquote':
+    case 'block_quote':
       node.children.forEach((child) => collectBlock(matches, child, position))
       break
     case 'list':
@@ -124,7 +124,7 @@ function collectBlock(
       node.children.forEach((child) => collectBlock(matches, child, position))
       if (node.type === 'admonition' && node.title) collectInline(matches, node.title, position)
       break
-    case 'definition-list':
+    case 'definition_list':
       node.items.forEach((item) => {
         item.terms.forEach((term) => collectInline(matches, term, position))
         item.definitions.forEach((definition) =>
@@ -171,11 +171,11 @@ function blockContents(node: BlockNode): string | null {
   switch (node.type) {
     case 'heading':
       return '**Heading**\n\n`#` through `######` create section headings.'
-    case 'code-block':
+    case 'code_block':
       return '**Code Block**\n\nTriple backtick or tilde fences create verbatim code blocks.'
-    case 'raw-block':
+    case 'raw_block':
       return '**Raw Block**\n\nRaw passthrough blocks render only for matching output formats.'
-    case 'blockquote':
+    case 'block_quote':
       return '**Block Quote**\n\nLines beginning with `>` create quoted blocks.'
     case 'list':
       return '**List**\n\nUse bullets, task markers, or ordered markers for lists.'
@@ -194,15 +194,15 @@ function inlineContents(node: InlineNode): string | null {
   switch (node.type) {
     case 'strong':
       return '**Bold**\n\nCarve uses single asterisks for bold text: `*bold*`.'
-    case 'italic':
+    case 'emphasis':
       return '**Italic**\n\nCarve uses slashes for italic text: `/italic/`.'
     case 'underline':
       return '**Underline**\n\nCarve uses underscores for underline: `_underlined_`.'
     case 'strike':
       return '**Strikethrough**\n\nCarve uses tildes for strikethrough: `~removed~`.'
-    case 'sub':
+    case 'subscript':
       return '**Subscript**\n\nCarve subscript uses the braced form `{,text,}`, e.g. `H{,2,}O`. A bare comma is literal text.'
-    case 'super':
+    case 'superscript':
       return '**Superscript**\n\nCarve superscript uses the braced form `{^text^}`, e.g. `E=mc{^2^}`. A bare caret is literal text.'
     case 'highlight':
       return '**Highlight**\n\nCarve highlight is a single equals: `=marked=` (use the forced form `{=marked=}` intraword).'
