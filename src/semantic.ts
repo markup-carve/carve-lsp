@@ -99,14 +99,14 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode): void {
     case 'paragraph':
       collectInline(tokens, lines, node.children)
       break
-    case 'code-block':
-    case 'raw-block':
+    case 'code_block':
+    case 'raw_block':
       pushPosition(tokens, lines, node.pos, 'string')
       break
     case 'comment':
       pushPosition(tokens, lines, node.pos, 'comment')
       break
-    case 'blockquote':
+    case 'block_quote':
       pushLinePrefix(tokens, lines, node.pos, /^\s*>+/, 'operator')
       for (const child of node.children) collectBlock(tokens, lines, child)
       break
@@ -125,7 +125,7 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode): void {
       pushLinePrefix(tokens, lines, node.pos, /^\s*:{3,}/, 'operator')
       for (const child of node.children) collectBlock(tokens, lines, child)
       break
-    case 'definition-list':
+    case 'definition_list':
       for (const item of node.items) {
         for (const term of item.terms) collectInline(tokens, lines, term)
         for (const definition of item.definitions) {
@@ -147,10 +147,10 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode): void {
     case 'image':
       pushPosition(tokens, lines, node.pos, 'string')
       break
-    case 'thematic-break':
+    case 'thematic_break':
       pushPosition(tokens, lines, node.pos, 'operator')
       break
-    case 'abbreviation-def':
+    case 'abbreviation_def':
       pushPosition(tokens, lines, node.pos, 'property')
       break
   }
@@ -165,16 +165,16 @@ function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[]): v
   for (const node of nodes) {
     switch (node.type) {
       case 'text':
-      case 'soft-break':
-      case 'hard-break':
+      case 'soft_break':
+      case 'hard_break':
         break
       case 'code':
       case 'math':
-      case 'raw-inline':
+      case 'raw_inline':
       case 'link':
       case 'image':
       case 'autolink':
-      case 'crossref':
+      case 'heading_ref':
         pushPosition(tokens, lines, node.pos, 'string')
         break
       case 'mention':
@@ -185,17 +185,17 @@ function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[]): v
         pushPosition(tokens, lines, node.pos, 'variable', ['readonly'])
         break
       case 'span':
-      case 'extension':
+      case 'inline_extension':
         pushPosition(tokens, lines, node.pos, 'property')
         break
-      case 'critic-insert':
+      case 'insert':
         pushPosition(tokens, lines, node.pos, 'type')
         break
-      case 'critic-delete':
+      case 'delete':
       case 'critic-comment':
         pushPosition(tokens, lines, node.pos, 'comment')
         break
-      case 'critic-substitute':
+      case 'substitution':
         pushPosition(tokens, lines, node.pos, 'keyword')
         break
       case 'comment':

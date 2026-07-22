@@ -3,15 +3,15 @@ import { parse, resolve, type BlockNode, type Document } from '@markup-carve/car
 
 /** Block kinds worth offering as a collapsible region when multi-line. */
 const FOLDABLE = new Set<BlockNode['type']>([
-  'code-block',
-  'raw-block',
+  'code_block',
+  'raw_block',
   'comment',
-  'blockquote',
+  'block_quote',
   'list',
   'table',
   'admonition',
   'div',
-  'definition-list',
+  'definition_list',
   'figure',
 ])
 
