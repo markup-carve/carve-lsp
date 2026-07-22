@@ -259,6 +259,9 @@ function headingPlainText(nodes: InlineNode[]): string {
     else if ('children' in node && Array.isArray(node.children)) {
       out += headingPlainText(node.children as InlineNode[])
     } else if (node.type === 'code') out += node.value
+    // An inline literal (§27) renders as visible prose, so it must contribute
+    // to the heading text a crossref resolves against.
+    else if (node.type === 'literal_inline') out += node.content
   }
   return out.trim()
 }

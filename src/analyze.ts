@@ -150,6 +150,9 @@ function plainText(nodes: InlineNode[]): string {
     else if ('children' in node && Array.isArray(node.children)) {
       out += plainText(node.children as InlineNode[])
     } else if (node.type === 'code') out += node.value
+    // An inline literal (§27) renders as visible prose, so it contributes its
+    // verbatim content to the outline symbol name just as a code span does.
+    else if (node.type === 'literal_inline') out += node.content
     else if (node.type === 'symbol') out += `:${node.name}:`
     else if (node.type === 'mention') out += `@${node.user}`
     else if (node.type === 'tag') out += `#${node.name}`

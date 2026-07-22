@@ -170,6 +170,7 @@ function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[]): v
         break
       case 'code':
       case 'math':
+      case 'literal_inline':
       case 'raw_inline':
       case 'link':
       case 'image':
