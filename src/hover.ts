@@ -208,6 +208,8 @@ function inlineContents(node: InlineNode): string | null {
       return '**Highlight**\n\nCarve highlight is a single equals: `=marked=` (use the forced form `{=marked=}` intraword).'
     case 'code':
       return '**Inline Code**\n\nBackticks mark inline code spans.'
+    case 'literal_inline':
+      return '**Inline Literal**\n\nA `!` prefix on a verbatim span renders its content as ordinary prose, without code styling: `` !`/kaet/` ``. Mirrors the `$`-math prefix.'
     case 'link':
       return '**Link**\n\nInline links use `[label](url)` or reference-link syntax.'
     case 'image':

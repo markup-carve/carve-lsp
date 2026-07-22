@@ -16,6 +16,15 @@ test('crossref </#id> jumps to the matching heading', () => {
   assert.equal(loc.range.start.line, 0)
 })
 
+test('crossref resolves to a heading containing an inline literal', () => {
+  // The literal's content is part of the visible heading text, so it must be
+  // included when matching a crossref against heading text.
+  const source = '# The !`/kaet/` sound\n\nSee </#the-kaet-sound>.'
+  const loc = definitionAt(URI, source, { line: 2, character: 8 })
+  assert.ok(loc, 'expected the crossref to resolve')
+  assert.equal(loc.range.start.line, 0)
+})
+
 test('crossref </#id> with explicit {#custom-id} block attribute', () => {
   // In Carve, a block attribute ({#id}) is placed on the line BEFORE the heading.
   const source = '{#my-section}\n# Intro\n\nSee </#my-section>.'

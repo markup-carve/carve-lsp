@@ -12,6 +12,22 @@ test('returns heading document symbols', () => {
   assert.equal(result.symbols[0]!.children?.[0]?.name, 'Two')
 })
 
+test('inline literal in a heading contributes to the document symbol name', () => {
+  // An inline literal (§27) renders as visible prose, so its content must reach
+  // the outline. Before it was handled, the node was skipped and the symbol
+  // name came out as 'The  sound' with the literal silently dropped.
+  const result = analyzeCarve('# The !`/kaet/` sound\n')
+  assert.equal(result.symbols[0]!.name, 'The /kaet/ sound')
+})
+
+test('inline literal gets a string semantic token spanning the whole construct', () => {
+  const result = semanticTokens('Say !`/kaet/` now.\n')
+  assert.deepEqual(
+    result.map((token) => [token.line, token.character, token.length, token.type]),
+    [[0, 4, 9, 'string']],
+  )
+})
+
 test('reports carve-breakage migration warnings', () => {
   const result = analyzeCarve('**bold**')
   assert.equal(result.diagnostics.length, 1)
