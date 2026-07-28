@@ -15,6 +15,7 @@ import {
   type Heading,
   type InlineNode,
 } from '@markup-carve/carve'
+import { smartPunctuationText } from './inline-text.js'
 
 export interface Analysis {
   diagnostics: Diagnostic[]
@@ -156,6 +157,7 @@ function plainText(nodes: InlineNode[]): string {
     else if (node.type === 'symbol') out += `:${node.name}:`
     else if (node.type === 'mention') out += `@${node.user}`
     else if (node.type === 'tag') out += `#${node.name}`
+    else out += smartPunctuationText(node)
   }
   return out.trim()
 }

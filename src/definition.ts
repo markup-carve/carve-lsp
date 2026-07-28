@@ -1,5 +1,6 @@
 import { type Location, type Position } from 'vscode-languageserver/node.js'
 import { parse, resolve, type BlockNode, type Document, type InlineNode } from '@markup-carve/carve'
+import { smartPunctuationText } from './inline-text.js'
 
 /**
  * Go-to-definition for Carve constructs:
@@ -262,6 +263,7 @@ function headingPlainText(nodes: InlineNode[]): string {
     // An inline literal (§27) renders as visible prose, so it must contribute
     // to the heading text a crossref resolves against.
     else if (node.type === 'literal_inline') out += node.content
+    else out += smartPunctuationText(node)
   }
   return out.trim()
 }
