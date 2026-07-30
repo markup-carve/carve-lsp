@@ -28,6 +28,17 @@ test('inline literal gets a string semantic token spanning the whole construct',
   )
 })
 
+test('a critic comment gets a comment token under either AST spelling', () => {
+  // carve-js renamed this AST type from `critic-comment` to `critic_comment`
+  // (carve#401). This asserts through the source text rather than the type
+  // name, so it holds both against the currently pinned engine and after the
+  // pin is raised - which is what makes the rename safe to land out of order.
+  assert.deepEqual(
+    semanticTokens('a {# note #} b\n').map((token) => [token.character, token.length, token.type]),
+    [[2, 10, 'comment']],
+  )
+})
+
 test('reports carve-breakage migration warnings', () => {
   const result = analyzeCarve('**bold**')
   assert.equal(result.diagnostics.length, 1)

@@ -163,6 +163,25 @@ function collectFigureTarget(tokens: Token[], lines: string[], node: BlockNode):
 
 function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[]): void {
   for (const node of nodes) {
+    // carve-js renamed this AST type from `critic-comment` to `critic_comment`,
+    // completing the kebab-to-snake vocabulary convergence (carve#401). The
+    // rename is not published yet and this package pins `^0.1.2`, whose types
+    // only know the hyphenated name - so the new spelling cannot be a `case`
+    // arm without a compile error, and the old one cannot simply be replaced
+    // without breaking against the version actually installed.
+    //
+    // Handling it here accepts both, so neither publish order produces a silent
+    // break - and the break really would be silent: without this the node falls
+    // through to the generic brace handling and comes out as a `keyword` token,
+    // a mis-colored comment rather than a crash.
+    //
+    // Drop this once the pin is raised past the release carrying the rename.
+    // That cleanup is self-enforcing: at that point the hyphenated `case` arm
+    // below stops compiling, because the type union no longer contains it.
+    if ((node.type as string) === 'critic_comment') {
+      pushPosition(tokens, lines, (node as { pos?: Position }).pos, 'comment')
+      continue
+    }
     switch (node.type) {
       case 'text':
       case 'soft_break':
