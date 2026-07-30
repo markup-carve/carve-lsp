@@ -8,6 +8,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Critic comments keep their `comment` semantic token across the carve-js AST
+  rename. carve-js renamed the node type `critic-comment` to `critic_comment`
+  (markup-carve/carve-js#454); this package pins a published `^0.1.2` that still
+  emits the old spelling, so both are accepted and the two can be released in
+  either order. Without this the node would have fallen through to the generic
+  brace handling and highlighted as a `keyword` - a mis-colored comment rather
+  than a visible failure.
+
 - The plain-text walks behind outline symbols, cross-reference matching and
   go-to-definition no longer drop `smart_punctuation` nodes. Carve represents a
   typographic substitution as its own inline node rather than writing the glyph
