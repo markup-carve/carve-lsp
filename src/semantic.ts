@@ -178,6 +178,19 @@ function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[]): v
     // Drop this once the pin is raised past the release carrying the rename.
     // That cleanup is self-enforcing: at that point the hyphenated `case` arm
     // below stops compiling, because the type union no longer contains it.
+    // carve-js split `footnote` into `footnote_ref` (`[^a]`) and
+    // `inline_footnote` (`^[…]`), because one identifier named both of those
+    // AND the block definition type (carve#405). Same situation as the
+    // `critic_comment` rename below: the pinned `^0.1.2` still emits the old
+    // name, and the new ones cannot be `case` arms until the pin moves, so all
+    // three are accepted and either release order is safe.
+    //
+    // Without this the split node falls through to the default and loses its
+    // token entirely - a footnote marker stops being highlighted, silently.
+    if ((node.type as string) === 'footnote_ref' || (node.type as string) === 'inline_footnote') {
+      pushPosition(tokens, lines, (node as { pos?: Position }).pos, 'variable', ['readonly'])
+      continue
+    }
     if ((node.type as string) === 'critic_comment') {
       pushPosition(tokens, lines, (node as { pos?: Position }).pos, 'comment')
       continue
