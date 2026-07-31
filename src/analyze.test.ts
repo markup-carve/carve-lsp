@@ -28,6 +28,16 @@ test('inline literal gets a string semantic token spanning the whole construct',
   )
 })
 
+test('both footnote forms get a variable token across the AST split', () => {
+  // carve-js split `footnote` into `footnote_ref` and `inline_footnote`
+  // (markup-carve/carve#405). Asserted through source text rather than the type
+  // name, so it holds against the pinned engine and after the pin is raised -
+  // which is what makes the split safe to release in either order.
+  const tokens = semanticTokens('a[^r] and ^[n]\n\n[^r]: d\n').filter((t) => t.type === 'variable')
+
+  assert.equal(tokens.length, 2)
+})
+
 test('a critic comment gets a comment token under either AST spelling', () => {
   // carve-js renamed this AST type from `critic-comment` to `critic_comment`
   // (carve#401). This asserts through the source text rather than the type

@@ -8,6 +8,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Both footnote forms keep their `variable` semantic token across the carve-js
+  AST split. carve-js split `footnote` into `footnote_ref` and
+  `inline_footnote` (markup-carve/carve#405); this package pins a published
+  `^0.1.2` that still emits the old name, so all three are accepted and the two
+  can be released in either order. Without it the split node falls through to
+  the default and loses its token - a footnote marker silently stops being
+  highlighted.
+
+### Fixed
+
 - Critic comments keep their `comment` semantic token across the carve-js AST
   rename. carve-js renamed the node type `critic-comment` to `critic_comment`
   (markup-carve/carve-js#454); this package pins a published `^0.1.2` that still
