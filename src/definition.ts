@@ -1,5 +1,6 @@
 import { type Location, type Position } from 'vscode-languageserver/node.js'
 import { parse, resolve, type BlockNode, type Document, type InlineNode } from '@markup-carve/carve'
+import { astColumnToCharacter, sourceLines } from './position.js'
 import { smartPunctuationText } from './inline-text.js'
 
 /**
@@ -118,7 +119,16 @@ function findHeadingById(uri: string, source: string, targetId: string): Locatio
     uri,
     range: {
       start: { line, character: 0 },
-      end: { line, character: (heading.pos.endColumn ?? 200) - 1 },
+      // The heading's end column counts codepoints; the range carries UTF-16
+      // code units. Without a column at all, 200 stands in for "the whole
+      // line", as it did before.
+      end: {
+        line,
+        character:
+          heading.pos.endColumn === undefined
+            ? 199
+            : astColumnToCharacter(sourceLines(source)[line] ?? '', heading.pos.endColumn),
+      },
     },
   }
 }
@@ -248,7 +258,16 @@ function findHeadingByText(uri: string, source: string, text: string): Location 
     uri,
     range: {
       start: { line, character: 0 },
-      end: { line, character: (heading.pos.endColumn ?? 200) - 1 },
+      // The heading's end column counts codepoints; the range carries UTF-16
+      // code units. Without a column at all, 200 stands in for "the whole
+      // line", as it did before.
+      end: {
+        line,
+        character:
+          heading.pos.endColumn === undefined
+            ? 199
+            : astColumnToCharacter(sourceLines(source)[line] ?? '', heading.pos.endColumn),
+      },
     },
   }
 }
