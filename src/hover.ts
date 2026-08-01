@@ -7,6 +7,7 @@ import {
   type InlineNode,
   type Position as SourcePosition,
 } from '@markup-carve/carve'
+import { astColumnToCharacter, characterToAstColumn, sourceLines } from './position.js'
 
 interface HoverRule {
   pattern: RegExp
@@ -53,14 +54,16 @@ const rules: HoverRule[] = [
 ]
 
 export function hoverAt(source: string, position: Position): Hover | null {
+  const lines = sourceLines(source)
+
   try {
-    const hover = astHoverAt(resolve(parse(source)), position)
+    const hover = astHoverAt(resolve(parse(source)), position, lines)
     if (hover) return hover
   } catch {
     // Fall back to lexical help below for documents that do not parse.
   }
 
-  const line = source.replace(/\r\n?/g, '\n').split('\n')[position.line]
+  const line = lines[position.line]
   if (line === undefined) return null
 
   for (const rule of rules) {
@@ -85,9 +88,16 @@ export function hoverAt(source: string, position: Position): Hover | null {
   return null
 }
 
-function astHoverAt(doc: Document, position: Position): Hover | null {
+function astHoverAt(doc: Document, position: Position, lines: string[]): Hover | null {
+  // The request counts UTF-16 code units and the AST may count codepoints, so
+  // the cursor converts once here and every comparison below stays in the
+  // parser's unit. The range converts back on the way out.
+  const cursor: Position = {
+    line: position.line,
+    character: characterToAstColumn(lines[position.line] ?? '', position.character) - 1,
+  }
   const matches: Array<{ pos: SourcePosition; contents: string }> = []
-  for (const node of doc.children) collectBlock(matches, node, position)
+  for (const node of doc.children) collectBlock(matches, node, cursor)
   matches.sort((a, b) => spanSize(a.pos) - spanSize(b.pos))
   const match = matches[0]
   if (!match) return null
@@ -96,7 +106,7 @@ function astHoverAt(doc: Document, position: Position): Hover | null {
       kind: MarkupKind.Markdown,
       value: match.contents,
     },
-    range: toRange(match.pos),
+    range: toRange(match.pos, lines),
   }
 }
 
@@ -239,10 +249,16 @@ function contains(pos: SourcePosition, position: Position): boolean {
   return true
 }
 
-function toRange(pos: SourcePosition) {
+function toRange(pos: SourcePosition, lines: string[]) {
   return {
-    start: { line: pos.startLine - 1, character: (pos.startColumn ?? 1) - 1 },
-    end: { line: pos.endLine - 1, character: (pos.endColumn ?? 1) - 1 },
+    start: {
+      line: pos.startLine - 1,
+      character: astColumnToCharacter(lines[pos.startLine - 1] ?? '', pos.startColumn ?? 1),
+    },
+    end: {
+      line: pos.endLine - 1,
+      character: astColumnToCharacter(lines[pos.endLine - 1] ?? '', pos.endColumn ?? 1),
+    },
   }
 }
 

@@ -7,6 +7,7 @@ import {
   type InlineNode,
   type Position,
 } from '@markup-carve/carve'
+import { astColumnToCharacter } from './position.js'
 
 export const semanticTokenTypes = [
   'keyword',
@@ -266,9 +267,14 @@ function pushPosition(
   }
   for (let line = pos.startLine; line <= pos.endLine; line++) {
     const text = lines[line - 1] ?? ''
-    const startColumn = line === pos.startLine ? pos.startColumn : 1
-    const endColumn = line === pos.endLine ? pos.endColumn : text.length + 1
-    push(tokens, line - 1, startColumn - 1, Math.max(0, endColumn - startColumn), type, modifiers)
+    // The node's columns count codepoints; a token's character and length count
+    // UTF-16 code units, so both ends convert against the line they sit on. A
+    // line the node merely passes through is covered from its start to its end,
+    // which is already a UTF-16 length.
+    const start =
+      line === pos.startLine ? astColumnToCharacter(text, pos.startColumn) : 0
+    const end = line === pos.endLine ? astColumnToCharacter(text, pos.endColumn) : text.length
+    push(tokens, line - 1, start, Math.max(0, end - start), type, modifiers)
   }
 }
 
