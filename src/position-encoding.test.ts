@@ -27,6 +27,24 @@ const LINE = '\u{1F600} *bold* tail'
 const BOLD_START = LINE.indexOf('*')
 const BOLD_END = LINE.lastIndexOf('*') + 1
 
+// The unit the PINNED engine reports, asserted directly.
+//
+// The test above is deliberately unit-agnostic, so a release that changes the
+// unit passes it - which is how the change got in last time. This one names the
+// answer, so the change arrives as a failing assertion instead of as correct
+// positions on ASCII and wrong ones on every emoji.
+//
+// `0.1.2` counts UTF-16 code units. That does NOT match spec PART 12 section 4,
+// which specifies codepoints; carve-js#447 fixed it and the fix is not
+// published yet. So this assertion pins a known-nonconforming engine on
+// purpose. When the release carrying #447 lands, this test fails - that failure
+// is the review prompt, not a bug: flip the expectation, and check that the
+// `codepoint` branch of the conversions (which the installed engine cannot
+// exercise today) is the one now running.
+test('the pinned engine counts UTF-16 code units', () => {
+  assert.equal(engineColumnUnit(), 'utf16')
+})
+
 test('the probe agrees with the installed parser', () => {
   // Not a tautology: it reads the engine's answer for a known string rather
   // than the probe's own logic. If the two ever disagree, every conversion

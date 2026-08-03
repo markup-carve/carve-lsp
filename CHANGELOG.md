@@ -7,6 +7,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **The engine is pinned exactly rather than by range.** `@markup-carve/carve`
+  was depended on as `^0.1.2`, which is `>=0.1.2 <0.2.0` - precisely the range
+  `docs/versioning.md` says may carry behavior changes before 1.0. Every
+  sibling repo in the org pins an exact version or commit. A new test asserts
+  the unit the pinned engine's AST columns count in, so a release that changes
+  it fails here rather than shipping positions that are right on ASCII and
+  wrong on any astral character.
 
 - Both footnote forms keep their `variable` semantic token across the carve-js
   AST split. carve-js split `footnote` into `footnote_ref` and
