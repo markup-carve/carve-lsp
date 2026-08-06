@@ -112,7 +112,7 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode): void {
       for (const child of node.children) collectBlock(tokens, lines, child)
       break
     case 'list':
-      pushLinePrefix(tokens, lines, node.pos, /^\s*(?:[-+*]|\(?[0-9A-Za-z]+[.)])/, 'operator')
+      pushLinePrefix(tokens, lines, node.pos, LIST_MARKER_ONLY, 'operator')
       for (const item of node.items) {
         for (const child of item.children) collectBlock(tokens, lines, child)
       }
@@ -312,9 +312,61 @@ function pushHeadingTitle(tokens: Token[], lines: string[], pos: Position | unde
  * Called from astSemanticTokens after AST tokens are already collected;
  * withoutOverlaps will drop any that land on already-covered spans.
  */
+/*
+ * MARKER SEPARATORS ARE A LITERAL SPACE.
+ *
+ * Exported so the rule can be asserted directly. Most of it is NOT observable
+ * through `semanticTokens`: that prefers the AST path, so what a marker line
+ * becomes is decided by the pinned engine rather than by these patterns, and
+ * the pinned engine is old enough to still make `><TAB>q` a blockquote
+ * (carve-lsp#37). Testing through it would measure the dependency.
+ *
+ * `resources/grammar.ebnf` keeps two terminals apart on purpose - `whitespace`
+ * is `' ' | '\t'`, `space` is `' '` - and every marker below takes `space`.
+ * Separators are literal; indentation is columns, and a separator is not
+ * indentation (carve#692, carve#698).
+ *
+ * These were spelled `\s` in five places across two functions, so the editor
+ * colored a checkbox, a quote marker and a reference label on lines every
+ * engine renders as ordinary paragraph text (carve-lsp#38). Named once here
+ * because the same rule living in five regexes is why the earlier pass over
+ * these patterns fixed only the ones a report happened to name.
+ *
+ * How much whitespace each admits AFTER the required space is measured against
+ * the engine, not assumed - they differ:
+ *
+ *   `[a]: <TAB>/u`   defines      -> further whitespace is content's problem
+ *   `- [ ] <TAB>a`   NOT a task   -> the run is spaces, and content follows
+ *   `>  q` and `> <TAB>q`         -> both quote
+ */
+
+// `reference_definition = '[', reference_label, ']', ':', space, ...` and the
+// footnote form. The space is REQUIRED - the old `\s*` also matched none, so
+// `[a]:/u` was colored as a definition too.
+export const DEF_SEPARATOR = String.raw`\]: [ \t]*`
+
+// `blockquote_line = '>', (newline | (space, inline_content, newline))`. A bare
+// `>` is a blockquote line, which is why the space is optional only at
+// end-of-line.
+export const QUOTE_PREFIX = /^([ \t]*>+)(?: |$)/
+
+// `unordered_item = bullet_marker, [item_attributes], space, [task_marker], ...`
+// with `bullet_marker = '-' | '*'` - `+` is the list CONTINUATION marker, not a
+// bullet, so a `+ ` line is paragraph text.
+//
+// `task_marker = '[', task_state, ']', space`, and `task_state` is any of
+// ` x X - _ > ?`; the old class admitted only ` xX`, so four of the seven
+// states were not colored at all. The lookahead is the measured behavior: the
+// separator run is spaces, and what follows has to be content.
+// The marker alone, for the AST path, which already knows the line opens a
+// list and only needs the marker's width. Same bullet class: `+` is not one.
+export const LIST_MARKER_ONLY = /^[ \t]*(?:[-*]|\(?[0-9A-Za-z]+[.)])/
+
+export const LIST_PREFIX = /^([ \t]*)([-*]|\(?[0-9]+[.)]|\(?[A-Za-z][.)]) +(\[[ xX\-_>?]\] +(?=\S))?/
+
 function scanAstGaps(tokens: Token[], line: number, text: string): void {
   // footnote definition: [^label]: content — must be checked before reference def
-  const fnDef = /^(\[\^)([^\]\n]+)(\]:\s*)(.*)/.exec(text)
+  const fnDef = new RegExp(String.raw`^(\[\^)([^\]\n]+)(` + DEF_SEPARATOR + String.raw`)(.*)`).exec(text)
   if (fnDef) {
     push(tokens, line, fnDef.index, 2, 'operator')
     push(tokens, line, fnDef.index + 2, fnDef[2]!.length, 'type')
@@ -323,7 +375,7 @@ function scanAstGaps(tokens: Token[], line: number, text: string): void {
   }
 
   // reference definition: [label]: url
-  const refDef = /^(\[)([^\]\n]+)(\]:\s*)(\S+)/.exec(text)
+  const refDef = new RegExp(String.raw`^(\[)([^\]\n]+)(` + DEF_SEPARATOR + String.raw`)(\S+)`).exec(text)
   if (refDef) {
     push(tokens, line, refDef.index, 1, 'operator')
     push(tokens, line, refDef.index + 1, refDef[2]!.length, 'type')
@@ -414,17 +466,17 @@ function lexicalSemanticTokens(source: string): Token[] {
       if (div[3]) push(tokens, line, div[0].lastIndexOf(div[3]), div[3].length, 'type')
     }
 
-    const list = /^(\s*)([-+*]|\(?[0-9]+[.)]|\(?[A-Za-z][.)])\s+(\[[ xX]\]\s+)?/.exec(scanText)
+    const list = LIST_PREFIX.exec(scanText)
     if (list) {
       push(tokens, line, list[1]!.length, list[2]!.length, 'operator')
       if (list[3]) push(tokens, line, list[1]!.length + list[2]!.length + 1, list[3].trimEnd().length, 'keyword')
     }
 
-    const quote = /^(\s*>+)\s?/.exec(scanText)
+    const quote = QUOTE_PREFIX.exec(scanText)
     if (quote) push(tokens, line, quote[1]!.search(/>/), quote[1]!.trimStart().length, 'operator')
 
     // footnote definition: [^label]: content — must be checked before reference def
-    const fnDef = /^(\[\^)([^\]\n]+)(\]:\s*)(.*)/.exec(scanText)
+    const fnDef = new RegExp(String.raw`^(\[\^)([^\]\n]+)(` + DEF_SEPARATOR + String.raw`)(.*)`).exec(scanText)
     if (fnDef) {
       push(tokens, line, fnDef.index, 2, 'operator')
       push(tokens, line, fnDef.index + 2, fnDef[2]!.length, 'type')
@@ -433,7 +485,7 @@ function lexicalSemanticTokens(source: string): Token[] {
     }
 
     // reference definition: [label]: url
-    const refDef = /^(\[)([^\]\n]+)(\]:\s*)(\S+)/.exec(scanText)
+    const refDef = new RegExp(String.raw`^(\[)([^\]\n]+)(` + DEF_SEPARATOR + String.raw`)(\S+)`).exec(scanText)
     if (refDef) {
       push(tokens, line, refDef.index, 1, 'operator')
       push(tokens, line, refDef.index + 1, refDef[2]!.length, 'type')
@@ -443,7 +495,7 @@ function lexicalSemanticTokens(source: string): Token[] {
     }
 
     // abbreviation definition: *[ABBR]: expansion
-    const abbrDef = /^(\*\[)([^\]\n]+)(\]:\s*)(.*)/.exec(scanText)
+    const abbrDef = new RegExp(String.raw`^(\*\[)([^\]\n]+)(` + DEF_SEPARATOR + String.raw`)(.*)`).exec(scanText)
     if (abbrDef) {
       push(tokens, line, abbrDef.index, 2, 'operator')
       push(tokens, line, abbrDef.index + 2, abbrDef[2]!.length, 'property')
