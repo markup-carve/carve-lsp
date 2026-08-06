@@ -1,0 +1,190 @@
+name: Engine drift
+
+# This repo does not implement Carve - it calls an engine that is already
+# corpus-gated in its own repository. What can rot here is the DEPENDENCY:
+# nobody notices when the engine stops moving, and CI stays green because
+# hand-written expectations are satisfied by a stale parser exactly as well as
+# by a current one (carve#735).
+#
+# The pin here is EXACT (`"@markup-carve/carve": "0.1.2"`, deliberately - the
+# server reports positions and an engine changing its position units mid-range
+# would move every column it reports). An exact pin makes the first distance
+# below sharper than it is in the sibling repos: a `^0.1.2` range at least
+# picks up a `0.1.3`, an exact pin does not move for anything.
+#
+# THREE QUESTIONS, deliberately kept apart:
+#
+#   1. Where is the pin against the registry, and does the lockfile agree with
+#      it? Cheap, and the answer is a version string.
+#
+#   2. Where is the registry against carve-js `main`? This is the one that
+#      actually failed: a June engine sat in six repos while every range was
+#      satisfied and every check was green (carve#499). No pin check can see
+#      it, because nothing about the pin is wrong - the PUBLISHED engine had
+#      stopped tracking the source.
+#
+#   3. What does THIS SERVER do with the engine that is coming? A version
+#      distance is a proxy. The analysis switches on AST node types, so a
+#      renamed type is a silently lost token rather than an error - which is
+#      not hypothetical: `footnote` became `footnote_ref` and `critic-comment`
+#      became `critic_comment` inside the `0.1.x` line (carve#405), and both
+#      were found by hand. Question 3 runs the corpus through the built server
+#      twice, once per engine, and prints the difference.
+#
+# 1 and 2 WARN: upstream moving is not a defect here, and a job that goes red
+# for something outside the repository teaches people to ignore it. They fail
+# only when the pin resolves to nothing or the lockfile contradicts it, which
+# means an install here is broken. 3 FAILS when a document throws, because a
+# server that crashes on a document the coming engine emits is this repo's
+# defect and its user sees it as a dead editor.
+
+on:
+  schedule:
+    # 05:00 UTC daily, alongside the other drift runs in the org.
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+jobs:
+  engine-pin:
+    name: The pin, the lockfile and the registry agree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Compare the pin against the registry
+        id: registry
+        run: |
+          set -euo pipefail
+          pkg='@markup-carve/carve'
+          spec="$(node -p "const p=require('./package.json');const d=p.dependencies||{},v=p.devDependencies||{};d['${pkg}']||v['${pkg}']||''")"
+          if [ -z "${spec}" ]; then
+            echo "::error::${pkg} is not a dependency of this repo - this workflow is watching nothing"
+            exit 1
+          fi
+          resolved="$(npm view "${pkg}@${spec}" version 2>/dev/null | tail -1 | tr -d "'\" ")"
+          latest="$(npm view "${pkg}" version 2>/dev/null | tr -d "'\" ")"
+          if [ -z "${resolved}" ]; then
+            echo "::error::${pkg}@${spec} resolves to nothing on the registry - an install here is broken"
+            exit 1
+          fi
+          echo "declared        ${spec}"
+          echo "resolves to     ${resolved}"
+          echo "registry latest ${latest}"
+          if [ "${resolved}" != "${latest}" ]; then
+            echo "::warning::${pkg} ${latest} is published, but this repo takes ${resolved} - the pin is exact, so no release arrives on its own"
+          fi
+          echo "latest=${latest}" >> "${GITHUB_OUTPUT}"
+
+      - name: The declared pin and the lockfile agree
+        run: |
+          set -euo pipefail
+          pkg='@markup-carve/carve'
+          declared="$(node -p "const p=require('./package.json');const d=p.dependencies||{},v=p.devDependencies||{};d['${pkg}']||v['${pkg}']||''")"
+          locked="$(node -p "require('./package-lock.json').packages['node_modules/${pkg}'].version")"
+          echo "package.json ${declared}; package-lock.json ${locked}"
+          if [ "${declared}" != "${locked}" ]; then
+            echo "::error::package.json declares ${declared} but the lockfile installs ${locked} - what CI tests is not what the manifest says"
+            exit 1
+          fi
+
+      - name: Check out the engine
+        uses: actions/checkout@v4
+        with:
+          repository: markup-carve/carve-js
+          path: carve-js
+          fetch-depth: 0
+
+      - name: Compare the published engine against carve-js main
+        run: |
+          set -euo pipefail
+          latest='${{ steps.registry.outputs.latest }}'
+          tag=""
+          for candidate in "${latest}" "v${latest}"; do
+            if git -C carve-js rev-parse "${candidate}" >/dev/null 2>&1; then
+              tag="${candidate}"
+              break
+            fi
+          done
+          if [ -z "${tag}" ]; then
+            echo "::warning::carve-js has no tag for the published ${latest}, so the published engine cannot be located in the source"
+            exit 0
+          fi
+          behind="$(git -C carve-js rev-list --count "${tag}..origin/main")"
+          echo "published ${latest} is carve-js ${tag} ($(git -C carve-js log -1 --format=%s "${tag}"))"
+          echo "carve-js main is ${behind} commit(s) ahead of it"
+          if [ "${behind}" -gt 0 ]; then
+            echo "::warning::the PUBLISHED engine ${latest} is ${behind} commit(s) behind carve-js main - every repo installing from the registry is that far behind the language, however current its pin is"
+          fi
+
+  future-engine:
+    name: The server survives the engine that is coming
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check out the corpus from carve main
+        uses: actions/checkout@v4
+        with:
+          repository: markup-carve/carve
+          path: carve-main
+
+      - name: Check out and build carve-js main
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/markup-carve/carve-js.git upstream-carve-js
+          npm --prefix upstream-carve-js ci
+          npm --prefix upstream-carve-js run build
+          echo "carve-js main: $(git -C upstream-carve-js rev-parse HEAD)"
+
+      - name: Build the server against the pinned engine
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+
+      - name: Corpus through the server, pinned engine
+        id: pinned
+        run: |
+          set -euo pipefail
+          out="$(node tools/corpus-through-server.mjs carve-main/tests/corpus | tee /dev/stderr)"
+          for key in documents threw tokens diagnostics; do
+            printf '%s=%s\n' "${key}" "$(printf '%s\n' "$out" | sed -n "s/^${key}=//p")" >> "${GITHUB_OUTPUT}"
+          done
+
+      - name: Swap in carve-js main and run the corpus again
+        run: |
+          set -euo pipefail
+          # dist/ is plain JavaScript, so it is not rebuilt: a `case` arm naming
+          # a node type the newer engine no longer emits is dead at runtime
+          # rather than a compile error, and that dead arm is precisely the
+          # state this step exists to measure. Rebuilding would turn it into a
+          # type error and hide the count.
+          rm -rf node_modules/@markup-carve/carve
+          mkdir -p node_modules/@markup-carve/carve
+          cp -r upstream-carve-js/dist node_modules/@markup-carve/carve/dist
+          cp upstream-carve-js/package.json node_modules/@markup-carve/carve/package.json
+
+          out="$(node tools/corpus-through-server.mjs carve-main/tests/corpus | tee /dev/stderr)"
+          threw="$(printf '%s\n' "$out" | sed -n 's/^threw=//p')"
+          documents="$(printf '%s\n' "$out" | sed -n 's/^documents=//p')"
+          tokens="$(printf '%s\n' "$out" | sed -n 's/^tokens=//p')"
+          diagnostics="$(printf '%s\n' "$out" | sed -n 's/^diagnostics=//p')"
+
+          echo "pinned engine : ${{ steps.pinned.outputs.threw }} threw, ${{ steps.pinned.outputs.tokens }} tokens, ${{ steps.pinned.outputs.diagnostics }} diagnostics over ${{ steps.pinned.outputs.documents }} documents"
+          echo "carve-js main : ${threw} threw, ${tokens} tokens, ${diagnostics} diagnostics over ${documents} documents"
+
+          if [ "${threw}" -gt 0 ]; then
+            echo "::error::the server throws on ${threw} of ${documents} corpus documents with carve-js main - upgrading the pin as it stands would give every editor a dead server on those documents"
+            exit 1
+          fi
+          if [ "${tokens}" != "${{ steps.pinned.outputs.tokens }}" ] || [ "${diagnostics}" != "${{ steps.pinned.outputs.diagnostics }}" ]; then
+            echo "::warning::the coming engine changes what this server reports: ${{ steps.pinned.outputs.tokens }} -> ${tokens} semantic tokens and ${{ steps.pinned.outputs.diagnostics }} -> ${diagnostics} diagnostics over ${documents} documents. Neither is wrong on its own; the point is that the pin bump is not a no-op."
+          fi
