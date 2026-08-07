@@ -65,12 +65,28 @@ jobs:
             echo "::error::${pkg} is not a dependency of this repo - this workflow is watching nothing"
             exit 1
           fi
-          resolved="$(npm view "${pkg}@${spec}" version 2>/dev/null | tail -1 | tr -d "'\" ")"
-          latest="$(npm view "${pkg}" version 2>/dev/null | tr -d "'\" ")"
+          # `npm view <pkg>@<range> version` prints ONE bare version when the
+          # range matches a single release, and `<pkg>@<v> '<v>'` lines when it
+          # matches several. Taking the last WHITESPACE-SEPARATED FIELD reads
+          # both; `tail -1` alone concatenates the spec onto the version the
+          # moment a second matching release exists, yielding
+          # `@markup-carve/carve@0.1.20.1.2` rather than a version.
+          resolved="$(npm view "${pkg}@${spec}" version 2>/dev/null | tail -1 | tr -d "'\"" | awk '{print $NF}')"
+          latest="$(npm view "${pkg}" version 2>/dev/null | tr -d "'\"" | awk '{print $NF}')"
           if [ -z "${resolved}" ]; then
             echo "::error::${pkg}@${spec} resolves to nothing on the registry - an install here is broken"
             exit 1
           fi
+          # Both reads are checked for the SHAPE of a version before anything is
+          # compared. Without this the workflow's failure mode is silence: a
+          # mis-read compares unequal to everything, so the drift warning fires
+          # with a nonsense string in it and reads as a result (carve#755).
+          for pair in "resolved=${resolved}" "latest=${latest}"; do
+            case "${pair#*=}" in
+              [0-9]*.[0-9]*.[0-9]*) ;;
+              *) echo "::error::${pair%%=*} read back as \"${pair#*=}\" from the registry, which is not a version - every comparison below it would be meaningless"; exit 1 ;;
+            esac
+          done
           echo "declared        ${spec}"
           echo "resolves to     ${resolved}"
           echo "registry latest ${latest}"
@@ -154,7 +170,7 @@ jobs:
         id: pinned
         run: |
           set -euo pipefail
-          out="$(node tools/corpus-through-server.mjs carve-main/tests/corpus | tee /dev/stderr)"
+          out="$(node tools/corpus-through-server.mjs carve-main/tests/corpus --manifest pinned-manifest.tsv | tee /dev/stderr)"
           for key in documents threw tokens diagnostics; do
             printf '%s=%s\n' "${key}" "$(printf '%s\n' "$out" | sed -n "s/^${key}=//p")" >> "${GITHUB_OUTPUT}"
           done
@@ -172,7 +188,7 @@ jobs:
           cp -r upstream-carve-js/dist node_modules/@markup-carve/carve/dist
           cp upstream-carve-js/package.json node_modules/@markup-carve/carve/package.json
 
-          out="$(node tools/corpus-through-server.mjs carve-main/tests/corpus | tee /dev/stderr)"
+          out="$(node tools/corpus-through-server.mjs carve-main/tests/corpus --manifest current-manifest.tsv | tee /dev/stderr)"
           threw="$(printf '%s\n' "$out" | sed -n 's/^threw=//p')"
           documents="$(printf '%s\n' "$out" | sed -n 's/^documents=//p')"
           tokens="$(printf '%s\n' "$out" | sed -n 's/^tokens=//p')"
@@ -185,6 +201,22 @@ jobs:
             echo "::error::the server throws on ${threw} of ${documents} corpus documents with carve-js main - upgrading the pin as it stands would give every editor a dead server on those documents"
             exit 1
           fi
-          if [ "${tokens}" != "${{ steps.pinned.outputs.tokens }}" ] || [ "${diagnostics}" != "${{ steps.pinned.outputs.diagnostics }}" ]; then
-            echo "::warning::the coming engine changes what this server reports: ${{ steps.pinned.outputs.tokens }} -> ${tokens} semantic tokens and ${{ steps.pinned.outputs.diagnostics }} -> ${diagnostics} diagnostics over ${documents} documents. Neither is wrong on its own; the point is that the pin bump is not a no-op."
+
+          # Compared as SETS OF PER-DOCUMENT ROWS, not as totals. The totals are
+          # sums over the corpus, so a document that loses semantic tokens and
+          # another that gains the same number leave both totals identical - and
+          # the check would then report that the engine bump changes nothing
+          # while the server had in fact stopped tokenizing one construct and
+          # started tokenizing another. Two different distributions of the same
+          # size compare equal; that is the defect this whole workflow exists to
+          # stop shipping (carve#927), and it was in the workflow itself.
+          changed="$(diff <(sort pinned-manifest.tsv) <(sort current-manifest.tsv) \
+                       | grep -E '^[<>]' | awk '{print $2}' | sort -u || true)"
+          if [ -n "${changed}" ]; then
+            count="$(printf '%s\n' "${changed}" | wc -l | tr -d ' ')"
+            echo "documents this server reads differently under carve-js main:"
+            printf '%s\n' "${changed}" | sed 's/^/  /'
+            echo "::warning::the coming engine changes what this server reports on ${count} of ${documents} documents (totals ${{ steps.pinned.outputs.tokens }} -> ${tokens} semantic tokens, ${{ steps.pinned.outputs.diagnostics }} -> ${diagnostics} diagnostics). Neither is wrong on its own; the point is that the pin bump is not a no-op, and the per-document list above says where."
+          else
+            echo "no document is read differently under carve-js main"
           fi
