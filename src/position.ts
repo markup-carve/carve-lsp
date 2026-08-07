@@ -77,21 +77,43 @@ export function sourceLines(source: string): string[] {
  * codepoint, so a two-character probe reports a different end column under each
  * unit. The answer is cached - it cannot change within a process.
  */
-const COLUMN_PROBE = '\u{1F600}x'
-const CODEPOINT_PROBE_END_COLUMN = 3
+// Exported so the guard test drives THE PROBE rather than a copy of it. A test
+// that retypes the probe string agrees with this function for every value the
+// engine can return, including `undefined`, and goes on agreeing after the
+// probe here is changed to something that cannot tell the two units apart -
+// which is the whole failure it is supposed to report.
+export const COLUMN_PROBE = '\u{1F600}x'
+export const CODEPOINT_PROBE_END_COLUMN = 3
 let cachedUnit: 'codepoint' | 'utf16' | undefined
+
+/**
+ * The raw reading the classification is made from: the probe's end column as
+ * the installed parser reports it, or `undefined` when the parser cannot answer
+ * at all.
+ *
+ * Split out and exported so the guard test can consume THE READING the
+ * classifier uses, instead of computing its own copy of it. A test that reparses
+ * the probe itself agrees with `engineColumnUnit` for every value including
+ * `undefined`, so it cannot see the difference between a measurement and the
+ * fallback below - which is the only thing worth checking here.
+ */
+export function probeEndColumn(): number | undefined {
+  try {
+    return parse(COLUMN_PROBE).children[0]?.pos?.endColumn
+  } catch {
+    return undefined
+  }
+}
 
 export function engineColumnUnit(): 'codepoint' | 'utf16' {
   if (cachedUnit) return cachedUnit
 
-  try {
-    const endColumn = parse(COLUMN_PROBE).children[0]?.pos?.endColumn
-    cachedUnit = endColumn === CODEPOINT_PROBE_END_COLUMN ? 'codepoint' : 'utf16'
-  } catch {
-    // A parser that cannot answer gets the reading that needs no conversion,
-    // which is what every released version has done so far.
-    cachedUnit = 'utf16'
-  }
+  // A parser that cannot answer gets the reading that needs no conversion,
+  // which is what every released version has done so far. That default is right
+  // for a server that must not crash on an unexpected engine, and wrong to
+  // accept silently in CI, so a test asserts the probe was actually answered.
+  const endColumn = probeEndColumn()
+  cachedUnit = endColumn === CODEPOINT_PROBE_END_COLUMN ? 'codepoint' : 'utf16'
 
   return cachedUnit
 }

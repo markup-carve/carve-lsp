@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { parse } from '@markup-carve/carve'
 import { hoverAt } from './hover.js'
 import { semanticTokens } from './semantic.js'
 import {
@@ -8,6 +7,9 @@ import {
   characterToAstColumn,
   engineColumnUnit,
   setEngineColumnUnit,
+  CODEPOINT_PROBE_END_COLUMN,
+  COLUMN_PROBE,
+  probeEndColumn,
 } from './position.js'
 import type { Hover } from 'vscode-languageserver/node.js'
 
@@ -45,12 +47,69 @@ test('the pinned engine counts UTF-16 code units', () => {
   assert.equal(engineColumnUnit(), 'utf16')
 })
 
-test('the probe agrees with the installed parser', () => {
-  // Not a tautology: it reads the engine's answer for a known string rather
-  // than the probe's own logic. If the two ever disagree, every conversion
-  // below is running in the wrong direction.
-  const endColumn = parse('\u{1F600}x').children[0]?.pos?.endColumn
-  assert.equal(engineColumnUnit(), endColumn === 3 ? 'codepoint' : 'utf16')
+// This test used to retype the probe string and the constant, and then assert
+// that engineColumnUnit() agreed with a recomputation of its own expression:
+//
+//   const endColumn = parse('\u{1F600}x').children[0]?.pos?.endColumn
+//   assert.equal(engineColumnUnit(), endColumn === 3 ? 'codepoint' : 'utf16')
+//
+// Both sides read the same value through the same expression, so they agreed
+// for every value the engine can return - including `undefined`, where both
+// take the `utf16` branch and the "answer" is the catch-all rather than a
+// measurement. Two mutations, both measured against the old assertion, both
+// leaving the whole suite green at 134 of 134:
+//
+//   COLUMN_PROBE = 'abc'   a BMP-only probe has the same end column under
+//                          either unit, so the classifier can no longer tell
+//                          them apart. The test reparsed its own emoji probe
+//                          and never saw it.
+//   the classifier reads a property that does not exist, so every
+//                          classification is the fallback. The test reparsed
+//                          and got a real number, so it agreed with the
+//                          fallback and reported nothing.
+//
+// What follows checks three things separately, against values derived from the
+// probe rather than copied from it, and consumes the classifier's own reading
+// rather than making a second one.
+test('the probe can tell the two units apart', () => {
+  // A string is indexed in UTF-16 code units and iterated in codepoints, so a
+  // probe whose two lengths are equal reports the same end column under either
+  // unit and classifies nothing. This is a property of the probe alone, with no
+  // engine involved.
+  assert.notEqual(
+    COLUMN_PROBE.length,
+    [...COLUMN_PROBE].length,
+    'the probe has no astral character, so both units give it the same end column',
+  )
+  // And the constant the classifier compares against is that probe's codepoint
+  // end column - derived here, hard-coded there.
+  assert.equal(CODEPOINT_PROBE_END_COLUMN, [...COLUMN_PROBE].length + 1)
+})
+
+test('the installed parser answers the probe, rather than failing into the default', () => {
+  // engineColumnUnit() answers `utf16` when the parse throws or the position is
+  // absent. That is the right thing for a server not to crash on, and the wrong
+  // thing to accept silently in CI: a classification nobody measured reads
+  // exactly like one that was.
+  //
+  // probeEndColumn() rather than a reparse here: this is the reading the
+  // classifier actually makes, so a classifier that stops reading a position
+  // fails this. A reparse would agree with the fallback and report nothing.
+  const endColumn = probeEndColumn()
+  assert.equal(
+    typeof endColumn,
+    'number',
+    'the installed engine placed no position on the probe, so the unit below is a default, not a reading',
+  )
+  // Only two answers are possible for this probe, one per unit. Anything else
+  // means the engine is not counting either of the units this server knows how
+  // to convert between.
+  assert.ok(
+    endColumn === [...COLUMN_PROBE].length + 1 || endColumn === COLUMN_PROBE.length + 1,
+    `the probe's end column is ${endColumn}, which is neither its codepoint length + 1 ` +
+      `(${[...COLUMN_PROBE].length + 1}) nor its UTF-16 length + 1 (${COLUMN_PROBE.length + 1})`,
+  )
+  assert.equal(engineColumnUnit(), endColumn === [...COLUMN_PROBE].length + 1 ? 'codepoint' : 'utf16')
 })
 
 test('an emoji before a construct does not shift its hover range', () => {
