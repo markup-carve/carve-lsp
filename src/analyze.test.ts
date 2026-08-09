@@ -328,3 +328,83 @@ test('returns semantic tokens for YAML frontmatter', () => {
     ],
   )
 })
+
+// ---------------------------------------------------------------------------
+// Include resolution (PART 9 §19)
+// ---------------------------------------------------------------------------
+
+test('includes are OFF by default: the directive stays literal and nothing is read', () => {
+  // §19 requires opt-in. `analyzeCarve` with no include options must not
+  // construct a capability, so a resolver is never consulted and no include
+  // diagnostic appears - the directive is just text.
+  const result = analyzeCarve('See {{ secret.crv }} here.\n')
+  assert.deepEqual(
+    result.diagnostics.filter((d) => String(d.code ?? '').startsWith('include-')),
+    [],
+  )
+  assert.deepEqual(result.dependencies, [])
+})
+
+test('include options carrying no resolver are still inert', () => {
+  const result = analyzeCarve('{{ child.crv }}\n', { includes: { sourcePath: '/doc.crv' } })
+  assert.deepEqual(result.dependencies, [])
+  assert.deepEqual(
+    result.diagnostics.filter((d) => String(d.code ?? '').startsWith('include-')),
+    [],
+  )
+})
+
+test('an enabled include publishes its warning as a diagnostic on the directive range', () => {
+  const source = 'intro\n\n{{ absent.crv }}\n'
+  const result = analyzeCarve(source, {
+    includes: {
+      resolver: (includePath) => ({ ok: false, id: includePath, denial: 'not-found' }),
+      sourcePath: '/doc.crv',
+    },
+  })
+  const diagnostic = result.diagnostics.find((d) => d.code === 'include-unresolved')
+  assert.ok(diagnostic, 'expected an include-unresolved diagnostic')
+  assert.deepEqual(diagnostic.range, {
+    start: { line: 2, character: 0 },
+    end: { line: 2, character: 16 },
+  })
+  assert.equal(diagnostic.source, 'carve')
+  assert.deepEqual(result.dependencies, [{ id: 'absent.crv', resolved: false }])
+})
+
+test('a denial class never reaches the published diagnostic message', () => {
+  // §19 I7: the message names the failure class in the processor's own words.
+  // The internal denial (`outside-root`) is diagnostic detail, not author text,
+  // because a distinguishable denial is a probe for host layout.
+  const result = analyzeCarve('{{ ../secret.crv }}\n', {
+    includes: {
+      resolver: (includePath) => ({ ok: false, id: includePath, denial: 'outside-root' }),
+      sourcePath: '/doc.crv',
+    },
+  })
+  const diagnostic = result.diagnostics.find((d) => d.code === 'include-unresolved')
+  assert.ok(diagnostic)
+  assert.ok(!diagnostic.message.includes('outside-root'))
+})
+
+test('a nested warning names the child relative to the include root, not absolutely', () => {
+  const files: Record<string, string> = {
+    '/ws/a.crv': 'child\n\n{{ absent.crv }}',
+  }
+  const result = analyzeCarve('{{ a.crv }}\n', {
+    includes: {
+      resolver: (includePath) => {
+        const id = includePath.startsWith('/') ? includePath : `/ws/${includePath}`
+        const source = files[id]
+        if (source === undefined) return { ok: false, id, denial: 'not-found' }
+        return { ok: true, id, source, bytes: Buffer.byteLength(source, 'utf8') }
+      },
+      sourcePath: '/ws/doc.crv',
+      includeRoot: '/ws',
+    },
+  })
+  const diagnostic = result.diagnostics.find((d) => d.code === 'include-unresolved')
+  assert.ok(diagnostic)
+  assert.ok(diagnostic.message.includes('(in a.crv)'), diagnostic.message)
+  assert.ok(!diagnostic.message.includes('/ws/a.crv'))
+})
