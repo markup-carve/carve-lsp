@@ -12,12 +12,21 @@ import {
   PrepareRenameRequest,
   ProposedFeatures,
   ReferencesRequest,
+  DidChangeConfigurationNotification,
   RenameRequest,
   TextDocuments,
   TextDocumentSyncKind,
 } from 'vscode-languageserver/node.js'
 import { TextDocument } from 'vscode-languageserver-textdocument'
 import { analyzeCarve } from './analyze.js'
+import {
+  DEFAULT_INCLUDE_SETTINGS,
+  fsPath,
+  includeOptionsFor,
+  readIncludeSettings,
+  readWorkspaceTrusted,
+  type IncludeSettings,
+} from './include-settings.js'
 import { definitionAt } from './definition.js'
 import { referencesAt } from './references.js'
 import { codeLenses } from './codelens.js'
@@ -31,28 +40,51 @@ import { prepareRename, renameEdits } from './rename.js'
 const connection = createConnection(ProposedFeatures.all)
 const documents = new TextDocuments(TextDocument)
 
-connection.onInitialize(() => ({
-  capabilities: {
-    textDocumentSync: TextDocumentSyncKind.Incremental,
-    documentSymbolProvider: true,
-    hoverProvider: true,
-    codeActionProvider: true,
-    documentFormattingProvider: true,
-    foldingRangeProvider: true,
-    definitionProvider: true,
-    referencesProvider: true,
-    renameProvider: { prepareProvider: true },
-    codeLensProvider: { resolveProvider: false },
-    completionProvider: {
-      triggerCharacters: [':', '#', '^', '['],
+let includeSettings: IncludeSettings = DEFAULT_INCLUDE_SETTINGS
+let workspaceTrusted = false
+let workspaceRoots: string[] = []
+
+connection.onInitialize((params) => {
+  includeSettings = readIncludeSettings(params.initializationOptions)
+  workspaceTrusted = readWorkspaceTrusted(params.initializationOptions)
+  // Every folder, not just the first: a multi-root session roots each document
+  // at the folder it actually lives in.
+  const folders = (params.workspaceFolders ?? []).map((folder) => fsPath(folder.uri))
+  const legacyRoot = params.rootUri != null ? fsPath(params.rootUri) : undefined
+  workspaceRoots = [...folders, legacyRoot].filter((root): root is string => root !== undefined)
+
+  return {
+    capabilities: {
+      textDocumentSync: TextDocumentSyncKind.Incremental,
+      documentSymbolProvider: true,
+      hoverProvider: true,
+      codeActionProvider: true,
+      documentFormattingProvider: true,
+      foldingRangeProvider: true,
+      definitionProvider: true,
+      referencesProvider: true,
+      renameProvider: { prepareProvider: true },
+      codeLensProvider: { resolveProvider: false },
+      completionProvider: {
+        triggerCharacters: [':', '#', '^', '['],
+      },
+      // Semantic tokens are intentionally NOT advertised. Editor colouring is owned by the
+      // TextMate grammar (carve-grammars / the intellij-carve bundle); a second semantic-token
+      // layer over the same text only duplicated and fought it - clients merged the two and
+      // painted partial/incorrect ranges (a `{#top}` id showing as a hashtag, etc.). The
+      // builder in ./semantic.ts is kept (and tested) for any consumer that opts in explicitly.
     },
-    // Semantic tokens are intentionally NOT advertised. Editor colouring is owned by the
-    // TextMate grammar (carve-grammars / the intellij-carve bundle); a second semantic-token
-    // layer over the same text only duplicated and fought it - clients merged the two and
-    // painted partial/incorrect ranges (a `{#top}` id showing as a hashtag, etc.). The
-    // builder in ./semantic.ts is kept (and tested) for any consumer that opts in explicitly.
-  },
-}))
+  }
+})
+
+connection.onInitialized(() => {
+  void connection.client.register(DidChangeConfigurationNotification.type, undefined)
+})
+
+connection.onDidChangeConfiguration((change) => {
+  includeSettings = readIncludeSettings(change.settings)
+  for (const document of documents.all()) validate(document)
+})
 
 documents.onDidOpen((event) => validate(event.document))
 documents.onDidChangeContent((event) => validate(event.document))
@@ -129,7 +161,13 @@ connection.onRequest(ReferencesRequest.type, (params) => {
 })
 
 function validate(document: TextDocument) {
-  const analysis = analyzeCarve(document.getText())
+  const includes = includeOptionsFor({
+    uri: document.uri,
+    settings: includeSettings,
+    workspaceTrusted,
+    workspaceRoots,
+  })
+  const analysis = analyzeCarve(document.getText(), includes ? { includes } : {})
   connection.sendDiagnostics({
     uri: document.uri,
     diagnostics: analysis.diagnostics,

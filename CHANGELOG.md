@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **File inclusion (`{{ path }}`) is resolved, and its failures are
+  diagnostics.** Off by default: the server enables it only when the client
+  asks, and under `"auto"` only for a workspace the client reports as trusted.
+  Targets must canonicalize inside the containment root (the workspace root
+  unless overridden), so a symlink or `..` path leaving the root, and an
+  absolute path outside it, are refused. Remote URLs are never fetched.
+  Recursion depth and total expanded bytes are both bounded. Settings live
+  under `carve.includes`; see the README.
+
 ### Fixed
 - **The engine is pinned exactly rather than by range.** `@markup-carve/carve`
   was depended on as `^0.1.2`, which is `>=0.1.2 <0.2.0` - precisely the range

@@ -15,14 +15,32 @@ import {
   type Heading,
   type InlineNode,
 } from '@markup-carve/carve'
+import path from 'node:path'
 import { smartPunctuationText } from './inline-text.js'
+import { resolveIncludes, type IncludeDependency, type IncludeOptions } from './includes.js'
+
+export interface AnalyzeOptions {
+  /**
+   * Include resolution settings (PART 9 §19). ABSENT MEANS OFF: with no
+   * options - or with options carrying no resolver - no include directive is
+   * acted on and no file is read. §19 requires includes to be opt-in, so the
+   * capability has to be handed in rather than defaulted into existence.
+   */
+  includes?: IncludeOptions
+}
 
 export interface Analysis {
   diagnostics: Diagnostic[]
   symbols: DocumentSymbol[]
+  /**
+   * Include targets touched while analyzing, resolved or not. Empty unless
+   * include resolution was enabled. Hosts watch these so a change in an
+   * INCLUDED document can re-publish diagnostics for the INCLUDING one.
+   */
+  dependencies: IncludeDependency[]
 }
 
-export function analyzeCarve(source: string): Analysis {
+export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Analysis {
   const diagnostics: Diagnostic[] = []
   let doc: Document | null = null
 
@@ -79,10 +97,60 @@ export function analyzeCarve(source: string): Analysis {
     })
   }
 
+  // Include resolution (PART 9 §19). Inert without a resolver, so a document
+  // in an untrusted or unconfigured workspace keeps its `{{ … }}` literal and
+  // nothing on disk is touched.
+  const includes = resolveIncludes(norm, options.includes ?? {})
+  for (const warning of includes.warnings) {
+    diagnostics.push({
+      severity: DiagnosticSeverity.Warning,
+      range: {
+        start: positionAt(norm, warning.start),
+        end: positionAt(norm, warning.end),
+      },
+      source: 'carve',
+      code: warning.rule,
+      // `warning.detail` is deliberately not folded in: §19 I7 keeps the
+      // failure class out of author-visible text so a denial cannot be used
+      // to probe host layout. The attributed child is named relative to the
+      // include root for the same reason - never as an absolute path.
+      message: attributeToChild(warning.message, warning.file, options.includes),
+    })
+  }
+
   return {
     diagnostics,
     symbols: doc ? documentSymbols(doc) : [],
+    dependencies: includes.dependencies,
   }
+}
+
+/**
+ * Name the file a nested include warning arose in, relative to the include
+ * root. A warning raised in the document the client already has open adds
+ * nothing and is left alone.
+ */
+function attributeToChild(
+  message: string,
+  file: string | undefined,
+  includes: IncludeOptions | undefined,
+): string {
+  if (file === undefined || file === includes?.sourcePath) return message
+  return `${message} (in ${relativeToRoot(file, includes?.includeRoot)})`
+}
+
+/**
+ * A child's identity as the author wrote it: relative to the include root,
+ * segment-wise, so a sibling directory named `..foo` is not mistaken for an
+ * escape. A file that is not under the root at all is named as it came, since
+ * inventing a relative form for it would be a lie.
+ */
+function relativeToRoot(file: string, root: string | undefined): string {
+  if (root === undefined) return file
+  const relative = path.relative(root, file)
+  if (!relative || path.isAbsolute(relative)) return file
+  if (relative.split(path.sep)[0] === '..') return file
+  return relative
 }
 
 function documentSymbols(doc: Document): DocumentSymbol[] {
