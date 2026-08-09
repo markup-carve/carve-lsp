@@ -42,15 +42,16 @@ const documents = new TextDocuments(TextDocument)
 
 let includeSettings: IncludeSettings = DEFAULT_INCLUDE_SETTINGS
 let workspaceTrusted = false
-let workspaceRoot: string | undefined
+let workspaceRoots: string[] = []
 
 connection.onInitialize((params) => {
   includeSettings = readIncludeSettings(params.initializationOptions)
   workspaceTrusted = readWorkspaceTrusted(params.initializationOptions)
-  workspaceRoot =
-    (params.workspaceFolders?.[0]?.uri !== undefined
-      ? fsPath(params.workspaceFolders[0].uri)
-      : undefined) ?? (params.rootUri !== null && params.rootUri !== undefined ? fsPath(params.rootUri) : undefined)
+  // Every folder, not just the first: a multi-root session roots each document
+  // at the folder it actually lives in.
+  const folders = (params.workspaceFolders ?? []).map((folder) => fsPath(folder.uri))
+  const legacyRoot = params.rootUri != null ? fsPath(params.rootUri) : undefined
+  workspaceRoots = [...folders, legacyRoot].filter((root): root is string => root !== undefined)
 
   return {
     capabilities: {
@@ -164,7 +165,7 @@ function validate(document: TextDocument) {
     uri: document.uri,
     settings: includeSettings,
     workspaceTrusted,
-    ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
+    workspaceRoots,
   })
   const analysis = analyzeCarve(document.getText(), includes ? { includes } : {})
   connection.sendDiagnostics({

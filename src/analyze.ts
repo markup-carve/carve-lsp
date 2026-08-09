@@ -15,6 +15,7 @@ import {
   type Heading,
   type InlineNode,
 } from '@markup-carve/carve'
+import path from 'node:path'
 import { smartPunctuationText } from './inline-text.js'
 import { resolveIncludes, type IncludeDependency, type IncludeOptions } from './includes.js'
 
@@ -135,10 +136,21 @@ function attributeToChild(
   includes: IncludeOptions | undefined,
 ): string {
   if (file === undefined || file === includes?.sourcePath) return message
-  const root = includes?.includeRoot
-  const relative =
-    root !== undefined && file.startsWith(root) ? file.slice(root.length).replace(/^[/\\]/, '') : file
-  return `${message} (in ${relative})`
+  return `${message} (in ${relativeToRoot(file, includes?.includeRoot)})`
+}
+
+/**
+ * A child's identity as the author wrote it: relative to the include root,
+ * segment-wise, so a sibling directory named `..foo` is not mistaken for an
+ * escape. A file that is not under the root at all is named as it came, since
+ * inventing a relative form for it would be a lie.
+ */
+function relativeToRoot(file: string, root: string | undefined): string {
+  if (root === undefined) return file
+  const relative = path.relative(root, file)
+  if (!relative || path.isAbsolute(relative)) return file
+  if (relative.split(path.sep)[0] === '..') return file
+  return relative
 }
 
 function documentSymbols(doc: Document): DocumentSymbol[] {

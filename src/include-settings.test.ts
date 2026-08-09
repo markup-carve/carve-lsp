@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -32,7 +32,7 @@ test('the default is OFF: auto plus an untrusted workspace yields no capability'
     uri: pathToFileURL(path.join(dir, 'docs/main.crv')).href,
     settings: AUTO,
     workspaceTrusted: false,
-    workspaceRoot: dir,
+    workspaceRoots: [dir],
   })
   assert.equal(options, undefined)
 })
@@ -50,7 +50,7 @@ test('auto plus a trusted workspace yields a resolver rooted at the workspace', 
     uri: pathToFileURL(path.join(dir, 'docs/main.crv')).href,
     settings: AUTO,
     workspaceTrusted: true,
-    workspaceRoot: dir,
+    workspaceRoots: [dir],
   })
   assert.ok(options?.resolver)
   assert.equal(options.includeRoot, dir)
@@ -63,7 +63,7 @@ test('off wins over a trusted workspace', () => {
     uri: pathToFileURL(path.join(dir, 'docs/main.crv')).href,
     settings: { enabled: 'off' },
     workspaceTrusted: true,
-    workspaceRoot: dir,
+    workspaceRoots: [dir],
   })
   assert.equal(options, undefined)
 })
@@ -74,7 +74,7 @@ test('on enables includes without a trust report', () => {
     uri: pathToFileURL(path.join(dir, 'docs/main.crv')).href,
     settings: { enabled: 'on' },
     workspaceTrusted: false,
-    workspaceRoot: dir,
+    workspaceRoots: [dir],
   })
   assert.ok(options?.resolver)
 })
@@ -94,15 +94,67 @@ test('a file opened outside any workspace is rooted at its own directory, never 
   assert.notEqual(options?.includeRoot, process.cwd())
 })
 
+test('a document is rooted at the workspace folder that contains it, not the first one', () => {
+  const dir = workspace()
+  const other = workspace()
+  const options = includeOptionsFor({
+    uri: pathToFileURL(path.join(dir, 'docs/main.crv')).href,
+    settings: { enabled: 'on' },
+    workspaceTrusted: true,
+    // The containing folder is listed second on purpose.
+    workspaceRoots: [other, dir],
+  })
+  assert.equal(options?.includeRoot, dir)
+})
+
+test('a document in none of the workspace folders falls back to its own directory', () => {
+  const dir = workspace()
+  const other = workspace()
+  const options = includeOptionsFor({
+    uri: pathToFileURL(path.join(dir, 'docs/main.crv')).href,
+    settings: { enabled: 'on' },
+    workspaceTrusted: true,
+    workspaceRoots: [other],
+  })
+  assert.equal(options?.includeRoot, path.join(dir, 'docs'))
+})
+
+test('the deepest containing workspace folder wins', () => {
+  const dir = workspace()
+  const options = includeOptionsFor({
+    uri: pathToFileURL(path.join(dir, 'docs/main.crv')).href,
+    settings: { enabled: 'on' },
+    workspaceTrusted: true,
+    workspaceRoots: [dir, path.join(dir, 'docs')],
+  })
+  assert.equal(options?.includeRoot, path.join(dir, 'docs'))
+})
+
 test('an explicit includeRoot wins over the workspace root', () => {
   const dir = workspace()
   const options = includeOptionsFor({
     uri: pathToFileURL(path.join(dir, 'docs/main.crv')).href,
     settings: { enabled: 'on', includeRoot: path.join(dir, 'docs') },
     workspaceTrusted: true,
-    workspaceRoot: dir,
+    workspaceRoots: [dir],
   })
   assert.equal(options?.includeRoot, path.join(dir, 'docs'))
+})
+
+test('a root reached through a symlink is reported canonically', () => {
+  // The resolver returns canonical child ids. If `includeRoot` were the
+  // uncanonical spelling, every child would look like it sits outside the root
+  // and a diagnostic naming one would print an absolute filesystem path.
+  const dir = workspace()
+  const link = path.join(path.dirname(dir), `${path.basename(dir)}-link`)
+  symlinkSync(dir, link)
+  test.after(() => rmSync(link, { force: true }))
+  const options = includeOptionsFor({
+    uri: pathToFileURL(path.join(dir, 'docs/main.crv')).href,
+    settings: { enabled: 'on', includeRoot: link },
+    workspaceTrusted: true,
+  })
+  assert.equal(options?.includeRoot, dir)
 })
 
 test('a root that is not a real directory yields no capability rather than a wider one', () => {
@@ -111,7 +163,7 @@ test('a root that is not a real directory yields no capability rather than a wid
     uri: pathToFileURL(path.join(dir, 'docs/main.crv')).href,
     settings: { enabled: 'on', includeRoot: path.join(dir, 'does-not-exist') },
     workspaceTrusted: true,
-    workspaceRoot: dir,
+    workspaceRoots: [dir],
   })
   assert.equal(options, undefined)
 })
@@ -121,7 +173,7 @@ test('a document with no filesystem identity gets no capability', () => {
     uri: 'untitled:Untitled-1',
     settings: { enabled: 'on' },
     workspaceTrusted: true,
-    workspaceRoot: '/tmp',
+    workspaceRoots: ['/tmp'],
   })
   assert.equal(options, undefined)
 })

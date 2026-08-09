@@ -7,7 +7,8 @@
  * the gate in front of a file-read capability, which is not something to leave
  * exercised only by hand.
  */
-import { dirname } from 'node:path'
+import { realpathSync } from 'node:fs'
+import path, { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { fileSystemResolver } from './include-path.js'
 import type { IncludeOptions } from './includes.js'
@@ -74,7 +75,35 @@ export interface IncludeGateInput {
   uri: string
   settings: IncludeSettings
   workspaceTrusted: boolean
-  workspaceRoot?: string
+  /**
+   * Every workspace folder the client reported, in the order it reported them.
+   * A multi-root session gets one root per folder, not the first folder for
+   * everything: rooting a document from the second folder at the first would
+   * reject its ordinary relative includes as escapes.
+   */
+  workspaceRoots?: string[]
+}
+
+/** True when `candidate` is `root` or sits underneath it, segment-wise. */
+function contains(root: string, candidate: string): boolean {
+  const rel = path.relative(root, candidate)
+  if (rel === '') return true
+  if (!rel || path.isAbsolute(rel)) return false
+  return rel.split(path.sep)[0] !== '..'
+}
+
+/**
+ * The workspace folder this document belongs to: the deepest one containing
+ * it. A document in no folder at all has no workspace root, and falls back to
+ * its own directory rather than to somebody else's folder.
+ */
+function workspaceRootFor(documentPath: string, roots: string[] | undefined): string | undefined {
+  let best: string | undefined
+  for (const root of roots ?? []) {
+    if (!contains(root, documentPath)) continue
+    if (best === undefined || root.length > best.length) best = root
+  }
+  return best
 }
 
 /**
@@ -97,7 +126,23 @@ export function includeOptionsFor(input: IncludeGateInput): IncludeOptions | und
   // directory to resolve against and gets no capability.
   if (documentPath === undefined) return undefined
 
-  const root = input.settings.includeRoot ?? input.workspaceRoot ?? dirname(documentPath)
+  const configured =
+    input.settings.includeRoot ??
+    workspaceRootFor(documentPath, input.workspaceRoots) ??
+    dirname(documentPath)
+
+  // Canonicalize the root here as well as inside the resolver, so that the
+  // root a caller sees on `includeRoot` is in the same coordinate system as
+  // the ids the resolver returns. Without it, a root reached through a symlink
+  // (or given relatively) makes every child id look like it sits outside the
+  // root, and a diagnostic naming that child would print an absolute path.
+  let root: string
+  try {
+    root = realpathSync(configured)
+  } catch {
+    return undefined
+  }
+
   let resolver
   try {
     resolver = fileSystemResolver(root, {
