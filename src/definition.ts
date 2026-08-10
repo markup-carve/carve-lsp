@@ -1,6 +1,8 @@
 import { type Location, type Position } from 'vscode-languageserver/node.js'
 import { parse, resolve, type BlockNode, type Document, type InlineNode } from '@markup-carve/carve'
 import { astColumnToCharacter, sourceLines } from './position.js'
+import { includeDefinitionAt } from './include-definition.js'
+import type { IncludeOptions } from './includes.js'
 import { smartPunctuationText } from './inline-text.js'
 
 /**
@@ -12,10 +14,26 @@ import { smartPunctuationText } from './inline-text.js'
  * - Link reference   `[text][ref]`     -> the `[ref]:` definition line
  * - Citation         `[@key]`          -> the `[@key]:` definition line
  * - Wikilink         `[[Page]]`        -> heading whose text matches Page (best-effort)
+ * - Include          `{{ path }}`      -> the file the directive names
+ *
+ * `includes` is optional and defaults to inert, matching `analyzeCarve`: with
+ * no resolver the include branch answers null and every other construct behaves
+ * exactly as before, so a caller that never passes it sees no change.
  */
-export function definitionAt(uri: string, source: string, position: Position): Location | null {
+export function definitionAt(
+  uri: string,
+  source: string,
+  position: Position,
+  includes: IncludeOptions = {},
+): Location | null {
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   const line = lines[position.line] ?? ''
+
+  // 0. Include directive {{ path }} - checked first because a directive span is
+  // unambiguous: no other construct here starts with `{{`, so an early answer
+  // cannot shadow one of them.
+  const includeTarget = includeDefinitionAt(source, position, includes)
+  if (includeTarget !== null) return includeTarget
 
   // 1. Citation [@key] - check before link-ref so `[@foo]` doesn't match as link-ref
   const citationTarget = resolveCitationAt(lines, line, position)

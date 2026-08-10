@@ -150,7 +150,21 @@ connection.onRequest(CodeLensRequest.type, (params) => {
 
 connection.onRequest(DefinitionRequest.type, (params) => {
   const document = documents.get(params.textDocument.uri)
-  return document ? definitionAt(params.textDocument.uri, document.getText(), params.position) : null
+  if (!document) return null
+  // The same gate the validate() pass uses, so navigation and diagnostics agree
+  // about which documents may resolve includes at all and under which root.
+  const includes = includeOptionsFor({
+    uri: params.textDocument.uri,
+    settings: includeSettings,
+    workspaceTrusted,
+    workspaceRoots,
+  })
+  return definitionAt(
+    params.textDocument.uri,
+    document.getText(),
+    params.position,
+    includes ?? {},
+  )
 })
 
 connection.onRequest(ReferencesRequest.type, (params) => {
