@@ -2,6 +2,8 @@ import { type Location, type Position } from 'vscode-languageserver/node.js'
 import { parse, resolve, type BlockNode, type Document, type InlineNode } from '@markup-carve/carve'
 import { astColumnToCharacter, sourceLines } from './position.js'
 import { smartPunctuationText } from './inline-text.js'
+import { includeDefinitionAt } from './include-definition.js'
+import type { IncludeOptions } from './includes.js'
 
 /**
  * Go-to-definition for Carve constructs:
@@ -13,7 +15,14 @@ import { smartPunctuationText } from './inline-text.js'
  * - Citation         `[@key]`          -> the `[@key]:` definition line
  * - Wikilink         `[[Page]]`        -> heading whose text matches Page (best-effort)
  */
-export function definitionAt(uri: string, source: string, position: Position): Location | null {
+export function definitionAt(
+  uri: string,
+  source: string,
+  position: Position,
+  includes?: IncludeOptions,
+): Location | null {
+  const included = includeDefinitionAt(source, position, includes)
+  if (included) return included
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   const line = lines[position.line] ?? ''
 

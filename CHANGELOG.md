@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Track resolved and missing local include dependencies with dynamic file
+  watchers. A child change invalidates bounded source and parsed-tree caches
+  and revalidates every open including document.
+- Go to definition on an include directive opens the contained child through
+  the same guarded resolver used for diagnostics.
+- Include headings in document-symbol results with locations attributed to
+  their child files.
+
 ## [0.1.2] - 2026-08-10
 
 ### Added
