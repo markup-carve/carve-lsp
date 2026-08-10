@@ -12,6 +12,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
 
       # Guard: package.json version AND the CHANGELOG must match the release
       # tag (tags are `v`-prefixed), so a mistyped tag, a forgotten version
