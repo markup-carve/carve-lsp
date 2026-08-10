@@ -36,15 +36,20 @@ const BOLD_END = LINE.lastIndexOf('*') + 1
 // answer, so the change arrives as a failing assertion instead of as correct
 // positions on ASCII and wrong ones on every emoji.
 //
-// `0.1.2` counts UTF-16 code units. That does NOT match spec PART 12 section 4,
-// which specifies codepoints; carve-js#447 fixed it and the fix is not
-// published yet. So this assertion pins a known-nonconforming engine on
-// purpose. When the release carrying #447 lands, this test fails - that failure
-// is the review prompt, not a bug: flip the expectation, and check that the
-// `codepoint` branch of the conversions (which the installed engine cannot
-// exercise today) is the one now running.
-test('the pinned engine counts UTF-16 code units', () => {
-  assert.equal(engineColumnUnit(), 'utf16')
+// That is exactly what happened: this assertion read `utf16` while the pin sat
+// at `0.1.2`, and raising the pin to `0.1.3` turned it red. `0.1.3` carries
+// carve-js#447, which counts codepoints and so conforms to spec PART 12
+// section 4. The expectation is flipped here rather than relaxed, because an
+// assertion that accepts either unit is the shape that let the change through
+// unnoticed the first time.
+//
+// The conversions in position.js have always had both branches; until this
+// release the `codepoint` one was unreachable with the installed engine. It is
+// the live branch now, and the unit-agnostic tests above cover it: they derive
+// every expectation from `indexOf` on the SOURCE, so they would fail if the
+// conversion returned the parser's raw codepoint column to an LSP client.
+test('the pinned engine counts codepoints', () => {
+  assert.equal(engineColumnUnit(), 'codepoint')
 })
 
 // This test used to retype the probe string and the constant, and then assert
