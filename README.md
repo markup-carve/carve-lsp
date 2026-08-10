@@ -26,7 +26,7 @@ The server communicates over **stdio** (`--stdio` flag).
 | Document symbols | Headings as an outline tree |
 | Hover | Contextual information on hover |
 | Completion | Trigger characters `:` `#` `^` `[` |
-| Go to definition | Jump to heading / reference targets |
+| Go to definition | Jump to heading / reference targets, and from an include directive to the file it names |
 | Find references | All uses of a heading id or reference label |
 | Rename | Prepare + apply renames across the document |
 | Code actions | Migration quick-fixes for deprecated Carve syntax |

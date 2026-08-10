@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Go to definition on an include directive.** `{{ chapter-1.crv }}` jumps to
+  the file it names. Resolution goes through the same `include-path` resolver
+  the include pass uses, so a target the resolver refuses - outside the root,
+  reached by an escaping symlink, absolute when absolutes are denied, or simply
+  missing - does not navigate at all rather than jumping somewhere best-effort.
+
 ## [0.1.2] - 2026-08-10
 
 ### Added
