@@ -11,6 +11,7 @@ import { realpathSync } from 'node:fs'
 import path, { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { fileSystemResolver } from './include-path.js'
+import type { IncludeSourceCache } from './include-cache.js'
 import type { IncludeOptions } from './includes.js'
 
 export interface IncludeSettings {
@@ -82,6 +83,7 @@ export interface IncludeGateInput {
    * reject its ordinary relative includes as escapes.
    */
   workspaceRoots?: string[]
+  cache?: IncludeSourceCache
 }
 
 /** True when `candidate` is `root` or sits underneath it, segment-wise. */
@@ -148,6 +150,7 @@ export function includeOptionsFor(input: IncludeGateInput): IncludeOptions | und
     resolver = fileSystemResolver(root, {
       allowAbsolute: input.settings.allowAbsolute ?? false,
       allowedRemoteHosts: input.settings.allowedRemoteHosts ?? [],
+      ...(input.cache === undefined ? {} : { cache: input.cache }),
     })
   } catch {
     // A root that is not a real directory yields no capability at all, rather

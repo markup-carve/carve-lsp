@@ -61,6 +61,8 @@ export interface IncludeDependency {
   id: string
   /** True when the resolver produced source text for this target. */
   resolved: boolean
+  /** Absolute legal filesystem candidate a host can watch. */
+  watch?: string
 }
 
 export interface IncludeOptions {
@@ -89,6 +91,8 @@ export interface IncludeResolution {
   dependencies: IncludeDependency[]
   /** Bytes charged against the budget. */
   bytes: number
+  /** Successfully read child documents, de-duplicated by canonical id. */
+  documents: Array<{ id: string; source: string; version?: string }>
 }
 
 const MIN_BUDGET = 1024 * 1024
@@ -106,7 +110,8 @@ interface State {
   maxBytes: number
   usedBytes: number
   warnings: IncludeWarning[]
-  dependencies: Map<string, boolean>
+  dependencies: Map<string, IncludeDependency>
+  documents: Map<string, { source: string; version?: string }>
   /** Offsets of every line start in the root document, for line/column. */
   lineStarts: number[]
 }
@@ -155,8 +160,21 @@ function warn(
  * encounter fixes the order, and a later successful read upgrades an entry
  * first seen unresolved.
  */
-function note(state: State, id: string, resolved: boolean): void {
-  if (resolved || !state.dependencies.has(id)) state.dependencies.set(id, resolved)
+function note(state: State, id: string, resolved: boolean, watch?: string): void {
+  // A canonical/watchable path is the dependency identity when available.
+  // Two nested files can both name `missing.crv`; keying those by the raw
+  // spelling would collapse distinct future files into one watcher.
+  const key = watch ?? id
+  const previous = state.dependencies.get(key)
+  if (!previous || resolved) {
+    state.dependencies.set(key, {
+      id,
+      resolved,
+      ...(watch === undefined ? {} : { watch }),
+    })
+  } else if (previous.watch === undefined && watch !== undefined) {
+    previous.watch = watch
+  }
 }
 
 function visit(
@@ -235,7 +253,7 @@ function visit(
     }
 
     if (!resolved.ok) {
-      note(state, resolved.id, false)
+      note(state, resolved.id, false, resolved.watch)
       warn(
         state,
         'include-unresolved',
@@ -247,7 +265,7 @@ function visit(
       continue
     }
 
-    note(state, resolved.id, true)
+    note(state, resolved.id, true, resolved.watch)
 
     if (stack.includes(resolved.id)) {
       warn(state, 'include-cycle', `Include cycle detected for "${directive.path}".`, at, file)
@@ -270,6 +288,13 @@ function visit(
       continue
     }
 
+    if (!state.documents.has(resolved.id)) {
+      state.documents.set(resolved.id, {
+        source: resolved.source,
+        ...(resolved.version === undefined ? {} : { version: resolved.version }),
+      })
+    }
+
     visit(state, resolved.source, resolved.id, [...stack, resolved.id], depth + 1, at)
   }
 }
@@ -284,7 +309,7 @@ function visit(
  * resolver, so no caller can reach the filesystem by forgetting a flag.
  */
 export function resolveIncludes(source: string, options: IncludeOptions = {}): IncludeResolution {
-  if (!options.resolver) return { warnings: [], dependencies: [], bytes: 0 }
+  if (!options.resolver) return { warnings: [], dependencies: [], bytes: 0, documents: [] }
 
   const normalized = source.replace(/\r\n?/g, '\n')
   const state: State = {
@@ -295,6 +320,7 @@ export function resolveIncludes(source: string, options: IncludeOptions = {}): I
     usedBytes: 0,
     warnings: [],
     dependencies: new Map(),
+    documents: new Map(),
     lineStarts: lineStarts(normalized),
   }
 
@@ -303,7 +329,8 @@ export function resolveIncludes(source: string, options: IncludeOptions = {}): I
 
   return {
     warnings: state.warnings,
-    dependencies: [...state.dependencies].map(([id, resolved]) => ({ id, resolved })),
+    dependencies: [...state.dependencies.values()],
     bytes: state.usedBytes,
+    documents: [...state.documents].map(([id, child]) => ({ id, ...child })),
   }
 }

@@ -1,6 +1,7 @@
 import {
   DiagnosticSeverity,
   DocumentSymbol,
+  SymbolInformation,
   SymbolKind,
   type Diagnostic,
   type Range,
@@ -16,8 +17,10 @@ import {
   type InlineNode,
 } from '@markup-carve/carve'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { smartPunctuationText } from './inline-text.js'
 import { resolveIncludes, type IncludeDependency, type IncludeOptions } from './includes.js'
+import type { IncludeParseCache } from './include-cache.js'
 
 export interface AnalyzeOptions {
   /**
@@ -27,6 +30,7 @@ export interface AnalyzeOptions {
    * capability has to be handed in rather than defaulted into existence.
    */
   includes?: IncludeOptions
+  includedParseCache?: IncludeParseCache
 }
 
 export interface Analysis {
@@ -38,6 +42,8 @@ export interface Analysis {
    * INCLUDED document can re-publish diagnostics for the INCLUDING one.
    */
   dependencies: IncludeDependency[]
+  /** Outline entries from included files, carrying their child-file URI. */
+  includedSymbols: SymbolInformation[]
 }
 
 export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Analysis {
@@ -122,7 +128,37 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
     diagnostics,
     symbols: doc ? documentSymbols(doc) : [],
     dependencies: includes.dependencies,
+    includedSymbols: includedSymbols(includes.documents, options.includedParseCache),
   }
+}
+
+function includedSymbols(
+  documents: Array<{ id: string; source: string; version?: string }>,
+  cache: IncludeParseCache | undefined,
+): SymbolInformation[] {
+  const symbols: SymbolInformation[] = []
+  for (const child of documents) {
+    let document = child.version === undefined ? undefined : cache?.get(child.id, child.version)
+    if (!document) {
+      try {
+        document = resolve(parse(child.source))
+      } catch {
+        continue
+      }
+      if (child.version !== undefined) cache?.set(child.id, child.version, document)
+    }
+    const uri = pathToFileURL(child.id).toString()
+    for (const heading of walkHeadings(document.children)) {
+      const symbol = headingSymbol(heading)
+      symbols.push({
+        name: symbol.name,
+        kind: symbol.kind,
+        location: { uri, range: symbol.range },
+        containerName: path.basename(child.id),
+      })
+    }
+  }
+  return symbols
 }
 
 /**

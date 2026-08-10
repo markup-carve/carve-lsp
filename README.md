@@ -23,10 +23,10 @@ The server communicates over **stdio** (`--stdio` flag).
 | Capability | Details |
 |---|---|
 | Diagnostics | Syntax errors from the Carve parser; advisory warnings for Djot/Markdown delimiter collisions |
-| Document symbols | Headings as an outline tree |
+| Document symbols | Headings as an outline tree, including headings attributed to included files |
 | Hover | Contextual information on hover |
 | Completion | Trigger characters `:` `#` `^` `[` |
-| Go to definition | Jump to heading / reference targets |
+| Go to definition | Jump to heading / reference targets and included files |
 | Find references | All uses of a heading id or reference label |
 | Rename | Prepare + apply renames across the document |
 | Code actions | Migration quick-fixes for deprecated Carve syntax |
@@ -34,7 +34,7 @@ The server communicates over **stdio** (`--stdio` flag).
 | Folding ranges | Fold sections and block containers |
 | Formatting | Format the whole document |
 | Semantic tokens | Token-based syntax highlighting |
-| File inclusion | Resolves `{{ path }}` directives and reports the failures as diagnostics - **off by default**, see below |
+| File inclusion | Resolves `{{ path }}` directives, watches dependencies, and reports failures as diagnostics - **off by default**, see below |
 
 ## File inclusion
 
@@ -89,6 +89,14 @@ A refused target produces an `include-unresolved` diagnostic on the directive,
 and the directive stays literal. The diagnostic deliberately does not say WHICH
 check refused it: a distinguishable denial is a way to probe the layout of the
 machine the server runs on.
+
+The server watches every legal include target, including a missing target that
+may be created later. A child change invalidates its cached source and parsed
+tree, then revalidates every open document that includes it. Go to definition
+on a directive opens the resolved child, and child headings appear in the
+including document's symbol result with locations in the child file. All three
+features use the same contained resolver as diagnostics; refused paths are
+never registered as watchers or navigation targets.
 
 ## Editor setup
 

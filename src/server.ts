@@ -13,9 +13,13 @@ import {
   ProposedFeatures,
   ReferencesRequest,
   DidChangeConfigurationNotification,
+  DidChangeWatchedFilesNotification,
   RenameRequest,
   TextDocuments,
   TextDocumentSyncKind,
+  type Disposable,
+  type DocumentSymbol,
+  type SymbolInformation,
 } from 'vscode-languageserver/node.js'
 import { TextDocument } from 'vscode-languageserver-textdocument'
 import { analyzeCarve } from './analyze.js'
@@ -36,6 +40,8 @@ import { formatDocument } from './format.js'
 import { hoverAt } from './hover.js'
 import { migrationCodeActions } from './migration-actions.js'
 import { prepareRename, renameEdits } from './rename.js'
+import { IncludeParseCache, IncludeSourceCache } from './include-cache.js'
+import { DependencyIndex, watcherFor } from './dependencies.js'
 
 const connection = createConnection(ProposedFeatures.all)
 const documents = new TextDocuments(TextDocument)
@@ -43,6 +49,11 @@ const documents = new TextDocuments(TextDocument)
 let includeSettings: IncludeSettings = DEFAULT_INCLUDE_SETTINGS
 let workspaceTrusted = false
 let workspaceRoots: string[] = []
+const includeCache = new IncludeSourceCache()
+const includeParseCache = new IncludeParseCache()
+const dependencyIndex = new DependencyIndex()
+let watcherRegistration: Disposable | undefined
+let watcherRefresh = Promise.resolve()
 
 connection.onInitialize((params) => {
   includeSettings = readIncludeSettings(params.initializationOptions)
@@ -89,12 +100,36 @@ connection.onDidChangeConfiguration((change) => {
 documents.onDidOpen((event) => validate(event.document))
 documents.onDidChangeContent((event) => validate(event.document))
 documents.onDidClose((event) => {
+  if (dependencyIndex.remove(event.document.uri)) refreshWatchers()
   connection.sendDiagnostics({ uri: event.document.uri, diagnostics: [] })
+})
+
+connection.onDidChangeWatchedFiles((params) => {
+  const affected = new Set<string>()
+  for (const change of params.changes) {
+    const target = fsPath(change.uri)
+    if (target === undefined) continue
+    includeCache.invalidate(target)
+    includeParseCache.invalidate(target)
+    for (const uri of dependencyIndex.documentsFor(target)) affected.add(uri)
+  }
+  for (const uri of affected) {
+    const document = documents.get(uri)
+    if (document) validate(document)
+  }
 })
 
 connection.onRequest(DocumentSymbolRequest.type, (params) => {
   const document = documents.get(params.textDocument.uri)
-  return document ? analyzeCarve(document.getText()).symbols : []
+  if (!document) return []
+  const includes = includeOptions(document)
+  const analysis = analyzeCarve(document.getText(), {
+    ...(includes ? { includes } : {}),
+    includedParseCache: includeParseCache,
+  })
+  return analysis.includedSymbols.length > 0
+    ? [...flattenSymbols(analysis.symbols, document.uri), ...analysis.includedSymbols]
+    : analysis.symbols
 })
 
 connection.onRequest(HoverRequest.type, (params) => {
@@ -150,7 +185,14 @@ connection.onRequest(CodeLensRequest.type, (params) => {
 
 connection.onRequest(DefinitionRequest.type, (params) => {
   const document = documents.get(params.textDocument.uri)
-  return document ? definitionAt(params.textDocument.uri, document.getText(), params.position) : null
+  return document
+    ? definitionAt(
+        params.textDocument.uri,
+        document.getText(),
+        params.position,
+        includeOptions(document),
+      )
+    : null
 })
 
 connection.onRequest(ReferencesRequest.type, (params) => {
@@ -161,17 +203,63 @@ connection.onRequest(ReferencesRequest.type, (params) => {
 })
 
 function validate(document: TextDocument) {
-  const includes = includeOptionsFor({
-    uri: document.uri,
-    settings: includeSettings,
-    workspaceTrusted,
-    workspaceRoots,
+  const includes = includeOptions(document)
+  const analysis = analyzeCarve(document.getText(), {
+    ...(includes ? { includes } : {}),
+    includedParseCache: includeParseCache,
   })
-  const analysis = analyzeCarve(document.getText(), includes ? { includes } : {})
+  const changed = dependencyIndex.update(
+    document.uri,
+    analysis.dependencies.flatMap((dependency) =>
+      dependency.watch === undefined ? [] : [dependency.watch],
+    ),
+  )
+  if (changed) refreshWatchers()
   connection.sendDiagnostics({
     uri: document.uri,
     diagnostics: analysis.diagnostics,
   })
+}
+
+function includeOptions(document: TextDocument) {
+  return includeOptionsFor({
+    uri: document.uri,
+    settings: includeSettings,
+    workspaceTrusted,
+    workspaceRoots,
+    cache: includeCache,
+  })
+}
+
+function refreshWatchers(): void {
+  const paths = dependencyIndex.watchedPaths()
+  watcherRefresh = watcherRefresh.then(async () => {
+    watcherRegistration?.dispose()
+    watcherRegistration = undefined
+    if (paths.length === 0) return
+    watcherRegistration = await connection.client.register(DidChangeWatchedFilesNotification.type, {
+      watchers: paths.map(watcherFor),
+    })
+  }).catch((error: unknown) => {
+    connection.console.warn(`Could not register include watchers: ${String(error)}`)
+  })
+}
+
+function flattenSymbols(symbols: DocumentSymbol[], uri: string): SymbolInformation[] {
+  const result: SymbolInformation[] = []
+  const visit = (items: DocumentSymbol[], containerName?: string): void => {
+    for (const symbol of items) {
+      result.push({
+        name: symbol.name,
+        kind: symbol.kind,
+        location: { uri, range: symbol.range },
+        ...(containerName === undefined ? {} : { containerName }),
+      })
+      visit(symbol.children ?? [], symbol.name)
+    }
+  }
+  visit(symbols)
+  return result
 }
 
 documents.listen(connection)

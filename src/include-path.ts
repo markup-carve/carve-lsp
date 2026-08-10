@@ -17,6 +17,7 @@
  */
 import { closeSync, fstatSync, openSync, readSync, realpathSync } from 'node:fs'
 import path from 'node:path'
+import type { IncludeSourceCache } from './include-cache.js'
 
 /**
  * Why a resolver refused a target. Reported on {@link IncludeWarning.detail},
@@ -47,8 +48,8 @@ export interface IncludeContext {
 }
 
 export type IncludeResolved =
-  | { ok: true; id: string; source: string; bytes: number }
-  | { ok: false; id: string; denial: IncludeDenial }
+  | { ok: true; id: string; source: string; bytes: number; watch?: string; version?: string }
+  | { ok: false; id: string; denial: IncludeDenial; watch?: string }
 
 export type IncludeResolver = (includePath: string, ctx: IncludeContext) => IncludeResolved
 
@@ -66,6 +67,8 @@ export interface FileSystemResolverOptions {
    * later gains a fetcher has the gate already in place.
    */
   allowedRemoteHosts?: string[]
+  /** Process-level child-source cache, consulted only after containment. */
+  cache?: IncludeSourceCache
 }
 
 /** A scheme with an authority (`https://…`), or a protocol-relative `//host/…`. */
@@ -111,6 +114,22 @@ export function fileSystemResolver(
     return rel.split(path.sep)[0] !== '..'
   }
 
+  const missingCandidate = (candidate: string): string | undefined => {
+    let ancestor = path.dirname(candidate)
+    const suffix = [path.basename(candidate)]
+    while (ancestor !== path.dirname(ancestor)) {
+      try {
+        const ancestorReal = realpathSync(ancestor)
+        const canonicalCandidate = path.join(ancestorReal, ...suffix)
+        return contains(canonicalCandidate) ? canonicalCandidate : undefined
+      } catch {
+        suffix.unshift(path.basename(ancestor))
+        ancestor = path.dirname(ancestor)
+      }
+    }
+    return undefined
+  }
+
   return (includePath, ctx) => {
     // GUARD 1 (§19: MUST NOT fetch remote URLs unless an allowlist is
     // explicitly configured). Checked before any path join, so a URL can never
@@ -146,7 +165,12 @@ export function fileSystemResolver(
       // makes a symlinked escape visible to GUARD 3 at all.
       real = realpathSync(joined)
     } catch {
-      return { ok: false, id: includePath, denial: 'not-found' }
+      // A missing but lexically contained candidate is safe and useful to
+      // watch: its later creation must revalidate the including document.
+      const watch = missingCandidate(joined)
+      return watch === undefined
+        ? { ok: false, id: includePath, denial: 'outside-root' }
+        : { ok: false, id: includePath, denial: 'not-found', watch }
     }
 
     // GUARD 3 (§19: only files under the configured project root AFTER symlink
@@ -167,6 +191,9 @@ export function fileSystemResolver(
       // Regular files only. A FIFO or a character device would block the read
       // or stream without end, and neither is a document.
       if (!stat.isFile()) return { ok: false, id: real, denial: 'not-a-file' }
+      const cached = opts.cache?.get(real, stat.mtimeMs, stat.size)
+      const version = `${stat.mtimeMs}:${stat.size}`
+      if (cached) return { ok: true, id: real, watch: real, version, ...cached }
       const buffer = Buffer.allocUnsafe(stat.size)
       let read = 0
       while (read < stat.size) {
@@ -174,14 +201,18 @@ export function fileSystemResolver(
         if (n <= 0) break
         read += n
       }
-      return {
+      const value = {
         ok: true,
         id: real,
+        watch: real,
+        version,
         source: buffer.subarray(0, read).toString('utf8'),
         // Encoded bytes, not JavaScript characters, so the budget counts what
         // the include-bomb actually costs.
         bytes: read,
-      }
+      } as const
+      opts.cache?.set(real, stat.mtimeMs, stat.size, value)
+      return value
     } finally {
       closeSync(fd)
     }
