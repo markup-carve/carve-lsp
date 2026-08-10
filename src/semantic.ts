@@ -214,7 +214,8 @@ function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[]): v
       case 'mention':
       case 'tag':
       case 'symbol':
-      case 'footnote':
+      case 'footnote_ref':
+      case 'inline_footnote':
       case 'abbreviation':
         pushPosition(tokens, lines, node.pos, 'variable', ['readonly'])
         break
@@ -226,7 +227,7 @@ function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[]): v
         pushPosition(tokens, lines, node.pos, 'type')
         break
       case 'delete':
-      case 'critic-comment':
+      case 'critic_comment':
         pushPosition(tokens, lines, node.pos, 'comment')
         break
       case 'substitution':
