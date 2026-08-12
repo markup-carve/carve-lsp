@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Diagnostics are coalesced per document instead of running on every keystroke
+  (markup-carve/carve-lsp#68). Analysis is whole-document - a full parse and
+  resolve plus the migration and lint passes - so one run per edit multiplies
+  that cost by the typing rate on large files. Edits now settle for a short
+  window (120 ms by default) and produce one run, and a queued run is REPLACED
+  rather than queued behind, so diagnostics computed for a superseded version
+  are never published. Opening a document still analyzes immediately, and
+  closing one cancels any queued run.
+
 ### Added
 
 - Track resolved and missing local include dependencies with dynamic file
