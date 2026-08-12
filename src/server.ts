@@ -40,6 +40,7 @@ import { formatDocument } from './format.js'
 import { hoverAt } from './hover.js'
 import { migrationCodeActions } from './migration-actions.js'
 import { prepareRename, renameEdits } from './rename.js'
+import { DiagnosticScheduler } from './diagnostic-scheduler.js'
 import { IncludeParseCache, IncludeSourceCache } from './include-cache.js'
 import { DependencyIndex, watcherFor } from './dependencies.js'
 
@@ -94,12 +95,35 @@ connection.onInitialized(() => {
 
 connection.onDidChangeConfiguration((change) => {
   includeSettings = readIncludeSettings(change.settings)
-  for (const document of documents.all()) validate(document)
+  // Coalesced: a settings change can arrive alongside others, and revalidating
+  // every open document synchronously is the same cost this ticket is removing.
+  for (const document of documents.all()) diagnostics.schedule(document.uri, document.version)
 })
 
-documents.onDidOpen((event) => validate(event.document))
-documents.onDidChangeContent((event) => validate(event.document))
+/**
+ * Analysis is whole-document, so a burst of keystrokes must produce ONE run
+ * rather than one per edit (markup-carve/carve-lsp#68). The scheduler always
+ * hands back the newest version, and the document is re-read here, so
+ * diagnostics for a superseded version are never published.
+ */
+const diagnostics = new DiagnosticScheduler({
+  run: (uri) => {
+    const document = documents.get(uri)
+    // Closed between the last edit and the run: nothing to publish, and the
+    // close handler has already cleared its diagnostics.
+    if (document === undefined) return
+    validate(document)
+  },
+})
+
+// Open is not a burst, and waiting out a window nobody is typing in is pure
+// latency, so it runs straight away.
+documents.onDidOpen((event) => diagnostics.flush(event.document.uri, event.document.version))
+documents.onDidChangeContent((event) =>
+  diagnostics.schedule(event.document.uri, event.document.version),
+)
 documents.onDidClose((event) => {
+  diagnostics.cancel(event.document.uri)
   if (dependencyIndex.remove(event.document.uri)) refreshWatchers()
   connection.sendDiagnostics({ uri: event.document.uri, diagnostics: [] })
 })
