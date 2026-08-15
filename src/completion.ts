@@ -4,6 +4,7 @@ import {
   type Position,
 } from 'vscode-languageserver/node.js'
 import { parse, resolve, type BlockNode, type Document } from '@markup-carve/carve'
+import { captionTargets, type CaptionTarget } from './captions.js'
 
 /** The eight canonical admonition kinds (grammar PART 9 §12, Tier 1). */
 const ADMONITIONS = ['note', 'tip', 'warning', 'danger', 'info', 'success', 'example', 'quote']
@@ -38,9 +39,23 @@ export function completionAt(source: string, position: Position): CompletionItem
     ]
   }
   if ((match = /<\/#([\w-]*)$/.exec(prefix))) {
-    return headingIds(source).map((id) =>
-      completion(id, CompletionItemKind.Reference, match![1], position, 'Heading id'),
-    )
+    // A crossref reaches a captioned host as well as a heading (PART 9R R4).
+    // Offering only heading ids said the others were not targets, which is the
+    // reading that made a `</#fig>` naming a figure look like a typo.
+    return [
+      ...headingIds(source).map((id) =>
+        completion(id, CompletionItemKind.Reference, match![1], position, 'Heading id'),
+      ),
+      ...captionIds(source).map((target) =>
+        completion(
+          target.id,
+          CompletionItemKind.Reference,
+          match![1],
+          position,
+          captionDetail(target),
+        ),
+      ),
+    ]
   }
   if ((match = /\[\^([\w-]*)$/.exec(prefix))) {
     return footnoteLabels(source).map((label) =>
@@ -89,6 +104,26 @@ function headingIds(source: string): string[] {
     // Parsing may fail mid-edit; offer no ids rather than throwing.
   }
   return [...new Set(ids)]
+}
+
+function captionIds(source: string): CaptionTarget[] {
+  try {
+    return captionTargets(resolve(parse(source, { positions: true })))
+  } catch {
+    // Parsing may fail mid-edit; offer no ids rather than throwing.
+    return []
+  }
+}
+
+/**
+ * What the id resolves to, so the list distinguishes the group from its panels
+ * without the author having to remember which is which: "Figure 2" beside
+ * "Figure 2a". A host that drew no number says what it is instead - there is no
+ * text for the reference to render, and §4c makes that deliberate.
+ */
+function captionDetail(target: CaptionTarget): string {
+  if (target.text === null) return `Unnumbered ${target.kind}`
+  return `${target.text} (${target.kind})`
 }
 
 function footnoteLabels(source: string): string[] {

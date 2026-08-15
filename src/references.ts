@@ -1,6 +1,7 @@
 import { type Location, type Position, type ReferenceContext } from 'vscode-languageserver/node.js'
 import { parse, resolve, type BlockNode, type Document } from '@markup-carve/carve'
 import { smartPunctuationText } from './inline-text.js'
+import { captionTargetById } from './captions.js'
 
 /**
  * Find-references for Carve constructs (same-document scope).
@@ -120,16 +121,22 @@ function findHeadingAtLine(
   return null
 }
 
+/**
+ * The line a crossref id is declared on: a heading's own line, or a captioned
+ * host's first line. Headings alone were searched here, so asking for the
+ * usages of a figure id found the group and then returned nothing.
+ */
 function findHeadingLineById(source: string, targetId: string): number | null {
   let doc: Document
   try {
-    doc = resolve(parse(source))
+    doc = resolve(parse(source, { positions: true }))
   } catch {
     return null
   }
   const heading = findHeadingWithId(doc.children, targetId.toLowerCase())
-  if (!heading || !heading.pos) return null
-  return heading.pos.startLine - 1
+  if (heading?.pos) return heading.pos.startLine - 1
+  const caption = captionTargetById(doc, targetId)
+  return caption?.pos ? caption.pos.startLine - 1 : null
 }
 
 function findHeadingWithId(

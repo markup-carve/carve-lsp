@@ -19,6 +19,7 @@ import {
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { smartPunctuationText } from './inline-text.js'
+import { panelLetter } from './captions.js'
 import { resolveIncludes, type IncludeDependency, type IncludeOptions } from './includes.js'
 import type { IncludeParseCache } from './include-cache.js'
 
@@ -148,8 +149,12 @@ function includedSymbols(
       if (child.version !== undefined) cache?.set(child.id, child.version, document)
     }
     const uri = pathToFileURL(child.id).toString()
-    for (const heading of walkHeadings(document.children)) {
-      const symbol = headingSymbol(heading)
+    for (const entry of walkOutline(document.children)) {
+      // An INCLUDED file contributes its headings, flat. A composite figure is
+      // a landmark inside its own file rather than a navigable entry in
+      // another one, so it stays out of this list.
+      if (entry.type !== 'heading') continue
+      const symbol = headingSymbol(entry)
       symbols.push({
         name: symbol.name,
         kind: symbol.kind,
@@ -193,11 +198,7 @@ function documentSymbols(doc: Document): DocumentSymbol[] {
   const stack: Array<{ level: number; symbol: DocumentSymbol }> = []
   const roots: DocumentSymbol[] = []
 
-  for (const heading of walkHeadings(doc.children)) {
-    const symbol = headingSymbol(heading)
-    while (stack.length && stack[stack.length - 1]!.level >= heading.level) {
-      stack.pop()
-    }
+  const place = (symbol: DocumentSymbol): void => {
     const parent = stack[stack.length - 1]
     if (parent) {
       parent.symbol.children ??= []
@@ -205,23 +206,102 @@ function documentSymbols(doc: Document): DocumentSymbol[] {
     } else {
       roots.push(symbol)
     }
-    stack.push({ level: heading.level, symbol })
+  }
+
+  for (const entry of walkOutline(doc.children)) {
+    if (entry.type === 'figure_group') {
+      // A composite figure is a structural landmark: one figure holding
+      // ordered panels (PART 9 §4c). It takes NO level, so it never pops the
+      // heading stack - it hangs under the section it appears in, the way a
+      // heading's own children do.
+      place(figureGroupSymbol(entry))
+      continue
+    }
+    while (stack.length && stack[stack.length - 1]!.level >= entry.level) {
+      stack.pop()
+    }
+    const symbol = headingSymbol(entry)
+    place(symbol)
+    stack.push({ level: entry.level, symbol })
   }
 
   return roots
 }
 
-function* walkHeadings(nodes: BlockNode[]): Iterable<Heading> {
+type OutlineEntry = Heading | Extract<BlockNode, { type: 'figure_group' }>
+
+/**
+ * The outline's entries in source order: headings, and composite figures.
+ *
+ * A group is worth an entry where a plain figure is not, because it is a
+ * CONTAINER an author folds, navigates and loses their place inside - the same
+ * reason it folds. Its panels come with it, so the outline says how many there
+ * are without scrolling the fence.
+ */
+function* walkOutline(nodes: BlockNode[]): Iterable<OutlineEntry> {
   for (const node of nodes) {
     if (node.type === 'heading') yield node
+    if (node.type === 'figure_group') {
+      yield node
+      // Its panels ride on the group's own symbol, but a heading inside the
+      // group's stray content is still a heading and still belongs to the
+      // section it sits in.
+      yield* walkOutline(node.children.filter((child) => !isPanel(child)))
+      continue
+    }
     if ('children' in node && Array.isArray(node.children)) {
-      yield* walkHeadings(node.children.filter(isBlockNode))
+      yield* walkOutline(node.children.filter(isBlockNode))
     }
     if (node.type === 'figure') {
       if ('children' in node.target && Array.isArray(node.target.children)) {
-        yield* walkHeadings(node.target.children.filter(isBlockNode))
+        yield* walkOutline(node.target.children.filter(isBlockNode))
       }
     }
+  }
+}
+
+/** A group's panels are its direct `figure` and `table` children (§4c). */
+function isPanel(node: BlockNode): boolean {
+  return node.type === 'figure' || node.type === 'table'
+}
+
+function figureGroupSymbol(group: Extract<BlockNode, { type: 'figure_group' }>): DocumentSymbol {
+  const range = blockRange(group)
+  const panels = group.children.filter(isPanel)
+  return {
+    name: (group.caption ? plainText(group.caption) : '') || 'Composite figure',
+    detail: panels.length === 1 ? '1 panel' : `${panels.length} panels`,
+    kind: SymbolKind.Struct,
+    range,
+    selectionRange: range,
+    children: panels.map((panel, index) => panelSymbol(panel, index)),
+  }
+}
+
+/**
+ * A panel is named by its own caption, and falls back to the LETTER a crossref
+ * would use for it (§4c) - not to a number, which would read as a figure number
+ * the panel does not have.
+ */
+function panelSymbol(panel: BlockNode, index: number): DocumentSymbol {
+  const caption = (panel as { caption?: InlineNode[] }).caption
+  const range = blockRange(panel)
+  return {
+    name: (caption ? plainText(caption) : '') || `Panel ${panelLetter(index)}`,
+    kind: panel.type === 'table' ? SymbolKind.Array : SymbolKind.Object,
+    range,
+    selectionRange: range,
+    children: [],
+  }
+}
+
+function blockRange(node: BlockNode): Range {
+  if (!node.pos) {
+    return { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }
+  }
+  return {
+    start: { line: node.pos.startLine - 1, character: 0 },
+    end: { line: node.pos.endLine - 1, character: 200 },
   }
 }
 
@@ -258,6 +338,10 @@ function plainText(nodes: InlineNode[]): string {
     // An inline literal (§27) renders as visible prose, so it contributes its
     // verbatim content to the outline symbol name just as a code span does.
     else if (node.type === 'literal_inline') out += node.content
+    // A caption's resolved number. Without it a composite figure appeared in
+    // the outline as "Figure : Group caption", with the gap where the number
+    // the reader is looking for should be.
+    else if (node.type === 'caption_number') out += String(node.n)
     else if (node.type === 'symbol') out += `:${node.name}:`
     else if (node.type === 'mention') out += `@${node.user}`
     else if (node.type === 'tag') out += `#${node.name}`

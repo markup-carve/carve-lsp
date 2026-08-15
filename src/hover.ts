@@ -8,6 +8,7 @@ import {
   type Position as SourcePosition,
 } from '@markup-carve/carve'
 import { astColumnToCharacter, characterToAstColumn, sourceLines } from './position.js'
+import { captionTargetById, type CaptionTarget } from './captions.js'
 
 interface HoverRule {
   pattern: RegExp
@@ -97,7 +98,11 @@ function astHoverAt(doc: Document, position: Position, lines: string[]): Hover |
     character: characterToAstColumn(lines[position.line] ?? '', position.character) - 1,
   }
   const matches: Array<{ pos: SourcePosition; contents: string }> = []
-  for (const node of doc.children) collectBlock(matches, node, cursor)
+  // A crossref's help depends on what the id NAMES, so the whole document is in
+  // scope for it while every other rule reads one node. It is looked up through
+  // this resolver rather than from inside the inline walk.
+  const resolveRef: RefResolver = (id) => captionTargetById(doc, id)
+  for (const node of doc.children) collectBlock(matches, node, cursor, resolveRef)
   matches.sort((a, b) => spanSize(a.pos) - spanSize(b.pos))
   const match = matches[0]
   if (!match) return null
@@ -114,45 +119,46 @@ function collectBlock(
   matches: Array<{ pos: SourcePosition; contents: string }>,
   node: BlockNode,
   position: Position,
+  resolveRef: RefResolver,
 ): void {
   addMatch(matches, node.pos, position, blockContents(node))
   switch (node.type) {
     case 'heading':
-      collectInline(matches, node.children, position)
+      collectInline(matches, node.children, position, resolveRef)
       break
     case 'paragraph':
-      collectInline(matches, node.children, position)
+      collectInline(matches, node.children, position, resolveRef)
       break
     case 'block_quote':
-      node.children.forEach((child) => collectBlock(matches, child, position))
+      node.children.forEach((child) => collectBlock(matches, child, position, resolveRef))
       break
     case 'list':
-      node.items.forEach((item) => item.children.forEach((child) => collectBlock(matches, child, position)))
+      node.items.forEach((item) => item.children.forEach((child) => collectBlock(matches, child, position, resolveRef)))
       break
     case 'admonition':
     case 'div':
-      node.children.forEach((child) => collectBlock(matches, child, position))
-      if (node.type === 'admonition' && node.title) collectInline(matches, node.title, position)
+      node.children.forEach((child) => collectBlock(matches, child, position, resolveRef))
+      if (node.type === 'admonition' && node.title) collectInline(matches, node.title, position, resolveRef)
       break
     case 'definition_list':
       node.items.forEach((item) => {
-        item.terms.forEach((term) => collectInline(matches, term, position))
+        item.terms.forEach((term) => collectInline(matches, term, position, resolveRef))
         item.definitions.forEach((definition) =>
-          definition.forEach((child) => collectBlock(matches, child, position)),
+          definition.forEach((child) => collectBlock(matches, child, position, resolveRef)),
         )
       })
       break
     case 'figure':
-      collectBlock(matches, node.target, position)
-      collectInline(matches, node.caption, position)
+      collectBlock(matches, node.target, position, resolveRef)
+      collectInline(matches, node.caption, position, resolveRef)
       break
     case 'figure_group':
-      node.children.forEach((child) => collectBlock(matches, child, position))
-      if (node.caption) collectInline(matches, node.caption, position)
+      node.children.forEach((child) => collectBlock(matches, child, position, resolveRef))
+      if (node.caption) collectInline(matches, node.caption, position, resolveRef)
       break
     case 'table':
-      if (node.caption) collectInline(matches, node.caption, position)
-      node.rows.forEach((row) => row.cells.forEach((cell) => collectInline(matches, cell.children, position)))
+      if (node.caption) collectInline(matches, node.caption, position, resolveRef)
+      node.rows.forEach((row) => row.cells.forEach((cell) => collectInline(matches, cell.children, position, resolveRef)))
       break
   }
 }
@@ -161,13 +167,14 @@ function collectInline(
   matches: Array<{ pos: SourcePosition; contents: string }>,
   nodes: InlineNode[],
   position: Position,
+  resolveRef: RefResolver,
 ): void {
   for (const node of nodes) {
-    addMatch(matches, node.pos, position, inlineContents(node))
+    addMatch(matches, node.pos, position, inlineContents(node, resolveRef))
     const children = (node as { children?: InlineNode[] }).children
-    if (Array.isArray(children)) collectInline(matches, children, position)
+    if (Array.isArray(children)) collectInline(matches, children, position, resolveRef)
     const content = (node as { content?: InlineNode[] }).content
-    if (Array.isArray(content)) collectInline(matches, content, position)
+    if (Array.isArray(content)) collectInline(matches, content, position, resolveRef)
   }
 }
 
@@ -210,7 +217,7 @@ function blockContents(node: BlockNode): string | null {
   }
 }
 
-function inlineContents(node: InlineNode): string | null {
+function inlineContents(node: InlineNode, resolveRef: RefResolver): string | null {
   switch (node.type) {
     case 'strong':
       return '**Bold**\n\nCarve uses single asterisks for bold text: `*bold*`.'
@@ -240,9 +247,38 @@ function inlineContents(node: InlineNode): string | null {
       return '**Tag**\n\nTags use `#name`.'
     case 'span':
       return '**Span**\n\nInline spans use `[text]{attrs}`.'
+    case 'heading_ref':
+      return crossrefContents(node, resolveRef)
     default:
       return null
   }
+}
+
+type RefResolver = (id: string) => CaptionTarget | null
+
+/**
+ * A `</#id>` used to fall through this switch entirely, so the LEXICAL rules
+ * above took it and reported the `#` inside the reference as a heading marker.
+ * It now says what the reference resolves to, which for a composite figure's
+ * panel is the group's number plus its letter (PART 9 §4c).
+ *
+ * A heading target keeps the generic wording: the heading's own text is what
+ * the reference renders, and it is already on screen.
+ */
+function crossrefContents(node: InlineNode, resolveRef: RefResolver): string {
+  const generic =
+    '**Cross-reference**\n\nA `</#id>` reference links to the heading or captioned host carrying that id.'
+  const id = (node as { target?: unknown }).target
+  if (typeof id !== 'string') return generic
+  const target = resolveRef(id)
+  if (!target) return generic
+  if (target.text === null) {
+    return (
+      '**Cross-reference**\n\nAn unnumbered ' + target.kind + '. It is an anchor, but it drew no ' +
+      'number, so this reference has no caption text to render.'
+    )
+  }
+  return '**Cross-reference**\n\nResolves to **' + target.text + '** (' + target.kind + ').'
 }
 
 function contains(pos: SourcePosition, position: Position): boolean {
