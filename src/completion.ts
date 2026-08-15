@@ -4,6 +4,7 @@ import {
   type Position,
 } from 'vscode-languageserver/node.js'
 import { parse, resolve, type BlockNode, type Document } from '@markup-carve/carve'
+import { captionTargets, type CaptionTarget } from './captions.js'
 
 /** The eight canonical admonition kinds (grammar PART 9 §12, Tier 1). */
 const ADMONITIONS = ['note', 'tip', 'warning', 'danger', 'info', 'success', 'example', 'quote']
@@ -38,9 +39,17 @@ export function completionAt(source: string, position: Position): CompletionItem
     ]
   }
   if ((match = /<\/#([\w-]*)$/.exec(prefix))) {
-    return headingIds(source).map((id) =>
-      completion(id, CompletionItemKind.Reference, match![1], position, 'Heading id'),
-    )
+    // A crossref reaches a captioned host as well as a heading (PART 9R R4).
+    // Offering only heading ids said the others were not targets, which is the
+    // reading that made a `</#fig>` naming a figure look like a typo.
+    return [
+      ...headingIds(source).map((id) =>
+        completion(id, CompletionItemKind.Reference, match![1], position, 'Heading id'),
+      ),
+      ...resolvableCaptionIds(source).map(({ id, detail }) =>
+        completion(id, CompletionItemKind.Reference, match![1], position, detail),
+      ),
+    ]
   }
   if ((match = /\[\^([\w-]*)$/.exec(prefix))) {
     return footnoteLabels(source).map((label) =>
@@ -89,6 +98,33 @@ function headingIds(source: string): string[] {
     // Parsing may fail mid-edit; offer no ids rather than throwing.
   }
   return [...new Set(ids)]
+}
+
+/**
+ * The caption ids a `</#…>` can actually RESOLVE, each with what it resolves to
+ * - "Figure 2" beside "Figure 2a", so the list distinguishes a group from its
+ * panels without the author having to remember which is which.
+ *
+ * A host that drew NO number is left out. Its id is a real anchor, and a
+ * `[text](#id)` fragment link reaches it, but a CROSSREF to it renders as
+ * literal text (PART 9 §4c: an unnumbered group's panels are anchors, not
+ * caption crossref targets). Every heading id this list offers resolves, and a
+ * caption id that did not would be the one entry that quietly does not work.
+ */
+function resolvableCaptionIds(source: string): Array<{ id: string; detail: string }> {
+  let targets: CaptionTarget[]
+  try {
+    targets = captionTargets(resolve(parse(source, { positions: true })))
+  } catch {
+    // Parsing may fail mid-edit; offer no ids rather than throwing.
+    return []
+  }
+  const resolvable: Array<{ id: string; detail: string }> = []
+  for (const target of targets) {
+    if (target.text === null) continue
+    resolvable.push({ id: target.id, detail: `${target.text} (${target.kind})` })
+  }
+  return resolvable
 }
 
 function footnoteLabels(source: string): string[] {

@@ -2,13 +2,15 @@ import { type Location, type Position } from 'vscode-languageserver/node.js'
 import { parse, resolve, type BlockNode, type Document, type InlineNode } from '@markup-carve/carve'
 import { astColumnToCharacter, sourceLines } from './position.js'
 import { smartPunctuationText } from './inline-text.js'
+import { captionTargetById } from './captions.js'
 import { includeDefinitionAt } from './include-definition.js'
 import type { IncludeOptions } from './includes.js'
 
 /**
  * Go-to-definition for Carve constructs:
  *
- * - Cross-reference  `</#id>`         -> the heading whose generated id is `id`
+ * - Cross-reference  `</#id>`         -> the heading whose generated id is `id`,
+ *                                       or the captioned host carrying it
  * - Fragment link    `[text](#id)`     -> same (href starts with `#`)
  * - Footnote ref     `[^name]`         -> the `[^name]:` definition line
  * - Link reference   `[text][ref]`     -> the `[ref]:` definition line
@@ -115,13 +117,19 @@ function resolveCrossrefAt(uri: string, source: string, line: string, position: 
 function findHeadingById(uri: string, source: string, targetId: string): Location | null {
   let doc: Document
   try {
-    doc = resolve(parse(source))
+    doc = resolve(parse(source, { positions: true }))
   } catch {
     return null
   }
 
   const heading = findHeadingWithId(doc.children, targetId.toLowerCase())
-  if (!heading || !heading.pos) return null
+  if (!heading || !heading.pos) {
+    // A crossref reaches a CAPTIONED HOST as well - a figure, a table, a
+    // composite figure or one of its panels (PART 9R R4). Only headings were
+    // searched here, so `</#fig>` jumped nowhere on a construct that predates
+    // composite figures entirely.
+    return findCaptionById(uri, doc, targetId)
+  }
 
   const line = heading.pos.startLine - 1
   return {
@@ -140,6 +148,18 @@ function findHeadingById(uri: string, source: string, targetId: string): Locatio
       },
     },
   }
+}
+
+/**
+ * The host's own first line. A captioned host has no single "definition line"
+ * the way a heading does - its id sits on a block-attribute line above it, its
+ * caption below it - so the jump lands on the host itself, which is the line an
+ * author is looking for.
+ */
+function findCaptionById(uri: string, doc: Document, targetId: string): Location | null {
+  const target = captionTargetById(doc, targetId)
+  if (!target?.pos) return null
+  return locationAtLine(uri, target.pos.startLine - 1)
 }
 
 function findHeadingWithId(

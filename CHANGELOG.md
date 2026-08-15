@@ -19,6 +19,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   separately because it is not a ninth one. An opener carrying a title or a
   `[label]` is unchanged and still an admonition.
 
+- **A cross-reference reaches a captioned host, not only a heading** (spec PART
+  9R R4, markup-carve/carve-lsp#79). `</#id>` naming a figure, a table, a
+  composite figure or one of its panels now completes, jumps to its host, finds
+  its usages, and hovers with the text it resolves to - "Figure 2" for a group,
+  "Figure 2a" for its first panel. Every crossref feature walked headings only
+  before this, so a reference to a plain captioned figure - a construct that
+  predates composite figures entirely - offered no completion and jumped
+  nowhere. Hovering one reported it as a heading, because no case existed for
+  the reference and the lexical fallback matched the `#` inside it.
+
+  The number is the engine's own resolved `caption_number`; only the panel
+  letter (a..z, then aa) is derived here, and the tests pin it against the
+  anchor text the engine renders for the same id. An unnumbered group's panels
+  stay anchors without crossref text, which is what PART 9 §4c says they are,
+  and completion leaves such an id out rather than offering a reference that
+  renders as literal text. Find-references answers from the declaration too -
+  the block-attribute line above a captioned host, which is where its id is
+  actually written - and not only from a usage.
+
+- **The outline carries a composite figure and nests its panels.** The group is
+  named by its caption, says how many panels it holds, and hangs under the
+  section it appears in - a group takes no heading level, so it never closes
+  one. A panel is named by its own caption, falling back to the letter a
+  crossref would use for it.
+
 ### Changed
 
 - The `@markup-carve/carve` dependency tracks a carve-js commit rather than the
