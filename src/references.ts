@@ -1,7 +1,7 @@
 import { type Location, type Position, type ReferenceContext } from 'vscode-languageserver/node.js'
 import { parse, resolve, type BlockNode, type Document } from '@markup-carve/carve'
 import { smartPunctuationText } from './inline-text.js'
-import { captionTargetById } from './captions.js'
+import { captionTargetById, captionTargets } from './captions.js'
 
 /**
  * Find-references for Carve constructs (same-document scope).
@@ -11,6 +11,7 @@ import { captionTargetById } from './captions.js'
  *
  * Supported families, mirroring definition.ts:
  * - Heading id  (on `#` heading line or on a `</#id>` / `[text](#id)` usage)
+ * - Caption id  (on a captioned host or its attribute line, or on a usage)
  * - Footnote    `[^name]` references and `[^name]:` definition
  * - Link-ref    `[text][ref]` / `[ref][]` usages and `[ref]:` definition
  * - Citation    `[@key]` usages and `[@key]:` definition
@@ -93,6 +94,42 @@ function resolveHeadingGroup(
     return collectHeadingRefs(uri, source, lines, id, defLine, context)
   }
 
+  // Cursor on the DECLARATION of a captioned host. A heading declares its id on
+  // its own line, and asking there works; a captioned host declares it on the
+  // block-attribute line ABOVE itself, and asking there answered nothing - so
+  // the feature was reachable from a usage only, which is half of what this
+  // module documents.
+  const declared = captionIdDeclaredAt(source, position.line)
+  if (declared !== null) {
+    const defLine = findHeadingLineById(source, declared)
+    if (defLine === null) return []
+    return collectHeadingRefs(uri, source, lines, declared, defLine, context)
+  }
+
+  return null
+}
+
+/**
+ * The caption id a source line DECLARES: the host's own first line, or the
+ * block-attribute line immediately above it, which is where the id is actually
+ * written. The attribute line sits OUTSIDE the host's span, so it cannot be
+ * found by containment and is matched by adjacency instead.
+ */
+function captionIdDeclaredAt(source: string, lineIndex: number): string | null {
+  let doc: Document
+  try {
+    doc = resolve(parse(source, { positions: true }))
+  } catch {
+    return null
+  }
+  for (const target of captionTargets(doc)) {
+    if (!target.pos) continue
+    const hostLine = target.pos.startLine - 1
+    if (lineIndex === hostLine) return target.id
+    if (lineIndex === hostLine - 1 && /^\s*\{.*\}\s*$/.test(source.split(/\r?\n/)[lineIndex] ?? '')) {
+      return target.id
+    }
+  }
   return null
 }
 

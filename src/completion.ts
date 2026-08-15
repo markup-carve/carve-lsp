@@ -46,14 +46,8 @@ export function completionAt(source: string, position: Position): CompletionItem
       ...headingIds(source).map((id) =>
         completion(id, CompletionItemKind.Reference, match![1], position, 'Heading id'),
       ),
-      ...captionIds(source).map((target) =>
-        completion(
-          target.id,
-          CompletionItemKind.Reference,
-          match![1],
-          position,
-          captionDetail(target),
-        ),
+      ...resolvableCaptionIds(source).map(({ id, detail }) =>
+        completion(id, CompletionItemKind.Reference, match![1], position, detail),
       ),
     ]
   }
@@ -106,24 +100,31 @@ function headingIds(source: string): string[] {
   return [...new Set(ids)]
 }
 
-function captionIds(source: string): CaptionTarget[] {
+/**
+ * The caption ids a `</#…>` can actually RESOLVE, each with what it resolves to
+ * - "Figure 2" beside "Figure 2a", so the list distinguishes a group from its
+ * panels without the author having to remember which is which.
+ *
+ * A host that drew NO number is left out. Its id is a real anchor, and a
+ * `[text](#id)` fragment link reaches it, but a CROSSREF to it renders as
+ * literal text (PART 9 §4c: an unnumbered group's panels are anchors, not
+ * caption crossref targets). Every heading id this list offers resolves, and a
+ * caption id that did not would be the one entry that quietly does not work.
+ */
+function resolvableCaptionIds(source: string): Array<{ id: string; detail: string }> {
+  let targets: CaptionTarget[]
   try {
-    return captionTargets(resolve(parse(source, { positions: true })))
+    targets = captionTargets(resolve(parse(source, { positions: true })))
   } catch {
     // Parsing may fail mid-edit; offer no ids rather than throwing.
     return []
   }
-}
-
-/**
- * What the id resolves to, so the list distinguishes the group from its panels
- * without the author having to remember which is which: "Figure 2" beside
- * "Figure 2a". A host that drew no number says what it is instead - there is no
- * text for the reference to render, and §4c makes that deliberate.
- */
-function captionDetail(target: CaptionTarget): string {
-  if (target.text === null) return `Unnumbered ${target.kind}`
-  return `${target.text} (${target.kind})`
+  const resolvable: Array<{ id: string; detail: string }> = []
+  for (const target of targets) {
+    if (target.text === null) continue
+    resolvable.push({ id: target.id, detail: `${target.text} (${target.kind})` })
+  }
+  return resolvable
 }
 
 function footnoteLabels(source: string): string[] {

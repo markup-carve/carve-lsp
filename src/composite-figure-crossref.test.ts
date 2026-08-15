@@ -154,6 +154,39 @@ test('crossref completion offers caption ids beside heading ids', () => {
   assert.equal(detail('two'), 'Figure 2b (panel)')
 })
 
+test('an unnumbered host is not offered as a crossref target', () => {
+  // Every id `</#` offers has to RESOLVE. An unnumbered host is a real anchor
+  // and a fragment link reaches it, but a crossref to it renders as literal
+  // text, so offering it here would be the one entry in the list that does not
+  // work - the heading ids beside it all do.
+  const source = `{#ug}\n::: figure\n{#u1}\n![u](u.png)\n^ (a) U\n:::\n^ No number here\n\nSee </#`
+  const labels = completionAt(source, { line: 8, character: 7 }).map((item) => item.label)
+  assert.deepEqual(labels, [])
+})
+
+test('find-references works from the declaration as well as from a usage', () => {
+  // A heading declares its id on its own line; a captioned host declares it on
+  // the block-attribute line ABOVE itself. Both are where an author puts the
+  // cursor to ask "what points at this?".
+  const fromAttributeLine = referencesAt('file:///d.crv', DOC, { line: 6, character: 2 }, {
+    includeDeclaration: false,
+  })
+  const fromHostLine = referencesAt('file:///d.crv', DOC, { line: 7, character: 2 }, {
+    includeDeclaration: false,
+  })
+  assert.deepEqual(fromAttributeLine?.map((location) => location.range.start.line), [REF_LINE])
+  assert.deepEqual(fromHostLine?.map((location) => location.range.start.line), [REF_LINE])
+})
+
+test('an ordinary line declares nothing', () => {
+  // CONTROL. The declaration lookup keys on the host's own position, so a line
+  // that merely holds a brace - or the stray paragraph inside the group - must
+  // not be read as declaring the host below it.
+  assert.equal(referencesAt('file:///d.crv', DOC, { line: 12, character: 2 }, {
+    includeDeclaration: false,
+  }), null)
+})
+
 test('the outline carries the group and nests its panels', () => {
   const symbols = analyzeCarve(DOC).symbols
   assert.equal(symbols.length, 1, 'the heading is still the only root')

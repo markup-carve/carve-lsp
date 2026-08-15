@@ -32,7 +32,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   The number is the engine's own resolved `caption_number`; only the panel
   letter (a..z, then aa) is derived here, and the tests pin it against the
   anchor text the engine renders for the same id. An unnumbered group's panels
-  stay anchors without crossref text, which is what PART 9 §4c says they are.
+  stay anchors without crossref text, which is what PART 9 §4c says they are,
+  and completion leaves such an id out rather than offering a reference that
+  renders as literal text. Find-references answers from the declaration too -
+  the block-attribute line above a captioned host, which is where its id is
+  actually written - and not only from a usage.
 
 - **The outline carries a composite figure and nests its panels.** The group is
   named by its caption, says how many panels it holds, and hangs under the
