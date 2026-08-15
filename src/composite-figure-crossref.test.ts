@@ -236,6 +236,20 @@ test('the outline carries the group and nests its panels', () => {
   assert.deepEqual(group.children?.map((panel) => panel.name), ['(a) One', '(b) Two'])
 })
 
+test('a heading inside a panel stays in the outline', () => {
+  // CONTROL for the group's own entry. A panel yields no outline entry of its
+  // own, but the walk still descends through it: a panel can wrap a quote
+  // holding headings, and those belong to the section the group sits in - which
+  // is where they were before the group had an entry at all.
+  const symbols = analyzeCarve(
+    '# Section\n\n::: figure\n> ## Inside a panel\n>\n> Quoted.\n^ (a) A\n:::\n^ Figure #: g\n',
+  ).symbols
+  assert.deepEqual(
+    symbols[0]!.children?.map((child) => child.name),
+    ['Figure 1: g', 'Inside a panel'],
+  )
+})
+
 test('a group with no caption is still an outline entry, named for what it is', () => {
   const symbols = analyzeCarve('::: figure\n![a](a.png)\n^ (a) A\n:::\n').symbols
   assert.deepEqual(symbols.map((symbol) => symbol.name), ['Composite figure'])

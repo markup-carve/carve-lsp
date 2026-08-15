@@ -243,10 +243,11 @@ function* walkOutline(nodes: BlockNode[]): Iterable<OutlineEntry> {
     if (node.type === 'heading') yield node
     if (node.type === 'figure_group') {
       yield node
-      // Its panels ride on the group's own symbol, but a heading inside the
-      // group's stray content is still a heading and still belongs to the
-      // section it sits in.
-      yield* walkOutline(node.children.filter((child) => !isPanel(child)))
+      // Its panels ride on the group's own symbol - a `figure` or `table`
+      // yields no entry of its own here - but the walk still DESCENDS through
+      // them. A panel can wrap a quote holding headings, and skipping the panel
+      // node dropped those headings out of the outline entirely.
+      yield* walkOutline(node.children)
       continue
     }
     if ('children' in node && Array.isArray(node.children)) {
