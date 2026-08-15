@@ -178,13 +178,32 @@ test('find-references works from the declaration as well as from a usage', () =>
   assert.deepEqual(fromHostLine?.map((location) => location.range.start.line), [REF_LINE])
 })
 
-test('an ordinary line declares nothing', () => {
-  // CONTROL. The declaration lookup keys on the host's own position, so a line
-  // that merely holds a brace - or the stray paragraph inside the group - must
-  // not be read as declaring the host below it.
-  assert.equal(referencesAt('file:///d.crv', DOC, { line: 12, character: 2 }, {
-    includeDeclaration: false,
-  }), null)
+test('a declaration inside a container still declares', () => {
+  // The id's line is not always a bare `{#id}` at column 0. A shape test on it
+  // reads like a safety check and is not one - a host only has an id because a
+  // block-attribute line gave it one - so it can only reject a right answer.
+  const quoted = '> {#fig}\n> ![a](a.png)\n> ^ Figure #: A\n\nSee </#fig>.\n'
+  assert.deepEqual(
+    referencesAt('file:///d.crv', quoted, { line: 0, character: 3 }, { includeDeclaration: false })
+      ?.map((location) => location.range.start.line),
+    [4],
+  )
+})
+
+test('a line that declares no id declares nothing', () => {
+  // CONTROL. The lookup keys on hosts that CARRY an id, not on hosts. An
+  // uncaptioned-id figure has no entry, so the prose above it is just prose.
+  assert.equal(
+    referencesAt('file:///d.crv', 'Prose.\n![a](a.png)\n^ Figure #: A\n', { line: 0, character: 2 }, {
+      includeDeclaration: false,
+    }),
+    null,
+  )
+  // And a line nowhere near a host answers nothing either.
+  assert.equal(
+    referencesAt('file:///d.crv', DOC, { line: 12, character: 2 }, { includeDeclaration: false }),
+    null,
+  )
 })
 
 test('the outline carries the group and nests its panels', () => {

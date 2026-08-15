@@ -110,10 +110,18 @@ function resolveHeadingGroup(
 }
 
 /**
- * The caption id a source line DECLARES: the host's own first line, or the
- * block-attribute line immediately above it, which is where the id is actually
- * written. The attribute line sits OUTSIDE the host's span, so it cannot be
- * found by containment and is matched by adjacency instead.
+ * The caption id a source line DECLARES: the host's own first line, or the line
+ * immediately above it, which is where the id is written. The attribute line
+ * sits OUTSIDE the host's span, so it is matched by adjacency rather than by
+ * containment.
+ *
+ * NO SHAPE TEST ON THE LINE ABOVE, deliberately. A `/^\s*\{.*\}\s*$/` guard
+ * reads like a safety check and is not one: a host only HAS an id because a
+ * block-attribute line gave it one, so the line above a host in this list is
+ * that line by construction, and the guard can only ever reject a spelling of
+ * it - `> {#fig}` inside a block quote, which the anchored brace does not
+ * match. A check that cannot reject a wrong answer and can reject a right one
+ * is worse than no check.
  */
 function captionIdDeclaredAt(source: string, lineIndex: number): string | null {
   let doc: Document
@@ -125,10 +133,7 @@ function captionIdDeclaredAt(source: string, lineIndex: number): string | null {
   for (const target of captionTargets(doc)) {
     if (!target.pos) continue
     const hostLine = target.pos.startLine - 1
-    if (lineIndex === hostLine) return target.id
-    if (lineIndex === hostLine - 1 && /^\s*\{.*\}\s*$/.test(source.split(/\r?\n/)[lineIndex] ?? '')) {
-      return target.id
-    }
+    if (lineIndex === hostLine || lineIndex === hostLine - 1) return target.id
   }
   return null
 }
