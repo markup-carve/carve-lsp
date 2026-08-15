@@ -74,7 +74,9 @@ function resolveHeadingGroup(
   const headingMatch = /^(#{1,6})\s+/.exec(line)
   if (headingMatch) {
     const id = getHeadingId(source, position.line)
-    if (id) return collectHeadingRefs(uri, source, lines, id, position.line, context)
+    if (id) {
+      return collectRefs(uri, source, lines, id, { line: position.line, kind: 'heading' }, context)
+    }
   }
 
   // Cursor on </#id>
@@ -84,9 +86,9 @@ function resolveHeadingGroup(
     const end = start + m[0].length
     if (position.character < start || position.character >= end) continue
     const id = m[1]!
-    const defLine = findHeadingLineById(source, id)
-    if (defLine === null) return []
-    return collectHeadingRefs(uri, source, lines, id, defLine, context)
+    const declaration = findDeclarationById(source, id)
+    if (declaration === null) return []
+    return collectRefs(uri, source, lines, id, declaration, context)
   }
 
   // Cursor on [text](#id)
@@ -96,9 +98,9 @@ function resolveHeadingGroup(
     const end = start + m[0].length
     if (position.character < start || position.character >= end) continue
     const id = m[1]!
-    const defLine = findHeadingLineById(source, id)
-    if (defLine === null) return []
-    return collectHeadingRefs(uri, source, lines, id, defLine, context)
+    const declaration = findDeclarationById(source, id)
+    if (declaration === null) return []
+    return collectRefs(uri, source, lines, id, declaration, context)
   }
 
   return null
@@ -127,9 +129,9 @@ function resolveCaptionDeclarationGroup(
 ): Location[] | null {
   const declared = captionIdDeclaredAt(source, position.line)
   if (declared === null) return null
-  const defLine = findHeadingLineById(source, declared)
-  if (defLine === null) return []
-  return collectHeadingRefs(uri, source, lines, declared, defLine, context)
+  const declaration = findDeclarationById(source, declared)
+  if (declaration === null) return []
+  return collectRefs(uri, source, lines, declared, declaration, context)
 }
 
 /**
@@ -187,11 +189,20 @@ function findHeadingAtLine(
 }
 
 /**
- * The line a crossref id is declared on: a heading's own line, or a captioned
- * host's first line. Headings alone were searched here, so asking for the
- * usages of a figure id found the group and then returned nothing.
+ * Where a crossref id is declared, and WHAT declares it: a heading's own line,
+ * or a captioned host's first line. Headings alone were searched here, so
+ * asking for the usages of a figure id found the group and then returned
+ * nothing.
+ *
+ * The kind is not decoration. A COLLAPSED reference `[text][]` falls back to
+ * the implicit HEADING target (PART 9R R1) and to nothing else - `[foo][]`
+ * beside a figure `{#foo}` renders as literal text - so the usage scan that
+ * looks for it must run for one kind and not the other.
  */
-function findHeadingLineById(source: string, targetId: string): number | null {
+function findDeclarationById(
+  source: string,
+  targetId: string,
+): { line: number; kind: 'heading' | 'caption' } | null {
   let doc: Document
   try {
     doc = resolve(parse(source, { positions: true }))
@@ -199,9 +210,10 @@ function findHeadingLineById(source: string, targetId: string): number | null {
     return null
   }
   const heading = findHeadingWithId(doc.children, targetId.toLowerCase())
-  if (heading?.pos) return heading.pos.startLine - 1
+  if (heading?.pos) return { line: heading.pos.startLine - 1, kind: 'heading' }
   const caption = captionTargetById(doc, targetId)
-  return caption?.pos ? caption.pos.startLine - 1 : null
+  if (caption?.pos) return { line: caption.pos.startLine - 1, kind: 'caption' }
+  return null
 }
 
 function findHeadingWithId(
@@ -221,17 +233,28 @@ function findHeadingWithId(
   return null
 }
 
-function collectHeadingRefs(
+/**
+ * Every usage of an id, for a declaration that may be a heading or a captioned
+ * host.
+ *
+ * The families differ in exactly one usage form. A COLLAPSED reference
+ * `[text][]` falls back to the implicit HEADING target (PART 9R R1) and to
+ * nothing else, so `[foo][]` beside a figure `{#foo}` renders as literal text
+ * rather than reaching the figure. Reporting it as a usage of the figure would
+ * be a reference the author cannot follow and did not write.
+ */
+function collectRefs(
   uri: string,
   source: string,
   lines: string[],
   id: string,
-  defLine: number,
+  declaration: { line: number; kind: 'heading' | 'caption' },
   context: ReferenceContext,
 ): Location[] {
   const locs: Location[] = []
+  const defLine = declaration.line
 
-  // Optionally include the definition (the heading line itself)
+  // Optionally include the definition (the declaring line itself)
   if (context.includeDeclaration) {
     locs.push(lineLocation(uri, defLine, 0, lines[defLine]?.length ?? 0))
   }
@@ -262,12 +285,15 @@ function collectHeadingRefs(
   // These are resolved to `href` in the AST, so we check the link pool from
   // semantic analysis. For simplicity we scan for [text][] where text lowercased
   // matches the heading id (djot implicit ref: whitespace-collapsed, lowercase).
-  const implicitRefRe = /\[([^\]\n]+)\]\[\]/g
-  for (let i = 0; i < lines.length; i++) {
-    for (const m of lines[i]!.matchAll(implicitRefRe)) {
-      const slug = m[1]!.trim().toLowerCase().replace(/\s+/g, '-')
-      if (slug === idLower) {
-        locs.push(lineLocation(uri, i, m.index!, m.index! + m[0].length))
+  // HEADINGS ONLY - see the note on this function.
+  if (declaration.kind === 'heading') {
+    const implicitRefRe = /\[([^\]\n]+)\]\[\]/g
+    for (let i = 0; i < lines.length; i++) {
+      for (const m of lines[i]!.matchAll(implicitRefRe)) {
+        const slug = m[1]!.trim().toLowerCase().replace(/\s+/g, '-')
+        if (slug === idLower) {
+          locs.push(lineLocation(uri, i, m.index!, m.index! + m[0].length))
+        }
       }
     }
   }

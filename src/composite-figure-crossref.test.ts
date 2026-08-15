@@ -225,6 +225,27 @@ test('a construct on the declaration line still wins', () => {
   assert.deepEqual(onHost?.map((location) => location.range.start.line), [])
 })
 
+test('a collapsed reference is not a usage of a caption id', () => {
+  // `[foo][]` falls back to the implicit HEADING target and to nothing else
+  // (PART 9R R1): beside a figure `{#foo}` it renders as literal text, so
+  // reporting it as a usage would be a reference the author cannot follow.
+  const source = '{#foo}\n![a](a.png)\n^ Figure #: Foo\n\nSee [foo][] and </#foo>.\n'
+  const locations = referencesAt('file:///d.crv', source, { line: 4, character: 22 }, {
+    includeDeclaration: false,
+  })
+  assert.deepEqual(locations?.map((location) => location.range.start.character), [16])
+})
+
+test('a collapsed reference IS a usage of a heading id', () => {
+  // CONTROL. The scan is not removed, it is scoped: the same spelling still
+  // reaches a heading, which is the target it actually resolves to.
+  const source = '# Foo\n\nSee [foo][] and </#Foo>.\n'
+  const locations = referencesAt('file:///d.crv', source, { line: 2, character: 20 }, {
+    includeDeclaration: false,
+  })
+  assert.deepEqual(locations?.map((location) => location.range.start.character), [16, 4])
+})
+
 test('the outline carries the group and nests its panels', () => {
   const symbols = analyzeCarve(DOC).symbols
   assert.equal(symbols.length, 1, 'the heading is still the only root')
