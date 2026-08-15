@@ -9,8 +9,17 @@ import { parse, resolve, type BlockNode, type Document } from '@markup-carve/car
 const ADMONITIONS = ['note', 'tip', 'warning', 'danger', 'info', 'success', 'example', 'quote']
 
 /**
+ * `figure` is not one of them. It is RESERVED among the `:::` types (PART 9
+ * §4c): a BARE `::: figure` opener is one figure of ordered panels, and the same
+ * word with a title or a `[label]` is an ordinary container. Offering it beside
+ * the eight would say it is a ninth admonition, so it is offered separately and
+ * labelled for what it opens.
+ */
+const FIGURE_GROUP = 'figure'
+
+/**
  * Context-aware completions driven by the text immediately before the cursor:
- *   - `::: ` opens an admonition -> canonical kinds
+ *   - `::: ` opens a container   -> canonical admonition kinds, and `figure`
  *   - `</#`  cross-reference     -> heading ids in the document
  *   - `[^`   footnote reference  -> defined footnote labels
  *   - `][`   reference link      -> defined link reference labels
@@ -21,9 +30,12 @@ export function completionAt(source: string, position: Position): CompletionItem
 
   let match: RegExpExecArray | null
   if ((match = /:::\s*([\w-]*)$/.exec(prefix))) {
-    return ADMONITIONS.map((kind) =>
-      completion(kind, CompletionItemKind.Keyword, match![1], position, 'Admonition kind'),
-    )
+    return [
+      ...ADMONITIONS.map((kind) =>
+        completion(kind, CompletionItemKind.Keyword, match![1], position, 'Admonition kind'),
+      ),
+      completion(FIGURE_GROUP, CompletionItemKind.Struct, match![1], position, 'Composite figure'),
+    ]
   }
   if ((match = /<\/#([\w-]*)$/.exec(prefix))) {
     return headingIds(source).map((id) =>

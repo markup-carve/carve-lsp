@@ -138,6 +138,18 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode): void {
       collectFigureTarget(tokens, lines, node.target)
       collectInline(tokens, lines, node.caption)
       break
+    // A composite figure (PART 9 §4c): one figure of ordered panels, opened by a
+    // BARE `::: figure` fence. Its opener carries the reserved kind word, so the
+    // prefix is scoped `type` exactly as an admonition's is - the two are the
+    // same shape on the line and a client colouring one should colour the other.
+    // The caption is the group's, and it sits AFTER the closing fence rather than
+    // inside the container, which is why it is collected here beside the children
+    // and not from any one of them.
+    case 'figure_group':
+      pushLinePrefix(tokens, lines, node.pos, /^\s*:{3,}\s*figure/, 'type')
+      for (const child of node.children) collectBlock(tokens, lines, child)
+      if (node.caption) collectInline(tokens, lines, node.caption)
+      break
     case 'table':
       pushPosition(tokens, lines, node.pos, 'string')
       if (node.caption) collectInline(tokens, lines, node.caption)
