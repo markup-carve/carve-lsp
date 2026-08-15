@@ -11,7 +11,8 @@ import { captionTargetById, captionTargets } from './captions.js'
  *
  * Supported families, mirroring definition.ts:
  * - Heading id  (on `#` heading line or on a `</#id>` / `[text](#id)` usage)
- * - Caption id  (on a captioned host or its attribute line, or on a usage)
+ * - Caption id  (on a `</#id>` usage, or on a captioned host's own declaration
+ *                line - matched LAST, so a construct on that line still wins)
  * - Footnote    `[^name]` references and `[^name]:` definition
  * - Link-ref    `[text][ref]` / `[ref][]` usages and `[ref]:` definition
  * - Citation    `[@key]` usages and `[@key]:` definition
@@ -47,6 +48,12 @@ export function referencesAt(
   // 5. Wikilink
   const wikilinkResult = resolveWikilinkGroup(uri, source, lines, line, position, context)
   if (wikilinkResult) return wikilinkResult
+
+  // 6. A captioned host's own declaration line. LAST, because it is the only
+  //    family matched by line rather than by a construct under the cursor - see
+  //    resolveCaptionDeclarationGroup.
+  const captionResult = resolveCaptionDeclarationGroup(uri, source, lines, position, context)
+  if (captionResult) return captionResult
 
   return null
 }
@@ -94,19 +101,35 @@ function resolveHeadingGroup(
     return collectHeadingRefs(uri, source, lines, id, defLine, context)
   }
 
-  // Cursor on the DECLARATION of a captioned host. A heading declares its id on
-  // its own line, and asking there works; a captioned host declares it on the
-  // block-attribute line ABOVE itself, and asking there answered nothing - so
-  // the feature was reachable from a usage only, which is half of what this
-  // module documents.
-  const declared = captionIdDeclaredAt(source, position.line)
-  if (declared !== null) {
-    const defLine = findHeadingLineById(source, declared)
-    if (defLine === null) return []
-    return collectHeadingRefs(uri, source, lines, declared, defLine, context)
-  }
-
   return null
+}
+
+/**
+ * Cursor on the DECLARATION of a captioned host. A heading declares its id on
+ * its own line, and asking there works; a captioned host declares it on the
+ * block-attribute line ABOVE itself, and asking there answered nothing - so the
+ * feature was reachable from a usage only, which is half of what this module
+ * documents.
+ *
+ * IT RUNS LAST, and that ordering is the rule rather than an accident. This is
+ * the only family matched by LINE rather than by a construct under the cursor,
+ * so it answers for every column on that line - including a column holding
+ * something else. A host line can carry a reference image (`![alt][img]`), and
+ * running this before the link-reference family answered the FIGURE's
+ * references for a cursor sitting on `img`.
+ */
+function resolveCaptionDeclarationGroup(
+  uri: string,
+  source: string,
+  lines: string[],
+  position: Position,
+  context: ReferenceContext,
+): Location[] | null {
+  const declared = captionIdDeclaredAt(source, position.line)
+  if (declared === null) return null
+  const defLine = findHeadingLineById(source, declared)
+  if (defLine === null) return []
+  return collectHeadingRefs(uri, source, lines, declared, defLine, context)
 }
 
 /**

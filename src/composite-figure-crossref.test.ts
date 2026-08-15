@@ -206,6 +206,25 @@ test('a line that declares no id declares nothing', () => {
   )
 })
 
+test('a construct on the declaration line still wins', () => {
+  // CONTROL for the declaration lookup, which is matched by LINE and so
+  // answers for every column on it. A host line can carry a reference image,
+  // and asking on its label must reach the link-reference definition rather
+  // than the figure that happens to wrap it.
+  const source = '{#fig}\n![alt][img]\n^ Figure #: C\n\n[img]: pic.png\n\nAgain [x][img].\n'
+  const onLabel = referencesAt('file:///d.crv', source, { line: 1, character: 8 }, {
+    includeDeclaration: true,
+  })
+  assert.deepEqual(onLabel?.map((location) => location.range.start.line), [1, 4, 6])
+
+  // The same line still declares the figure where nothing else claims the
+  // cursor - here, on the `!` that opens the image.
+  const onHost = referencesAt('file:///d.crv', source, { line: 0, character: 2 }, {
+    includeDeclaration: false,
+  })
+  assert.deepEqual(onHost?.map((location) => location.range.start.line), [])
+})
+
 test('the outline carries the group and nests its panels', () => {
   const symbols = analyzeCarve(DOC).symbols
   assert.equal(symbols.length, 1, 'the heading is still the only root')
