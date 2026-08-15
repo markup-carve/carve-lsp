@@ -146,6 +146,10 @@ function collectBlock(
       collectBlock(matches, node.target, position)
       collectInline(matches, node.caption, position)
       break
+    case 'figure_group':
+      node.children.forEach((child) => collectBlock(matches, child, position))
+      if (node.caption) collectInline(matches, node.caption, position)
+      break
     case 'table':
       if (node.caption) collectInline(matches, node.caption, position)
       node.rows.forEach((row) => row.cells.forEach((cell) => collectInline(matches, cell.children, position)))
@@ -195,6 +199,12 @@ function blockContents(node: BlockNode): string | null {
       return '**Admonition**\n\nTyped `:::` fences create admonition blocks.'
     case 'div':
       return '**Div**\n\nBare `:::` fences create generic container blocks.'
+    case 'figure_group':
+      return (
+        '**Composite Figure**\n\nA bare `::: figure` fence is one figure of ordered panels. ' +
+        'The `^ ` line after the closing fence captions the whole group. ' +
+        'An opener carrying a title or a `[label]` stays a generic container instead.'
+      )
     default:
       return null
   }

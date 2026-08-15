@@ -13,6 +13,9 @@ const FOLDABLE = new Set<BlockNode['type']>([
   'div',
   'definition_list',
   'figure',
+  // A composite figure is a fenced container like any other, and a long one is
+  // exactly what a reader wants to collapse (PART 9 §4c).
+  'figure_group',
 ])
 
 /**

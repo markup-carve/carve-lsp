@@ -6,7 +6,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Composite figures are a container the server knows** (spec PART 9 §4c,
+  markup-carve/carve#1215). A bare `::: figure` fence parses to a `figure_group`
+  node, which the server had no case for, so the container silently stopped
+  folding, hovering and producing semantic tokens. It now folds like any other
+  fenced container, hovers with its own description, and its opener carries the
+  reserved kind word as a `type` token - including the `^ ` caption below the
+  CLOSING fence, which belongs to the group rather than to anything inside it.
+  `::: ` completion offers `figure` alongside the eight admonition kinds, listed
+  separately because it is not a ninth one. An opener carrying a title or a
+  `[label]` is unchanged and still an admonition.
+
 ### Changed
+
+- The `@markup-carve/carve` dependency tracks a carve-js commit rather than the
+  published `0.1.3`, which predates the composite-figure node. Mid-development a
+  git pin is the correct pin; it moves back to a version range at the next
+  release.
 
 - Diagnostics are coalesced per document instead of running on every keystroke
   (markup-carve/carve-lsp#68). Analysis is whole-document - a full parse and
