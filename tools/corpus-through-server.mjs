@@ -77,8 +77,8 @@ const documents = readdirSync(corpusDir)
  * in markup-carve/pandoc-carve.
  *
  * tests/corpus is GENERATED from the `::: compare` blocks in
- * docs/examples/{core,extensions,edge-cases}.md, and the generator refuses to
- * write a corpus where the two disagree (see tests/corpus/README.md and
+ * resources/examples/{core,extensions,edge-cases}.md, and the generator
+ * refuses to write a corpus where the two disagree (see tests/corpus/README.md and
  * scripts/generate-corpus.mjs in the spec repository). Those pages sit two
  * directories up from the corpus, in the same checkout the workflow already
  * clones. Counting them is an independent statement of how many documents there
@@ -96,7 +96,7 @@ const COMPARE_OPEN = /^:{3,}\s+compare(\s+\S.*)?$/
 // line inside an already-open block is content, not a second pair, and a block
 // closes on a bare marker line.
 const declaredCorpusSize = () => {
-  const examplesDir = join(corpusDir, '..', '..', 'docs', 'examples')
+  const examplesDir = join(corpusDir, '..', '..', 'resources', 'examples')
   let declared = 0
   for (const page of EXAMPLE_PAGES) {
     const path = join(examplesDir, page)
@@ -143,7 +143,7 @@ if (documents.length !== declared) {
   stdout.write(
     `corpus-through-server: ${corpusDir} holds ${documents.length} documents, ` +
       `but the spec's example pages declare ${declared}.\n` +
-      '  Every ::: compare block in docs/examples/{core,extensions,edge-cases}.md becomes\n' +
+      '  Every ::: compare block in resources/examples/{core,extensions,edge-cases}.md becomes\n' +
       '  one corpus pair, so a difference means this is not the corpus those pages\n' +
       '  describe: a truncated or stale checkout, a wrong <corpus-dir>, or a corpus that\n' +
       '  needs regenerating (npm run corpus:build in the spec repository). Every number\n' +
