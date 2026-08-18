@@ -71,28 +71,67 @@ jobs:
           # both; `tail -1` alone concatenates the spec onto the version the
           # moment a second matching release exists, yielding
           # `@markup-carve/carve@0.1.20.1.2` rather than a version.
-          resolved="$(npm view "${pkg}@${spec}" version 2>/dev/null | tail -1 | tr -d "'\"" | awk '{print $NF}')"
+          # THE PIN IS NOT ALWAYS A REGISTRY RANGE. It read `0.1.3` until the
+          # composite-figure work needed an engine that was not released yet, and
+          # it has been a git URL at an exact carve-js commit ever since. `npm view
+          # <pkg>@<git url>` cannot resolve that, so this step failed EVERY
+          # scheduled run from 2026-08-16 onward, announcing "resolves to nothing
+          # on the registry - an install here is broken" about a pin that installs
+          # perfectly well. A watchdog that cries wolf daily is one nobody reads,
+          # and this one had six red days on it before anybody looked.
+          #
+          # So the two pin shapes are told apart, and each is checked against the
+          # thing that can answer for it: a range against the registry, a commit
+          # against carve-js history in the step below.
           latest="$(npm view "${pkg}" version 2>/dev/null | tr -d "'\"" | awk '{print $NF}')"
-          if [ -z "${resolved}" ]; then
-            echo "::error::${pkg}@${spec} resolves to nothing on the registry - an install here is broken"
-            exit 1
-          fi
-          # Both reads are checked for the SHAPE of a version before anything is
+          # The read is checked for the SHAPE of a version before anything is
           # compared. Without this the workflow's failure mode is silence: a
           # mis-read compares unequal to everything, so the drift warning fires
           # with a nonsense string in it and reads as a result (carve#755).
-          for pair in "resolved=${resolved}" "latest=${latest}"; do
-            case "${pair#*=}" in
-              [0-9]*.[0-9]*.[0-9]*) ;;
-              *) echo "::error::${pair%%=*} read back as \"${pair#*=}\" from the registry, which is not a version - every comparison below it would be meaningless"; exit 1 ;;
-            esac
-          done
-          echo "declared        ${spec}"
-          echo "resolves to     ${resolved}"
-          echo "registry latest ${latest}"
-          if [ "${resolved}" != "${latest}" ]; then
-            echo "::warning::${pkg} ${latest} is published, but this repo takes ${resolved} - the pin is exact, so no release arrives on its own"
-          fi
+          case "${latest}" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::the registry's latest ${pkg} read back as \"${latest}\", which is not a version - every comparison below it would be meaningless"; exit 1 ;;
+          esac
+
+          case "${spec}" in
+            git+*|github:*|*github.com*)
+              commit="${spec##*#}"
+              if [ "${commit}" = "${spec}" ] || [ -z "${commit}" ]; then
+                echo "::error::${pkg} is pinned to ${spec}, a git dependency with no commit after '#' - it floats, so what CI tested is not what the next install gets"
+                exit 1
+              fi
+              echo "declared        ${spec}"
+              echo "pinned commit   ${commit}"
+              echo "registry latest ${latest}"
+              echo "::warning::${pkg} is pinned to a carve-js COMMIT, not a registry release. The published ${latest} cannot reach this repo, and no release arrives on its own."
+              echo "kind=git" >> "${GITHUB_OUTPUT}"
+              echo "commit=${commit}" >> "${GITHUB_OUTPUT}"
+              ;;
+            *)
+              # `npm view <pkg>@<range> version` prints ONE bare version when the
+              # range matches a single release, and `<pkg>@<v> '<v>'` lines when it
+              # matches several. Taking the last WHITESPACE-SEPARATED FIELD reads
+              # both; `tail -1` alone concatenates the spec onto the version the
+              # moment a second matching release exists, yielding
+              # `@markup-carve/carve@0.1.20.1.2` rather than a version.
+              resolved="$(npm view "${pkg}@${spec}" version 2>/dev/null | tail -1 | tr -d "'\"" | awk '{print $NF}')"
+              if [ -z "${resolved}" ]; then
+                echo "::error::${pkg}@${spec} resolves to nothing on the registry - an install here is broken"
+                exit 1
+              fi
+              case "${resolved}" in
+                [0-9]*.[0-9]*.[0-9]*) ;;
+                *) echo "::error::resolved read back as \"${resolved}\" from the registry, which is not a version - every comparison below it would be meaningless"; exit 1 ;;
+              esac
+              echo "declared        ${spec}"
+              echo "resolves to     ${resolved}"
+              echo "registry latest ${latest}"
+              if [ "${resolved}" != "${latest}" ]; then
+                echo "::warning::${pkg} ${latest} is published, but this repo takes ${resolved} - the pin is exact, so no release arrives on its own"
+              fi
+              echo "kind=registry" >> "${GITHUB_OUTPUT}"
+              ;;
+          esac
           echo "latest=${latest}" >> "${GITHUB_OUTPUT}"
 
       - name: The declared pin and the lockfile agree
@@ -101,8 +140,21 @@ jobs:
           pkg='@markup-carve/carve'
           declared="$(node -p "const p=require('./package.json');const d=p.dependencies||{},v=p.devDependencies||{};d['${pkg}']||v['${pkg}']||''")"
           locked="$(node -p "require('./package-lock.json').packages['node_modules/${pkg}'].version")"
-          echo "package.json ${declared}; package-lock.json ${locked}"
-          if [ "${declared}" != "${locked}" ]; then
+          resolved="$(node -p "require('./package-lock.json').packages['node_modules/${pkg}'].resolved || ''")"
+          echo "package.json ${declared}; package-lock.json version ${locked}, resolved ${resolved}"
+          if [ "${{ steps.registry.outputs.kind }}" = "git" ]; then
+            # Under a git pin the lockfile's `version` is whatever the engine's own
+            # package.json happened to say at that commit - a release number that
+            # was never published FROM that commit. Comparing it to the declared
+            # spec therefore always differs, which is the second way this job
+            # erred out on a healthy install. The field that answers "is this the
+            # commit the manifest asks for" is `resolved`.
+            commit='${{ steps.registry.outputs.commit }}'
+            case "${resolved}" in
+              *"${commit}") ;;
+              *) echo "::error::package.json pins carve-js commit ${commit} but the lockfile resolves to ${resolved} - what CI tests is not what the manifest says"; exit 1 ;;
+            esac
+          elif [ "${declared}" != "${locked}" ]; then
             echo "::error::package.json declares ${declared} but the lockfile installs ${locked} - what CI tests is not what the manifest says"
             exit 1
           fi
@@ -118,6 +170,25 @@ jobs:
         run: |
           set -euo pipefail
           latest='${{ steps.registry.outputs.latest }}'
+
+          # A commit pin can be located in carve-js history directly, which is a
+          # sharper answer than any version distance: it says exactly how far the
+          # engine this repo SHIPS is from the language. The registry comparison
+          # below cannot see it at all, because nothing about the pin is a version.
+          if [ "${{ steps.registry.outputs.kind }}" = "git" ]; then
+            commit='${{ steps.registry.outputs.commit }}'
+            if ! git -C carve-js rev-parse --verify "${commit}^{commit}" >/dev/null 2>&1; then
+              echo "::error::the pinned carve-js commit ${commit} is not in carve-js history - the pin names something that cannot be reviewed"
+              exit 1
+            fi
+            behind="$(git -C carve-js rev-list --count "${commit}..origin/main")"
+            echo "pinned carve-js ${commit} ($(git -C carve-js log -1 --format=%s "${commit}"))"
+            echo "carve-js main is ${behind} commit(s) ahead of it"
+            if [ "${behind}" -gt 0 ]; then
+              echo "::warning::the engine this repo pins is ${behind} commit(s) behind carve-js main"
+            fi
+          fi
+
           tag=""
           for candidate in "${latest}" "v${latest}"; do
             if git -C carve-js rev-parse "${candidate}" >/dev/null 2>&1; then
@@ -187,6 +258,22 @@ jobs:
           mkdir -p node_modules/@markup-carve/carve
           cp -r upstream-carve-js/dist node_modules/@markup-carve/carve/dist
           cp upstream-carve-js/package.json node_modules/@markup-carve/carve/package.json
+          # The swapped-in engine brings its own RUNTIME DEPENDENCIES, and copying
+          # only `dist` leaves them unresolvable. That is not hypothetical: when
+          # carve-js main gained `parse5` for html-import while the pin here did
+          # not have it yet, this step died with ERR_MODULE_NOT_FOUND before
+          # measuring a single document, and did so for three consecutive
+          # scheduled runs (2026-08-12 through 2026-08-14). It stopped only
+          # because the pin later moved to a commit that happens to depend on
+          # parse5 too, which masks the defect rather than fixing it: the next
+          # dependency carve-js main adds brings it straight back.
+          #
+          # Upstream's own node_modules is already installed by the step above and
+          # Node resolves a package's dependencies from its own node_modules
+          # first, so copying it in place is self-contained. Re-running `npm
+          # install` here is NOT the fix: it would re-resolve the manifest and
+          # overwrite the engine that was just swapped in.
+          cp -r upstream-carve-js/node_modules node_modules/@markup-carve/carve/node_modules
 
           out="$(node tools/corpus-through-server.mjs carve-main/tests/corpus --manifest current-manifest.tsv | tee /dev/stderr)"
           threw="$(printf '%s\n' "$out" | sed -n 's/^threw=//p')"
