@@ -15,6 +15,7 @@ import {
   DidChangeConfigurationNotification,
   DidChangeWatchedFilesNotification,
   RenameRequest,
+  SemanticTokensRequest,
   TextDocuments,
   TextDocumentSyncKind,
   type Disposable,
@@ -43,6 +44,11 @@ import { prepareRename, renameEdits } from './rename.js'
 import { DiagnosticScheduler } from './diagnostic-scheduler.js'
 import { IncludeParseCache, IncludeSourceCache } from './include-cache.js'
 import { DependencyIndex, watcherFor } from './dependencies.js'
+import {
+  buildSemanticTokens,
+  semanticTokenModifiers,
+  semanticTokenTypes,
+} from './semantic.js'
 
 const connection = createConnection(ProposedFeatures.all)
 const documents = new TextDocuments(TextDocument)
@@ -80,11 +86,13 @@ connection.onInitialize((params) => {
       completionProvider: {
         triggerCharacters: [':', '#', '^', '['],
       },
-      // Semantic tokens are intentionally NOT advertised. Editor colouring is owned by the
-      // TextMate grammar (carve-grammars / the intellij-carve bundle); a second semantic-token
-      // layer over the same text only duplicated and fought it - clients merged the two and
-      // painted partial/incorrect ranges (a `{#top}` id showing as a hashtag, etc.). The
-      // builder in ./semantic.ts is kept (and tested) for any consumer that opts in explicitly.
+      semanticTokensProvider: {
+        legend: {
+          tokenTypes: [...semanticTokenTypes],
+          tokenModifiers: [...semanticTokenModifiers],
+        },
+        full: true,
+      },
     },
   }
 })
@@ -224,6 +232,11 @@ connection.onRequest(ReferencesRequest.type, (params) => {
   return document
     ? referencesAt(params.textDocument.uri, document.getText(), params.position, params.context)
     : null
+})
+
+connection.onRequest(SemanticTokensRequest.type, (params) => {
+  const document = documents.get(params.textDocument.uri)
+  return document ? buildSemanticTokens(document.getText()) : { data: [] }
 })
 
 function validate(document: TextDocument) {
