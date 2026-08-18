@@ -52,6 +52,24 @@ export function formatDocument(source: string): string {
   return out.length ? out.join(eol) + eol : ''
 }
 
+export function formatRange(source: string, startLine: number, endLine: number): string {
+  const eol = source.includes('\r\n') ? '\r\n' : '\n'
+  const lines = source.split(/\r?\n/).slice(startLine, endLine + 1)
+  return formatDocument(lines.join(eol)).replace(/\r?\n$/, '')
+}
+
+/** Prefix inserted after Enter for container-shaped lines. */
+export function continuationPrefix(source: string, line: number): string {
+  const previous = source.split(/\r?\n/)[line - 1] ?? ''
+  const quote = /^(\s*(?:> )+)/.exec(previous)
+  if (quote) return quote[1]!
+  const table = /^(\s*)\|/.exec(previous)
+  if (table) return `${table[1]}| `
+  const definition = /^(\s*): /.exec(previous)
+  if (definition) return `${definition[1]}  `
+  return ''
+}
+
 /**
  * A verbatim block opener: a fence marker indented at most three spaces.
  * Backtick fences cannot carry a backtick in the info string, and a comment

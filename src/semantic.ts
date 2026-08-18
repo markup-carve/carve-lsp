@@ -28,7 +28,7 @@ const tokenModifierIndex = new Map(semanticTokenModifiers.map((modifier, index) 
 type TokenType = (typeof semanticTokenTypes)[number]
 type TokenModifier = (typeof semanticTokenModifiers)[number]
 
-interface Token {
+export interface Token {
   line: number
   character: number
   length: number
@@ -36,9 +36,25 @@ interface Token {
   modifiers?: TokenModifier[]
 }
 
-export function buildSemanticTokens(source: string): SemanticTokens {
+export function buildSemanticTokens(source: string, builder = new SemanticTokensBuilder()): SemanticTokens {
+  fillBuilder(builder, semanticTokens(source))
+  return builder.build()
+}
+
+export function buildSemanticTokensRange(source: string, startLine: number, endLine: number): SemanticTokens {
   const builder = new SemanticTokensBuilder()
-  for (const token of semanticTokens(source)) {
+  fillBuilder(builder, semanticTokens(source).filter((token) => token.line >= startLine && token.line <= endLine))
+  return builder.build()
+}
+
+export function updateSemanticTokens(source: string, builder: SemanticTokensBuilder, previousResultId: string) {
+  builder.previousResult(previousResultId)
+  fillBuilder(builder, semanticTokens(source))
+  return builder.buildEdits()
+}
+
+function fillBuilder(builder: SemanticTokensBuilder, tokens: Token[]): void {
+  for (const token of tokens) {
     builder.push(
       token.line,
       token.character,
@@ -47,7 +63,6 @@ export function buildSemanticTokens(source: string): SemanticTokens {
       modifierMask(token.modifiers ?? []),
     )
   }
-  return builder.build()
 }
 
 export function semanticTokens(source: string): Token[] {
@@ -151,7 +166,11 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode): void {
       if (node.caption) collectInline(tokens, lines, node.caption)
       break
     case 'table':
-      pushPosition(tokens, lines, node.pos, 'string')
+      if (node.pos) {
+        for (let line = node.pos.startLine - 1; line < node.pos.endLine; line += 1) {
+          scanTableLine(tokens, line, lines[line] ?? '')
+        }
+      }
       if (node.caption) collectInline(tokens, lines, node.caption)
       for (const row of node.rows) {
         for (const cell of row.cells) collectInline(tokens, lines, cell.children)
@@ -166,6 +185,17 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode): void {
     case 'abbreviation_def':
       pushPosition(tokens, lines, node.pos, 'property')
       break
+  }
+}
+
+function scanTableLine(tokens: Token[], line: number, text: string): void {
+  for (const pipe of text.matchAll(/\|/g)) push(tokens, line, pipe.index!, 1, 'operator')
+  for (const marker of text.matchAll(/\|=?\s*([<>~^v]{1,2})(?=\{| )/g)) {
+    const run = marker[1]!
+    push(tokens, line, marker.index! + marker[0].indexOf(run), run.length, 'keyword')
+  }
+  for (const attr of text.matchAll(/\b(aligns|valigns|widths|footer-rows|header-rows|header-cols)=/g)) {
+    push(tokens, line, attr.index!, attr[1]!.length, 'property')
   }
 }
 

@@ -15,6 +15,7 @@ import {
   type Document,
   type Heading,
   type InlineNode,
+  type LintPlatform,
 } from '@markup-carve/carve'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -22,10 +23,16 @@ import { smartPunctuationText } from './inline-text.js'
 import { panelLetter } from './captions.js'
 import { resolveIncludes, type IncludeDependency, type IncludeOptions } from './includes.js'
 import type { IncludeParseCache } from './include-cache.js'
+import { tableDiagnostics } from './table-diagnostics.js'
 
 export interface AnalyzeOptions {
   /** URI used for diagnostic related-information locations. */
   uri?: string
+  lint?: {
+    platforms?: readonly LintPlatform[]
+    extensions?: readonly string[]
+    severities?: Readonly<Record<string, 'error' | 'warning' | 'information' | 'hint' | 'off'>>
+  }
   /**
    * Include resolution settings (PART 9 §19). ABSENT MEANS OFF: with no
    * options - or with options carrying no resolver - no include directive is
@@ -93,7 +100,14 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
   // Silent-failure lint: markup that parses but renders as the wrong thing
   // (broken cross-references, duplicate heading ids, trailing heading
   // attributes, legacy raw fences, leaked block markers).
-  for (const warning of lintCarve(source)) {
+  const lintExtensions = (options.lint?.extensions ?? []).map((name) =>
+    name === 'semantic-span'
+      ? { name, semanticSpanNames: ['samp', 'var', 'cite', 'dfn'] }
+      : { name })
+  for (const warning of lintCarve(source, {
+    platforms: options.lint?.platforms,
+    extensions: lintExtensions,
+  })) {
     const len = Math.max(1, warning.end - warning.start)
     const diagnostic: Diagnostic = {
       severity: DiagnosticSeverity.Warning,
@@ -112,6 +126,8 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
     }]
     diagnostics.push(diagnostic)
   }
+
+  diagnostics.push(...tableDiagnostics(source))
 
   // Include resolution (PART 9 §19). Inert without a resolver, so a document
   // in an untrusted or unconfigured workspace keeps its `{{ … }}` literal and
@@ -135,11 +151,30 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
   }
 
   return {
-    diagnostics,
+    diagnostics: configuredDiagnostics(diagnostics, options.lint?.severities),
     symbols: doc ? documentSymbols(doc) : tolerantHeadingSymbols(source),
     dependencies: includes.dependencies,
     includedSymbols: includedSymbols(includes.documents, options.includedParseCache),
   }
+}
+
+function configuredDiagnostics(
+  diagnostics: Diagnostic[],
+  overrides?: Readonly<Record<string, 'error' | 'warning' | 'information' | 'hint' | 'off'>>,
+): Diagnostic[] {
+  if (!overrides) return diagnostics
+  const levels = {
+    error: DiagnosticSeverity.Error,
+    warning: DiagnosticSeverity.Warning,
+    information: DiagnosticSeverity.Information,
+    hint: DiagnosticSeverity.Hint,
+  }
+  return diagnostics.flatMap((diagnostic) => {
+    const configured = diagnostic.code === undefined ? undefined : overrides[String(diagnostic.code)]
+    if (!configured) return [diagnostic]
+    if (configured === 'off') return []
+    return [{ ...diagnostic, severity: levels[configured] }]
+  })
 }
 
 export function parseErrorRange(source: string, message: string): Range {

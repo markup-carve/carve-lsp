@@ -18,3 +18,9 @@ test('uses the singular form for a single reference', () => {
 test('emits no lenses without footnote definitions', () => {
   assert.deepEqual(codeLenses('just prose with [^ref] but no def line that matches? [^ref]'), [])
 })
+
+test('counts heading, citation, and link-reference usages', () => {
+  const source = '{#h}\n# H\n\nSee </#h> and [x][r] [@c].\n\n[r]: /u\n[@c]: Entry\n'
+  const titles = codeLenses(source).map((lens) => lens.command?.title)
+  assert.deepEqual(titles, ['1 reference', '1 reference', '1 reference'])
+})

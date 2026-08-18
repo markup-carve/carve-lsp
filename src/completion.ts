@@ -5,6 +5,7 @@ import {
 } from 'vscode-languageserver/node.js'
 import { parse, resolve, type BlockNode, type Document } from '@markup-carve/carve'
 import { captionTargets, type CaptionTarget } from './captions.js'
+import type { IndexedToken } from './workspace-index.js'
 
 /** The eight canonical admonition kinds (grammar PART 9 §12, Tier 1). */
 const ADMONITIONS = ['note', 'tip', 'warning', 'danger', 'info', 'success', 'example', 'quote']
@@ -25,7 +26,11 @@ const FIGURE_GROUP = 'figure'
  *   - `[^`   footnote reference  -> defined footnote labels
  *   - `][`   reference link      -> defined link reference labels
  */
-export function completionAt(source: string, position: Position): CompletionItem[] {
+export interface CompletionContext {
+  workspaceTokens?: IndexedToken[]
+}
+
+export function completionAt(source: string, position: Position, context: CompletionContext = {}): CompletionItem[] {
   const line = source.split(/\r?\n/)[position.line] ?? ''
   const prefix = line.slice(0, position.character)
 
@@ -42,14 +47,18 @@ export function completionAt(source: string, position: Position): CompletionItem
     // A crossref reaches a captioned host as well as a heading (PART 9R R4).
     // Offering only heading ids said the others were not targets, which is the
     // reading that made a `</#fig>` naming a figure look like a typo.
-    return [
+    const workspace = (context.workspaceTokens ?? [])
+      .filter((token) => token.declaration && (token.kind === 'heading' || token.kind === 'caption'))
+      .map((token) => completion(token.key, CompletionItemKind.Reference, match![1], position, `${token.kind} in workspace`))
+    return uniqueCompletions([
       ...headingIds(source).map((id) =>
         completion(id, CompletionItemKind.Reference, match![1], position, 'Heading id'),
       ),
       ...resolvableCaptionIds(source).map(({ id, detail }) =>
         completion(id, CompletionItemKind.Reference, match![1], position, detail),
       ),
-    ]
+      ...workspace,
+    ])
   }
   if ((match = /\[\^([\w-]*)$/.exec(prefix))) {
     return footnoteLabels(source).map((label) =>
@@ -61,7 +70,34 @@ export function completionAt(source: string, position: Position): CompletionItem
       completion(label, CompletionItemKind.Reference, match![1], position, 'Link reference'),
     )
   }
+  if ((match = /\[@([\w:.-]*)$/.exec(prefix))) {
+    const local = citationLabels(source)
+    const workspace = (context.workspaceTokens ?? [])
+      .filter((token) => token.declaration && token.kind === 'citation')
+      .map((token) => token.key)
+    return [...new Set([...local, ...workspace])].map((label) =>
+      completion(label, CompletionItemKind.Reference, match![1], position, 'Citation key'))
+  }
+  if ((match = /\{[^}\n]*\b([\w-]*)$/.exec(prefix))) {
+    const attributes = ['#id', '.class', 'align=', 'valign=', 'width=', 'aligns=', 'valigns=', 'widths=',
+      'header-rows=', 'header-cols=', 'footer-rows=', 'start=', 'type=', 'title=', 'label=']
+    return attributes.map((attribute) =>
+      completion(attribute, CompletionItemKind.Property, match![1], position, 'Carve attribute'))
+  }
+  if ((match = /:(\w*)$/.exec(prefix))) {
+    return ['abbr', 'time', 'kbd', 'samp', 'var', 'cite', 'dfn'].map((name) =>
+      completion(name, CompletionItemKind.TypeParameter, match![1], position, 'Semantic span'))
+  }
   return []
+}
+
+function uniqueCompletions(items: CompletionItem[]): CompletionItem[] {
+  const seen = new Set<string>()
+  return items.filter((item) => {
+    if (seen.has(item.label)) return false
+    seen.add(item.label)
+    return true
+  })
 }
 
 function completion(
@@ -143,6 +179,15 @@ function linkReferenceLabels(source: string): string[] {
     const match = /^\s{0,3}\[([^\]]+)\]:\s+\S/.exec(line)
     // `[^label]:` is a footnote definition, not a link reference definition.
     if (match && !match[1]!.startsWith('^')) labels.add(match[1]!)
+  }
+  return [...labels]
+}
+
+function citationLabels(source: string): string[] {
+  const labels = new Set<string>()
+  for (const line of source.split(/\r?\n/)) {
+    const match = /^\s{0,3}\[@([^\]]+)\]:/.exec(line)
+    if (match) labels.add(match[1]!)
   }
   return [...labels]
 }

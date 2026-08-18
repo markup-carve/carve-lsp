@@ -433,3 +433,11 @@ test('duplicate diagnostics point back to the first declaration', () => {
   assert.equal(footnote.diagnostics.find((item) => item.code === 'duplicate-footnote-definition')
     ?.relatedInformation?.[0]?.location.range.start.line, 0)
 })
+
+test('diagnostic severity overrides can promote or suppress individual rules', () => {
+  const source = '{widths="70,60"}\n| a | b |\n'
+  const promoted = analyzeCarve(source, { lint: { severities: { 'table-width-total': 'error' } } })
+  assert.equal(promoted.diagnostics.find((item) => item.code === 'table-width-total')?.severity, 1)
+  const hidden = analyzeCarve(source, { lint: { severities: { 'table-width-total': 'off' } } })
+  assert.equal(hidden.diagnostics.some((item) => item.code === 'table-width-total'), false)
+})
