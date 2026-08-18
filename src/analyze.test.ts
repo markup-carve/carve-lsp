@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { analyzeCarve } from './analyze.js'
+import { analyzeCarve, parseErrorRange, tolerantHeadingSymbols } from './analyze.js'
 import { hoverAt } from './hover.js'
 import { migrationCodeActions, migrationFixes } from './migration-actions.js'
 import { semanticTokens } from './semantic.js'
@@ -407,4 +407,29 @@ test('a nested warning names the child relative to the include root, not absolut
   assert.ok(diagnostic)
   assert.ok(diagnostic.message.includes('(in a.crv)'), diagnostic.message)
   assert.ok(!diagnostic.message.includes('/ws/a.crv'))
+})
+
+test('locates parser errors that carry a line and column', () => {
+  assert.deepEqual(parseErrorRange('one\ntwo\n', 'Parse error at 2:3'), {
+    start: { line: 1, character: 2 },
+    end: { line: 1, character: 3 },
+  })
+})
+
+test('keeps a usable heading outline when resolved analysis is unavailable', () => {
+  assert.deepEqual(tolerantHeadingSymbols('# One\n\n## Two\n').map((symbol) => symbol.name), ['One', 'Two'])
+})
+
+test('duplicate diagnostics point back to the first declaration', () => {
+  const uri = 'file:///document.crv'
+  const heading = analyzeCarve('{#same}\n# One\n\n{#same}\n# Two\n', { uri })
+  const headingDuplicate = heading.diagnostics.find((item) => item.code === 'duplicate-heading-id')
+  assert.deepEqual(headingDuplicate?.relatedInformation, [{
+    location: { uri, range: { start: { line: 0, character: 2 }, end: { line: 0, character: 6 } } },
+    message: 'First declaration is here.',
+  }])
+
+  const footnote = analyzeCarve('[^same]: one\n\n[^same]: two\n', { uri })
+  assert.equal(footnote.diagnostics.find((item) => item.code === 'duplicate-footnote-definition')
+    ?.relatedInformation?.[0]?.location.range.start.line, 0)
 })
