@@ -116,3 +116,9 @@ test('an unclosed top-level comment fence degrades to one comment line', () => {
   assert.ok(tokens.some((token) => token.line === 2 && token.type === 'type'))
   assert.ok(tokens.some((token) => token.line === 4 && token.type === 'string'))
 })
+
+test('classifies table pipes and two-axis alignment runs', () => {
+  const tokens = semanticTokens('|=~^ Item |=> Qty |\n| a |<v b |\n')
+  assert.ok(tokens.some((token) => token.type === 'operator' && token.length === 1))
+  assert.ok(tokens.some((token) => token.type === 'keyword' && token.length === 2))
+})

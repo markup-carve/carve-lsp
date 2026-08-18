@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { formatDocument } from './format.js'
+import { continuationPrefix, formatDocument, formatRange } from './format.js'
 
 test('strips trailing whitespace and enforces a final newline', () => {
   assert.equal(formatDocument('# Title   \n\npara\t'), '# Title\n\npara\n')
+})
+
+test('formats a selected range and continues structural prefixes', () => {
+  assert.equal(formatRange('a  \n\nb  \n', 2, 2), 'b')
+  assert.equal(continuationPrefix('> q\n', 1), '> ')
+  assert.equal(continuationPrefix('| a |\n', 1), '| ')
 })
 
 test('collapses runs of blank lines to a single blank line', () => {

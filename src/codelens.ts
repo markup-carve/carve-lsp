@@ -1,4 +1,5 @@
 import { type CodeLens } from 'vscode-languageserver/node.js'
+import { scanDocument } from './workspace-index.js'
 
 /**
  * A non-interactive code lens above each footnote definition showing how many
@@ -34,6 +35,18 @@ export function codeLenses(source: string): CodeLens[] {
       },
     })
   })
+
+  const tokens = scanDocument('file:///document.crv', source)
+  for (const declaration of tokens) {
+    if (!declaration.declaration || declaration.kind === 'footnote') continue
+    const count = tokens.filter((token) =>
+      !token.declaration && token.kind === declaration.kind &&
+      token.key.toLocaleLowerCase() === declaration.key.toLocaleLowerCase()).length
+    lenses.push({
+      range: declaration.range,
+      command: { title: count === 1 ? '1 reference' : `${count} references`, command: '' },
+    })
+  }
 
   return lenses
 }

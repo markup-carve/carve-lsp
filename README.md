@@ -22,19 +22,53 @@ The server communicates over **stdio** (`--stdio` flag).
 
 | Capability | Details |
 |---|---|
-| Diagnostics | Syntax errors from the Carve parser; advisory warnings for Djot/Markdown delimiter collisions |
-| Document symbols | Headings as an outline tree, including headings attributed to included files |
-| Hover | Contextual information on hover |
-| Completion | Trigger characters `:` `#` `^` `[` |
-| Go to definition | Jump to heading / reference targets and included files |
-| Find references | All uses of a heading id or reference label |
-| Rename | Prepare + apply renames across the document |
-| Code actions | Migration quick-fixes for deprecated Carve syntax |
-| Code lens | Inline annotations on headings and references |
-| Folding ranges | Fold sections and block containers |
-| Formatting | Format the whole document |
-| Semantic tokens | Token-based syntax highlighting |
+| Diagnostics | Push and LSP 3.17 pull diagnostics for syntax, migration hazards, silent failures, include failures, and invalid table metadata |
+| Symbols | Nested document outline plus queryable workspace symbols, including included files |
+| Hover | Markup, cross-reference, include, citation, and table-marker explanations |
+| Completion | Admonitions, attributes, semantic spans, citations, references, workspace anchors, and contained include paths/fragments |
+| Navigation | Document links, go-to-definition, highlights, and references for anchors, captions, footnotes, citations, and link labels |
+| Rename | Workspace-wide, namespace-aware rename; generated heading ids become explicit when renamed |
+| Code actions | Migration and lint quick-fixes, table marker repair, and creation of missing definitions |
+| Code lens | Reference counts for anchors, captions, citations, footnotes, and link labels |
+| Selection and folding | Syntax-aware selection expansion and folding, with tolerant fallbacks during incomplete edits |
+| Formatting | Conservative document/range formatting, on-type continuation, or explicit migration formatting |
+| Semantic tokens | Full, ranged, and delta token updates, including table structure and alignment metadata |
+| Inlay hints | Generated heading ids (configurable) |
+| Commands | `carve.previewHtml` and `carve.showAst` return an open document's rendered HTML or AST JSON |
 | File inclusion | Resolves `{{ path }}` directives, watches dependencies, and reports failures as diagnostics - **off by default**, see below |
+
+Workspace navigation is backed by a versioned `.crv` index. The initial scan
+ignores `.git` and `node_modules` and is bounded at 10,000 files / 64 MiB;
+open buffers replace their disk snapshot and closing a buffer restores it.
+
+## Language settings
+
+Clients can send these under `carve` in initialization options or
+`workspace/didChangeConfiguration`. If the client does not supply a `carve`
+section, the server reads the first `.carverc.json` in the workspace roots and
+watches it for changes.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `platforms` | `[]` | Extra platform lint profiles. Currently supports `"github"`. |
+| `extensions` | `[]` | Enabled extension names, for example `"semantic-span"`. |
+| `inlayHints` | `true` | Show generated heading identifiers. |
+| `formatter` | `"conservative"` | Use whitespace-only conservative formatting; `"migration"` opts into canonical whole-document conversion. |
+| `severities` | `{}` | Override a diagnostic code with `"error"`, `"warning"`, `"information"`, `"hint"`, or `"off"`. |
+
+Example `.carverc.json`:
+
+```json
+{
+  "carve": {
+    "platforms": ["github"],
+    "extensions": ["semantic-span"],
+    "inlayHints": true,
+    "formatter": "conservative",
+    "severities": { "table-width-total": "error" }
+  }
+}
+```
 
 ## File inclusion
 
@@ -46,7 +80,7 @@ editor clients - `helix-carve`, `emacs-carve`, `vim-carve`, `zed-carve`,
 Resolution reads files from disk, so it is **opt-in and off by default**. The
 server enables it only when it is asked to, and only inside a containment root.
 
-### Settings
+### Include settings
 
 Pass these under `carve.includes`, either in `initializationOptions` at
 initialize time or through `workspace/didChangeConfiguration`. Changing them

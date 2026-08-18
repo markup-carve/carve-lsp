@@ -17,6 +17,22 @@ interface HoverRule {
 
 const rules: HoverRule[] = [
   {
+    pattern: /\|=?\s*[<>~^v]{1,2}(?=\{| )/g,
+    contents: '**Table alignment**\n\nA one- or two-character run sets horizontal and/or vertical cell alignment. Two-axis runs normalize to horizontal then vertical.',
+  },
+  {
+    pattern: /\b(?:aligns|valigns|widths|header-rows|header-cols|footer-rows)=/g,
+    contents: '**Table metadata**\n\nA positional table/ListTable field. Empty list entries leave that column unset; cell-local values win.',
+  },
+  {
+    pattern: /\[@[^\]\n]+\]/g,
+    contents: '**Citation**\n\nCitation groups reference `[@key]: ...` bibliography entries when the Citations extension is enabled.',
+  },
+  {
+    pattern: /\{\{[^}\n]+\}\}/g,
+    contents: '**Include**\n\nProcessor-level file inclusion. The language server resolves it only in a trusted, explicitly enabled workspace.',
+  },
+  {
     pattern: /#{1,6}/g,
     contents: '**Heading**\n\n`#` through `######` create section headings.',
   },
