@@ -23,7 +23,7 @@ import {
   type SymbolInformation,
 } from 'vscode-languageserver/node.js'
 import { TextDocument } from 'vscode-languageserver-textdocument'
-import { analyzeCarve } from './analyze.js'
+import { analyzeCarve, type Analysis } from './analyze.js'
 import {
   DEFAULT_INCLUDE_SETTINGS,
   fsPath,
@@ -49,6 +49,7 @@ import {
   semanticTokenModifiers,
   semanticTokenTypes,
 } from './semantic.js'
+import { VersionedCache } from './versioned-cache.js'
 
 const connection = createConnection(ProposedFeatures.all)
 const documents = new TextDocuments(TextDocument)
@@ -59,6 +60,7 @@ let workspaceRoots: string[] = []
 const includeCache = new IncludeSourceCache()
 const includeParseCache = new IncludeParseCache()
 const dependencyIndex = new DependencyIndex()
+const analysisCache = new VersionedCache<Analysis>()
 let watcherRegistration: Disposable | undefined
 let watcherRefresh = Promise.resolve()
 
@@ -103,6 +105,7 @@ connection.onInitialized(() => {
 
 connection.onDidChangeConfiguration((change) => {
   includeSettings = readIncludeSettings(change.settings)
+  analysisCache.clear()
   // Coalesced: a settings change can arrive alongside others, and revalidating
   // every open document synchronously is the same cost this ticket is removing.
   for (const document of documents.all()) diagnostics.schedule(document.uri, document.version)
@@ -132,6 +135,7 @@ documents.onDidChangeContent((event) =>
 )
 documents.onDidClose((event) => {
   diagnostics.cancel(event.document.uri)
+  analysisCache.remove(event.document.uri)
   if (dependencyIndex.remove(event.document.uri)) refreshWatchers()
   connection.sendDiagnostics({ uri: event.document.uri, diagnostics: [] })
 })
@@ -147,7 +151,10 @@ connection.onDidChangeWatchedFiles((params) => {
   }
   for (const uri of affected) {
     const document = documents.get(uri)
-    if (document) validate(document)
+    if (document) {
+      analysisCache.remove(uri)
+      validate(document)
+    }
   }
 })
 
@@ -155,10 +162,7 @@ connection.onRequest(DocumentSymbolRequest.type, (params) => {
   const document = documents.get(params.textDocument.uri)
   if (!document) return []
   const includes = includeOptions(document)
-  const analysis = analyzeCarve(document.getText(), {
-    ...(includes ? { includes } : {}),
-    includedParseCache: includeParseCache,
-  })
+  const analysis = analysisFor(document, includes)
   return analysis.includedSymbols.length > 0
     ? [...flattenSymbols(analysis.symbols, document.uri), ...analysis.includedSymbols]
     : analysis.symbols
@@ -241,10 +245,7 @@ connection.onRequest(SemanticTokensRequest.type, (params) => {
 
 function validate(document: TextDocument) {
   const includes = includeOptions(document)
-  const analysis = analyzeCarve(document.getText(), {
-    ...(includes ? { includes } : {}),
-    includedParseCache: includeParseCache,
-  })
+  const analysis = analysisFor(document, includes)
   const changed = dependencyIndex.update(
     document.uri,
     analysis.dependencies.flatMap((dependency) =>
@@ -256,6 +257,14 @@ function validate(document: TextDocument) {
     uri: document.uri,
     diagnostics: analysis.diagnostics,
   })
+}
+
+function analysisFor(document: TextDocument, includes = includeOptions(document)): Analysis {
+  return analysisCache.getOrCreate(document.uri, document.version, () => analyzeCarve(document.getText(), {
+    uri: document.uri,
+    ...(includes ? { includes } : {}),
+    includedParseCache: includeParseCache,
+  }))
 }
 
 function includeOptions(document: TextDocument) {

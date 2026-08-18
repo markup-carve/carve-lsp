@@ -24,6 +24,8 @@ import { resolveIncludes, type IncludeDependency, type IncludeOptions } from './
 import type { IncludeParseCache } from './include-cache.js'
 
 export interface AnalyzeOptions {
+  /** URI used for diagnostic related-information locations. */
+  uri?: string
   /**
    * Include resolution settings (PART 9 §19). ABSENT MEANS OFF: with no
    * options - or with options carrying no resolver - no include directive is
@@ -54,11 +56,12 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
   try {
     doc = resolve(parse(source))
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
     diagnostics.push({
       severity: DiagnosticSeverity.Error,
-      range: rangeAt(source, 0, 1),
+      range: parseErrorRange(source, message),
       source: 'carve',
-      message: error instanceof Error ? error.message : String(error),
+      message,
     })
   }
 
@@ -92,7 +95,7 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
   // attributes, legacy raw fences, leaked block markers).
   for (const warning of lintCarve(source)) {
     const len = Math.max(1, warning.end - warning.start)
-    diagnostics.push({
+    const diagnostic: Diagnostic = {
       severity: DiagnosticSeverity.Warning,
       range: {
         start: { line: warning.line - 1, character: warning.column - 1 },
@@ -101,7 +104,13 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
       source: 'carve',
       code: warning.rule,
       message: warning.message,
-    })
+    }
+    const related = options.uri ? firstDuplicateDeclaration(source, warning.rule, warning.message, warning.line - 1) : null
+    if (options.uri && related) diagnostic.relatedInformation = [{
+      location: { uri: options.uri, range: related },
+      message: 'First declaration is here.',
+    }]
+    diagnostics.push(diagnostic)
   }
 
   // Include resolution (PART 9 §19). Inert without a resolver, so a document
@@ -127,10 +136,52 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
 
   return {
     diagnostics,
-    symbols: doc ? documentSymbols(doc) : [],
+    symbols: doc ? documentSymbols(doc) : tolerantHeadingSymbols(source),
     dependencies: includes.dependencies,
     includedSymbols: includedSymbols(includes.documents, options.includedParseCache),
   }
+}
+
+export function parseErrorRange(source: string, message: string): Range {
+  const located = /(?:line|at)\s+(\d+)(?::|,\s*column\s+)(\d+)/i.exec(message)
+  if (!located) return rangeAt(source, 0, 1)
+  const line = Math.max(0, Number(located[1]) - 1)
+  const character = Math.max(0, Number(located[2]) - 1)
+  return { start: { line, character }, end: { line, character: character + 1 } }
+}
+
+export function tolerantHeadingSymbols(source: string): DocumentSymbol[] {
+  const symbols: DocumentSymbol[] = []
+  for (const [line, text] of source.replace(/\r\n?/g, '\n').split('\n').entries()) {
+    const match = /^(#{1,6}) (.+)$/.exec(text)
+    if (!match) continue
+    const range = { start: { line, character: 0 }, end: { line, character: text.length } }
+    symbols.push({ name: match[2]!, kind: SymbolKind.String, range, selectionRange: range })
+  }
+  return symbols
+}
+
+function firstDuplicateDeclaration(source: string, rule: string, message: string, repeatedLine: number): Range | null {
+  const headingKey = rule === 'duplicate-heading-id' ? /heading id "([^"]+)"/.exec(message)?.[1] : undefined
+  const footnoteKey = rule === 'duplicate-footnote-definition' ? /\[\^([^\]]+)\]/.exec(message)?.[1] : undefined
+  const key = headingKey ?? footnoteKey
+  if (!key) return null
+  const lines = source.replace(/\r\n?/g, '\n').split('\n')
+  const declarations: Range[] = []
+  for (let line = 0; line < lines.length; line += 1) {
+    const text = lines[line]!
+    const match = headingKey
+      ? /^\{[^}]*#([^\s}]+)[^}]*\}\s*$/.exec(text)
+      : /^(?: {0,3})\[\^([^\]]+)\]:/.exec(text)
+    if (!match || match[1]!.toLocaleLowerCase() !== key.toLocaleLowerCase()) continue
+    const character = text.indexOf(match[1]!)
+    if (line >= repeatedLine - 1) break
+    declarations.push({
+      start: { line, character },
+      end: { line, character: character + match[1]!.length },
+    })
+  }
+  return declarations[0] ?? null
 }
 
 function includedSymbols(

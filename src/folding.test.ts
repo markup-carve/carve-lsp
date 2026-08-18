@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { foldingRanges } from './folding.js'
+import { foldingRanges, lexicalFolds } from './folding.js'
 
 const src = '# A\n\ntext\n\n## B\n\nmore\n\n```js\none\ntwo\n```\n'
 
@@ -21,4 +21,10 @@ test('folds a multi-line fenced code block', () => {
 
 test('returns nothing for an empty document', () => {
   assert.deepEqual(foldingRanges(''), [])
+})
+
+test('lexical fallback preserves section and fence folds after analysis failure', () => {
+  const ranges = lexicalFolds('# One\n\n::: note\nbody\n:::\n\n## Two\ntext\n')
+  assert.ok(ranges.some((range) => range.startLine === 0 && range.endLine >= 7))
+  assert.ok(ranges.some((range) => range.startLine === 2 && range.endLine === 4))
 })

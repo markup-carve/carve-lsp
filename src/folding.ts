@@ -29,7 +29,7 @@ export function foldingRanges(source: string): FoldingRange[] {
   try {
     doc = resolve(parse(source, { positions: true }))
   } catch {
-    return []
+    return lexicalFolds(source)
   }
 
   const ranges: FoldingRange[] = []
@@ -65,6 +65,34 @@ export function foldingRanges(source: string): FoldingRange[] {
     }
   }
 
+  return ranges
+}
+
+export function lexicalFolds(source: string): FoldingRange[] {
+  const lines = source.replace(/\r\n?/g, '\n').split('\n')
+  const ranges: FoldingRange[] = []
+  const headings: Array<{ level: number; line: number }> = []
+  const fences: Array<{ marker: string; line: number }> = []
+  for (let line = 0; line < lines.length; line += 1) {
+    const text = lines[line]!
+    const heading = /^(#{1,6}) /.exec(text)
+    if (heading) headings.push({ level: heading[1]!.length, line })
+    const fence = /^\s*(`{3,}|~{3,}|:{3,}|%{3,})/.exec(text)
+    if (!fence) continue
+    const top = fences.at(-1)
+    if (top && top.marker[0] === fence[1]![0] && fence[1]!.length >= top.marker.length) {
+      fences.pop()
+      if (line > top.line) ranges.push({ startLine: top.line, endLine: line })
+    } else {
+      fences.push({ marker: fence[1]!, line })
+    }
+  }
+  for (let index = 0; index < headings.length; index += 1) {
+    const heading = headings[index]!
+    const next = headings.slice(index + 1).find((candidate) => candidate.level <= heading.level)
+    const endLine = (next?.line ?? lines.length) - 1
+    if (endLine > heading.line) ranges.push({ startLine: heading.line, endLine, kind: 'region' })
+  }
   return ranges
 }
 
