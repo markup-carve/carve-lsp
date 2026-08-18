@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-08-18
+
 ### Added
 
 - Advertise full-document semantic tokens and answer
@@ -53,10 +55,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- The `@markup-carve/carve` dependency tracks a carve-js commit rather than the
-  published `0.1.3`, which predates the composite-figure node. Mid-development a
-  git pin is the correct pin; it moves back to a version range at the next
-  release.
+- The `@markup-carve/carve` dependency moves from its development commit pin to
+  the published `0.1.4` release. Besides the composite-figure support this
+  server needs, 0.1.4 fixes URL sanitization for every candidate in list-valued
+  attributes such as `srcset`; consumers no longer need Git to install the LSP.
 
 - Diagnostics are coalesced per document instead of running on every keystroke
   (markup-carve/carve-lsp#68). Analysis is whole-document - a full parse and
