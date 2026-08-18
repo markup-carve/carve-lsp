@@ -105,3 +105,14 @@ test('the space spellings all still tokenize', () => {
     assert.ok(semanticTokens(source).length > 0, source)
   }
 })
+
+test('an unclosed top-level comment fence degrades to one comment line', () => {
+  const tokens = semanticTokens('%%%\n\n# Still a heading\n\n`still code`\n')
+
+  assert.deepEqual(
+    tokens.filter((token) => token.type === 'comment').map((token) => token.line),
+    [0],
+  )
+  assert.ok(tokens.some((token) => token.line === 2 && token.type === 'type'))
+  assert.ok(tokens.some((token) => token.line === 4 && token.type === 'string'))
+})

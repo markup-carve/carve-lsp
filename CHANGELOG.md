@@ -8,6 +8,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Advertise full-document semantic tokens and answer
+  `textDocument/semanticTokens/full` requests. Unlike a line-local TextMate
+  grammar, the parsed token stream can distinguish an unclosed top-level `%%%`
+  comment fence (which degrades to a one-line comment) from a closed comment
+  fence, so one stray opener no longer has to scope the rest of the document as
+  a comment (markup-carve/carve-lsp#101).
+
 - **Composite figures are a container the server knows** (spec PART 9 §4c,
   markup-carve/carve#1215). A bare `::: figure` fence parses to a `figure_group`
   node, which the server had no case for, so the container silently stopped
