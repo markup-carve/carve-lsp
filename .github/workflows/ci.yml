@@ -24,6 +24,16 @@ jobs:
             echo "::error::package.json is $VER but CHANGELOG.md has no matching release section."
             exit 1
           fi
+      # The publish-time guard in release.yml is the one that stops a git
+      # dependency reaching the registry, but it only runs on a tag - which is
+      # too late to be useful feedback and is exactly how this regressed: the
+      # engine went back to a `github:` spec three and a half hours after
+      # v0.1.3 was tagged, and nothing looked at the manifest again until a
+      # release was being prepared. Running the same check per pull request
+      # turns that into a red check on the merge that causes it.
+      - name: No dependency is installed over git
+        run: node tools/no-git-dependencies.mjs
+
       - name: Prefer HTTPS for Git dependencies
         run: git config --global url."https://github.com/".insteadOf ssh://git@github.com/
       - run: npm ci
