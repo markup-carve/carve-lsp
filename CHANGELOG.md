@@ -6,10 +6,42 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Workspace intelligence: a versioned index of headings, captions, footnotes,
+  citations and link-reference definitions across `.crv` files, behind workspace
+  symbols and cross-file definition, references, completion and rename.
+  Renaming a generated heading ID inserts an explicit `{#new-id}` declaration
+  before rewriting its references. The initial census is bounded to 10,000 files
+  and 64 MiB and skips `.git` and `node_modules` (#103).
+- Document links, document highlights, selection ranges, generated-heading-ID
+  inlay hints, contained include-path and included-section completion, and the
+  `carve.previewHtml` and `carve.showAst` commands (#103).
+- LSP 3.17 pull diagnostics alongside the existing push path, plus semantic-token
+  full, delta and range support with table-specific tokens (#103).
+- Safe fixes for malformed raw blocks, blockquote spacing, table alignment
+  padding and missing footnote or link definitions, and table diagnostics for
+  alignment-run padding, column metadata arity, marker/attribute overlap and
+  width totals (#103, markup-carve/carve#1344).
+- `.carverc.json` and client configuration for lint platforms, extensions, inlay
+  hints, formatter mode and per-rule severity overrides (#103).
+- Conservative range formatting and on-type continuation for quotes, tables and
+  definitions; canonical migration formatting stays explicit opt-in (#103).
+
+### Changed
+
+- The Carve engine dependency is a `github:` commit pin again rather than the
+  published `0.1.4` range that 0.1.3 shipped, so installing the server needs Git
+  and GitHub reachability and skips npm's integrity check (#110).
+
 ### Fixed
 
+- The formatter preserves blank-line runs, trailing blank lines and trailing
+  whitespace, each of which can be structural Carve source. Adding a missing
+  final line ending is the one normalization it keeps, and the formatter is now
+  gated on rendered-HTML equivalence across every corpus document (#108, #105).
 - **`package.json` is importable, so the installed version can be read back**
-  (#117). The subpath was not in `exports`, so reading it threw
+  (#118, #117). The subpath was not in `exports`, so reading it threw
   `ERR_PACKAGE_PATH_NOT_EXPORTED` - which reads as the package being absent
   rather than the subpath being closed. Only that one file is opened; every
   other path stays refused.
