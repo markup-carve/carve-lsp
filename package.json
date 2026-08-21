@@ -23,7 +23,8 @@
     ".": {
       "import": "./dist/analyze.js",
       "types": "./dist/analyze.d.ts"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist"
