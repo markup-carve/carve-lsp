@@ -39,7 +39,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@markup-carve/carve": "github:markup-carve/carve-js#61f824d5d5724bfaa26dd07dc5c159249a66c977",
+    "@markup-carve/carve": "0.1.4",
     "vscode-languageserver": "^9.0.1",
     "vscode-languageserver-textdocument": "^1.0.12"
   },

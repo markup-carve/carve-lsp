@@ -28,12 +28,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Conservative range formatting and on-type continuation for quotes, tables and
   definitions; canonical migration formatting stays explicit opt-in (#103).
 
-### Changed
-
-- The Carve engine dependency is a `github:` commit pin again rather than the
-  published `0.1.4` range that 0.1.3 shipped, so installing the server needs Git
-  and GitHub reachability and skips npm's integrity check (#110).
-
 ### Fixed
 
 - The formatter preserves blank-line runs, trailing blank lines and trailing

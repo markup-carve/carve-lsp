@@ -45,6 +45,15 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
           cache: npm
+      # A git dependency in `dependencies` ships to every consumer: their npm
+      # re-resolves the spec out of this tarball's manifest, so the install
+      # needs git and GitHub reachability and has no registry tarball to check
+      # an integrity hash against. The manifest was never inspected before a
+      # publish, which is how the engine's `github:` pin survived to a release
+      # candidate here and reached the registry in
+      # markup-carve/carve-grammars#276's repo.
+      - name: No dependency is installed over git
+        run: node tools/no-git-dependencies.mjs
 
       - run: npm ci
       - run: npm run build
