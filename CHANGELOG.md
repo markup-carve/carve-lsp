@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`package.json` is importable, so the installed version can be read back**
+  (#117). The subpath was not in `exports`, so reading it threw
+  `ERR_PACKAGE_PATH_NOT_EXPORTED` - which reads as the package being absent
+  rather than the subpath being closed. Only that one file is opened; every
+  other path stays refused.
+
 ## [0.1.3] - 2026-08-18
 
 ### Added
