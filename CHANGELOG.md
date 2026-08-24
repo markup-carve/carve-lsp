@@ -39,6 +39,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `ERR_PACKAGE_PATH_NOT_EXPORTED` - which reads as the package being absent
   rather than the subpath being closed. Only that one file is opened; every
   other path stays refused.
+- The Carve engine still resolves from the npm registry at exactly `0.1.4`, the
+  spec `v0.1.3` shipped, so installing the server needs no Git or GitHub
+  reachability and npm verifies the tarball against an integrity hash. An
+  unreleased `github:` commit pin that had removed that guarantee is reverted
+  (#122, #120).
 
 ## [0.1.3] - 2026-08-18
 
