@@ -142,7 +142,7 @@ connection.onInitialize((params) => {
       diagnosticProvider: {
         identifier: 'carve',
         interFileDependencies: true,
-        workspaceDiagnostics: false,
+        workspaceDiagnostics: true,
       },
     },
   }
@@ -263,6 +263,15 @@ connection.languages.diagnostics.on((params) => {
     items: document ? analysisFor(document).diagnostics : [],
   }
 })
+
+connection.languages.diagnostics.onWorkspace(() => ({
+  items: workspaceIndex.documents().map((document) => ({
+    uri: document.uri,
+    version: null,
+    kind: DocumentDiagnosticReportKind.Full,
+    items: workspaceIndex.diagnostics(document.uri),
+  })),
+}))
 
 connection.onRequest(DocumentLinkRequest.type, (params) => {
   const document = documents.get(params.textDocument.uri)

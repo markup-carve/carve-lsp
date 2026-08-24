@@ -22,7 +22,7 @@ The server communicates over **stdio** (`--stdio` flag).
 
 | Capability | Details |
 |---|---|
-| Diagnostics | Push and LSP 3.17 pull diagnostics for syntax, migration hazards, silent failures, include failures, and invalid table metadata |
+| Diagnostics | Push, document-pull, and workspace-pull diagnostics for syntax, migration hazards, silent failures, include failures, table metadata, dead references, and duplicate declarations |
 | Symbols | Nested document outline plus queryable workspace symbols, including included files |
 | Hover | Markup, cross-reference, include, citation, and table-marker explanations |
 | Completion | Admonitions, attributes, semantic spans, citations, references, workspace anchors, and contained include paths/fragments |
