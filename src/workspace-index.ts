@@ -28,6 +28,12 @@ interface IndexedDocument {
   tokens: IndexedToken[]
 }
 
+export interface WorkspaceDocument {
+  uri: string
+  source: string
+  tokens: IndexedToken[]
+}
+
 /**
  * Versioned semantic inventory shared by workspace-facing LSP features.
  *
@@ -56,6 +62,14 @@ export class WorkspaceIndex {
   tokens(uri?: string): IndexedToken[] {
     if (uri !== undefined) return [...(this.#documents.get(uri)?.tokens ?? [])]
     return [...this.#documents.values()].flatMap((document) => document.tokens)
+  }
+
+  documents(): WorkspaceDocument[] {
+    return [...this.#documents].map(([uri, document]) => ({
+      uri,
+      source: document.source,
+      tokens: [...document.tokens],
+    }))
   }
 
   tokenAt(uri: string, position: Position): IndexedToken | null {

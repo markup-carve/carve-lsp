@@ -34,12 +34,17 @@ The server communicates over **stdio** (`--stdio` flag).
 | Formatting | Conservative document/range formatting, on-type continuation, or explicit migration formatting |
 | Semantic tokens | Full, ranged, and delta token updates, including table structure and alignment metadata |
 | Inlay hints | Generated heading ids (configurable) |
-| Commands | `carve.previewHtml` and `carve.showAst` return an open document's rendered HTML or AST JSON |
+| Commands | Preview/AST output plus workspace graph, backlinks, generated navigation, and transitive rebuild impact |
 | File inclusion | Resolves `{{ path }}` directives, watches dependencies, and reports failures as diagnostics - **off by default**, see below |
 
 Workspace navigation is backed by a versioned `.crv` index. The initial scan
 ignores `.git` and `node_modules` and is bounded at 10,000 files / 64 MiB;
 open buffers replace their disk snapshot and closing a buffer restores it.
+The same index exposes `carve.workspaceGraph`, `carve.backlinks`,
+`carve.generatedNavigation`, and `carve.rebuildImpact` through
+`workspace/executeCommand`. The graph includes semantic references, citation
+usage, document links, includes, and local asset dependencies; unresolved edges
+are reported separately for migration and build tooling.
 
 ## Language settings
 
