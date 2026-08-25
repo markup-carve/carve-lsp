@@ -37,6 +37,12 @@ test('continues structural prefixes', () => {
   assert.equal(continuationPrefix('| a |\n', 1), '| ')
 })
 
+test('inserts an exact closer after a typed colon-fence opener', () => {
+  assert.equal(continuationPrefix(':::: warning\n', 1), '\n::::')
+  assert.equal(continuationPrefix('  ::: note\n', 1), '\n  :::')
+  assert.equal(continuationPrefix(':::\n', 1), '')
+})
+
 test('is idempotent', () => {
   const once = formatDocument('# T')
   assert.equal(formatDocument(once), once)

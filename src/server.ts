@@ -17,6 +17,7 @@ import {
   FileChangeType,
   HoverRequest,
   InlayHintRequest,
+  LinkedEditingRangeRequest,
   PrepareRenameRequest,
   ProposedFeatures,
   ReferencesRequest,
@@ -73,6 +74,7 @@ import { readFileSync, statSync } from 'node:fs'
 import { VersionedCache } from './versioned-cache.js'
 import { includeCompletions } from './include-completion.js'
 import { DEFAULT_CARVE_SETTINGS, readCarveSettings, readProjectSettings, type CarveSettings } from './settings.js'
+import { colonFenceInlayHints, linkedColonFenceRanges } from './colon-fences.js'
 
 const connection = createConnection(ProposedFeatures.all)
 const documents = new TextDocuments(TextDocument)
@@ -118,6 +120,7 @@ connection.onInitialize((params) => {
       definitionProvider: true,
       documentLinkProvider: { resolveProvider: false },
       documentHighlightProvider: true,
+      linkedEditingRangeProvider: true,
       selectionRangeProvider: true,
       inlayHintProvider: true,
       executeCommandProvider: { commands: ['carve.previewHtml', 'carve.showAst'] },
@@ -278,7 +281,12 @@ connection.onRequest(SelectionRangeRequest.type, (params) => {
 connection.onRequest(InlayHintRequest.type, (params) => {
   if (!carveSettings.inlayHints) return []
   const document = documents.get(params.textDocument.uri)
-  return document ? inlayHints(document.getText(), params.range) : []
+  return document ? [...inlayHints(document.getText(), params.range), ...colonFenceInlayHints(document.getText(), params.range)] : []
+})
+
+connection.onRequest(LinkedEditingRangeRequest.type, (params) => {
+  const document = documents.get(params.textDocument.uri)
+  return document ? linkedColonFenceRanges(document.getText(), params.position) : null
 })
 
 connection.onRequest(ExecuteCommandRequest.type, async (params) => {

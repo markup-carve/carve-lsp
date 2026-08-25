@@ -24,6 +24,7 @@ import { panelLetter } from './captions.js'
 import { resolveIncludes, type IncludeDependency, type IncludeOptions } from './includes.js'
 import type { IncludeParseCache } from './include-cache.js'
 import { tableDiagnostics } from './table-diagnostics.js'
+import { colonFenceStructure } from './colon-fences.js'
 
 export interface AnalyzeOptions {
   /** URI used for diagnostic related-information locations. */
@@ -118,6 +119,7 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
       source: 'carve',
       code: warning.rule,
       message: warning.message,
+      data: (warning as typeof warning & { data?: unknown }).data,
     }
     const related = options.uri ? firstDuplicateDeclaration(source, warning.rule, warning.message, warning.line - 1) : null
     if (options.uri && related) diagnostic.relatedInformation = [{
@@ -128,6 +130,15 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
   }
 
   diagnostics.push(...tableDiagnostics(source))
+  // Source intent has disappeared from the AST once a near closer becomes a
+  // child div, so this structural source pass complements the engine lint.
+  for (const fenceDiagnostic of colonFenceStructure(source).diagnostics) {
+    const duplicate = diagnostics.some((diagnostic) =>
+      diagnostic.code === fenceDiagnostic.code &&
+      diagnostic.range.start.line === fenceDiagnostic.range.start.line &&
+      diagnostic.range.start.character === fenceDiagnostic.range.start.character)
+    if (!duplicate) diagnostics.push(fenceDiagnostic)
+  }
 
   // Include resolution (PART 9 §19). Inert without a resolver, so a document
   // in an untrusted or unconfigured workspace keeps its `{{ … }}` literal and
