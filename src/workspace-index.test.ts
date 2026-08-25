@@ -57,3 +57,15 @@ test('headings and captions share the document anchor namespace', () => {
   index.update('file:///b.crv', 'See </#plot>.\n', 1)
   assert.equal(index.definitions('heading', 'plot')[0]?.kind, 'caption')
 })
+
+test('reports workspace-wide dead references and duplicate declarations', () => {
+  const index = new WorkspaceIndex()
+  index.update('file:///a.crv', '{#same}\n# A\n', 1)
+  index.update('file:///b.crv', '{#same}\n# B\n\nSee </#missing>.\n', 1)
+  const diagnostics = index.diagnostics('file:///b.crv')
+  assert.deepEqual(diagnostics.map(({ code }) => code), [
+    'workspace-duplicate-heading',
+    'workspace-unresolved-heading',
+  ])
+  assert.equal(diagnostics[0]?.relatedInformation?.[0]?.location.uri, 'file:///a.crv')
+})

@@ -69,6 +69,7 @@ import { documentHighlights } from './document-highlights.js'
 import { inlayHints } from './inlay-hints.js'
 import { selectionRanges } from './selection.js'
 import { WorkspaceIndex } from './workspace-index.js'
+import { backlinks, generatedNavigation, rebuildImpact, workspaceGraph } from './workspace-graph.js'
 import { indexWorkspace } from './workspace-loader.js'
 import { readFileSync, statSync } from 'node:fs'
 import { VersionedCache } from './versioned-cache.js'
@@ -123,7 +124,10 @@ connection.onInitialize((params) => {
       linkedEditingRangeProvider: true,
       selectionRangeProvider: true,
       inlayHintProvider: true,
-      executeCommandProvider: { commands: ['carve.previewHtml', 'carve.showAst'] },
+      executeCommandProvider: { commands: [
+        'carve.previewHtml', 'carve.showAst', 'carve.workspaceGraph',
+        'carve.backlinks', 'carve.generatedNavigation', 'carve.rebuildImpact',
+      ] },
       referencesProvider: true,
       renameProvider: { prepareProvider: true },
       codeLensProvider: { resolveProvider: false },
@@ -141,7 +145,7 @@ connection.onInitialize((params) => {
       diagnosticProvider: {
         identifier: 'carve',
         interFileDependencies: true,
-        workspaceDiagnostics: false,
+        workspaceDiagnostics: true,
       },
     },
   }
@@ -263,6 +267,15 @@ connection.languages.diagnostics.on((params) => {
   }
 })
 
+connection.languages.diagnostics.onWorkspace(() => ({
+  items: workspaceIndex.documents().map((document) => ({
+    uri: document.uri,
+    version: null,
+    kind: DocumentDiagnosticReportKind.Full,
+    items: workspaceIndex.diagnostics(document.uri),
+  })),
+}))
+
 connection.onRequest(DocumentLinkRequest.type, (params) => {
   const document = documents.get(params.textDocument.uri)
   return document ? documentLinks(document.uri, document.getText()) : []
@@ -291,6 +304,10 @@ connection.onRequest(LinkedEditingRangeRequest.type, (params) => {
 
 connection.onRequest(ExecuteCommandRequest.type, async (params) => {
   const uri = typeof params.arguments?.[0] === 'string' ? params.arguments[0] : undefined
+  if (params.command === 'carve.workspaceGraph') return workspaceGraph(workspaceIndex)
+  if (params.command === 'carve.backlinks') return uri ? backlinks(workspaceIndex, uri) : []
+  if (params.command === 'carve.generatedNavigation') return generatedNavigation(workspaceIndex, uri)
+  if (params.command === 'carve.rebuildImpact') return uri ? rebuildImpact(workspaceIndex, uri) : []
   const document = uri ? documents.get(uri) : undefined
   if (!document) return null
   const engine = await import('@markup-carve/carve')

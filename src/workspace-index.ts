@@ -1,5 +1,7 @@
 import {
+  DiagnosticSeverity,
   SymbolKind,
+  type Diagnostic,
   type Location,
   type Position,
   type Range,
@@ -24,6 +26,12 @@ export interface IndexedToken {
 
 interface IndexedDocument {
   version: number | string
+  source: string
+  tokens: IndexedToken[]
+}
+
+export interface WorkspaceDocument {
+  uri: string
   source: string
   tokens: IndexedToken[]
 }
@@ -58,6 +66,14 @@ export class WorkspaceIndex {
     return [...this.#documents.values()].flatMap((document) => document.tokens)
   }
 
+  documents(): WorkspaceDocument[] {
+    return [...this.#documents].map(([uri, document]) => ({
+      uri,
+      source: document.source,
+      tokens: [...document.tokens],
+    }))
+  }
+
   tokenAt(uri: string, position: Position): IndexedToken | null {
     const candidates = this.tokens(uri).filter((token) => contains(token.range, position))
     candidates.sort((a, b) => rangeSize(a.range) - rangeSize(b.range))
@@ -84,6 +100,37 @@ export class WorkspaceIndex {
         location: { uri: token.uri, range: token.range },
         containerName: token.kind,
       }))
+  }
+
+  diagnostics(uri: string): Diagnostic[] {
+    const diagnostics: Diagnostic[] = []
+    const tokens = this.tokens(uri)
+    for (const token of tokens) {
+      if (!token.declaration && this.definitions(token.kind, token.key).length === 0) {
+        diagnostics.push({
+          range: token.range,
+          severity: DiagnosticSeverity.Warning,
+          source: 'carve-workspace',
+          code: `workspace-unresolved-${token.kind}`,
+          message: `No ${token.kind} declaration named ${JSON.stringify(token.key)} exists in the workspace.`,
+        })
+      }
+      if (token.declaration) {
+        const declarations = this.definitions(token.kind, token.key)
+        const first = declarations[0]
+        if (declarations.length > 1 && first && (first.uri !== token.uri || first.range.start.line !== token.range.start.line)) {
+          diagnostics.push({
+            range: token.range,
+            severity: DiagnosticSeverity.Error,
+            source: 'carve-workspace',
+            code: `workspace-duplicate-${token.kind}`,
+            message: `Duplicate workspace ${token.kind} declaration ${JSON.stringify(token.key)}.`,
+            relatedInformation: [{ location: { uri: first.uri, range: first.range }, message: 'First declaration' }],
+          })
+        }
+      }
+    }
+    return diagnostics
   }
 
   rename(uri: string, position: Position, newName: string): WorkspaceEdit | null {
