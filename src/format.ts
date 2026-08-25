@@ -21,6 +21,8 @@ export function formatRange(source: string, startLine: number, endLine: number):
 /** Prefix inserted after Enter for container-shaped lines. */
 export function continuationPrefix(source: string, line: number): string {
   const previous = source.split(/\r?\n/)[line - 1] ?? ''
+  const container = /^(\s*)(:{3,}) [^\s].*$/.exec(previous)
+  if (container) return `\n${container[1]}${container[2]}`
   const quote = /^(\s*(?:> )+)/.exec(previous)
   if (quote) return quote[1]!
   const table = /^(\s*)\|/.exec(previous)

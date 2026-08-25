@@ -21,3 +21,14 @@ test('creates missing footnote and link-reference definitions', () => {
   const link = lintCodeActions('file:///a.crv', 'See [x][r].\n', [diagnostic('unresolved-reference-link')])
   assert.match(link[0]?.edit?.changes?.['file:///a.crv']?.[0]?.newText ?? '', /\[r\]:/)
 })
+
+test('offers both explicit intentions for a near colon closer', () => {
+  const near = { ...diagnostic('colon-fence-length-mismatch'), data: { expectedWidth: 4 } }
+  const actions = lintCodeActions('file:///a.crv', ':::\n', [near])
+  assert.deepEqual(actions.map((action) => action.title), [
+    'Resize to 4 colons and close the container',
+    'Preserve the colon run as literal text',
+  ])
+  assert.equal(actions[0]?.edit?.changes?.['file:///a.crv']?.[0]?.newText, '::::')
+  assert.equal(actions[1]?.edit?.changes?.['file:///a.crv']?.[0]?.newText, '\\')
+})

@@ -42,6 +42,23 @@ export function lintCodeActions(uri: string, source: string, diagnostics: Diagno
         edit = append(source, `\n[${match[1]}]: `)
         title = `Create link definition “${match[1]}”`
       }
+    } else if (code === 'colon-fence-length-mismatch') {
+      const authored = /^\s*(:{3,})/.exec(line)
+      const expected = Number((diagnostic.data as { expectedWidth?: unknown } | undefined)?.expectedWidth)
+      if (authored && Number.isInteger(expected) && expected >= 3) {
+        const start = line.indexOf(authored[1]!)
+        const range = { start: { line: diagnostic.range.start.line, character: start }, end: { line: diagnostic.range.start.line, character: start + authored[1]!.length } }
+        actions.push({
+          title: `Resize to ${expected} colons and close the container`, kind: CodeActionKind.QuickFix,
+          diagnostics: [diagnostic], isPreferred: true,
+          edit: { changes: { [uri]: [{ range, newText: ':'.repeat(expected) }] } },
+        })
+        actions.push({
+          title: 'Preserve the colon run as literal text', kind: CodeActionKind.QuickFix,
+          diagnostics: [diagnostic], isPreferred: false,
+          edit: { changes: { [uri]: [{ range: point(diagnostic.range.start.line, start), newText: '\\' }] } },
+        })
+      }
     }
     if (!edit) continue
     actions.push({

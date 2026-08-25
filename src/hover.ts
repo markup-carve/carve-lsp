@@ -9,6 +9,7 @@ import {
 } from '@markup-carve/carve'
 import { astColumnToCharacter, characterToAstColumn, sourceLines } from './position.js'
 import { captionTargetById, type CaptionTarget } from './captions.js'
+import { colonFenceHover } from './colon-fences.js'
 
 interface HoverRule {
   pattern: RegExp
@@ -71,6 +72,8 @@ const rules: HoverRule[] = [
 ]
 
 export function hoverAt(source: string, position: Position): Hover | null {
+  const fence = colonFenceHover(source, position)
+  if (fence) return fence
   const lines = sourceLines(source)
 
   try {
