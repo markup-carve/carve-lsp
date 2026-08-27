@@ -67,6 +67,13 @@ test('a colon followed by only whitespace opens no description (PART 2, carve#18
   assert.equal(continuationPrefix(':: t\n  : body\n', 2), '    ')
   // An invisible line is content for this purpose - corpus 436 keeps the body.
   assert.equal(continuationPrefix(':: t\n:  %% c\n', 2), '   ')
+  // NOT RULED HERE. `: ` followed by a tab is carve#1836, deferred past this
+  // release with all three engines wrong about it in two different ways - the
+  // pinned carve-js reads it as a description body, which is what makes the
+  // question live. The server keeps the answer it gave before the rule above
+  // landed rather than picking a side; this line exists so that when carve#1836
+  // does land, someone has to come back to it.
+  assert.equal(continuationPrefix(':: t\n: \tbody\n', 2), '  ')
 })
 
 test('the continuation marker reaches column 0 and nothing else (PART 9 §17 L3, carve#1817)', () => {
