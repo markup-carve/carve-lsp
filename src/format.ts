@@ -27,7 +27,13 @@ export function continuationPrefix(source: string, line: number): string {
   if (quote) return quote[1]!
   const table = /^(\s*)\|/.exec(previous)
   if (table) return `${table[1]}| `
-  const definition = /^(\s*): /.exec(previous)
-  if (definition) return `${definition[1]}  `
+  // A description marker is a colon, a run of SPACES, then content. PART 2
+  // (MARKER REQUIRES CONTENT, carve#1830, corpus 439) makes a colon followed by
+  // only whitespace a paragraph, so there is no description to continue - and a
+  // tab separator is not a marker either. The separator run sets the body's
+  // content column (corpus 424), so the continuation is as wide as it is rather
+  // than always two.
+  const definition = /^([ \t]*)(: +)(?=\S)/.exec(previous)
+  if (definition) return definition[1]! + ' '.repeat(definition[2]!.length)
   return ''
 }
