@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-08-27
+
 ### Added
 
 - Workspace intelligence: a versioned index of headings, captions, footnotes,
@@ -27,9 +29,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   hints, formatter mode and per-rule severity overrides (#103).
 - Conservative range formatting and on-type continuation for quotes, tables and
   definitions; canonical migration formatting stays explicit opt-in (#103).
+- **Colon-fence editor tooling** (#150, markup-carve/carve#1727). Matching
+  opener/closer highlighting, linked editing that resizes both fences at once, a
+  closer hover, nesting inlay hints, a `colon-fence-length-mismatch` diagnostic
+  and its two fixes, and a same-width closer inserted after Enter on a typed
+  opener.
+- **The workspace document graph is exposed** (#141): backlinks, unresolved
+  references, generated navigation and rebuild impact as workspace commands,
+  plus workspace diagnostics for dead references and duplicate ids.
 
 ### Fixed
 
+- **A colon fence is recognized by its shape, not by a list of node types**
+  (#161, #157, markup-carve/carve#1718). The fenced block quote is a `block_quote`
+  carrying `fenced: true` rather than a type of its own, and `figure_group` was
+  never named either, so both fell through the hand-written chain: no
+  opener/closer pair, no highlight, no linked editing, and no
+  `colon-fence-length-mismatch` inside one. Openers are now read off the
+  schema-described shape - a block container whose start lands on a `:::` run -
+  and pairing walks the source, because some kinds span their closing fence and
+  a `::: >` quote does not. A colon fence inside a footnote body is seen too.
+- **A colon followed by only whitespace no longer continues a description**
+  (#161, spec PART 2, markup-carve/carve#1830). On-type continuation treated `: ` as
+  an open description body; the marker opens nothing, so there is nothing to
+  indent into. A real marker now continues at the content column its separator
+  run sets rather than always two.
 - The formatter preserves blank-line runs, trailing blank lines and trailing
   whitespace, each of which can be structural Carve source. Adding a missing
   final line ending is the one normalization it keeps, and the formatter is now
@@ -39,11 +63,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `ERR_PACKAGE_PATH_NOT_EXPORTED` - which reads as the package being absent
   rather than the subpath being closed. Only that one file is opened; every
   other path stays refused.
-- The Carve engine still resolves from the npm registry at exactly `0.1.4`, the
-  spec `v0.1.3` shipped, so installing the server needs no Git or GitHub
-  reachability and npm verifies the tarball against an integrity hash. An
-  unreleased `github:` commit pin that had removed that guarantee is reverted
-  (#122, #120).
+- The Carve engine resolves from the npm registry at exactly `0.1.5`, so
+  installing the server needs no Git or GitHub reachability and npm verifies the
+  tarball against an integrity hash. An unreleased `github:` commit pin that had
+  removed that guarantee is reverted (#122, #120).
 
 ## [0.1.3] - 2026-08-18
 
