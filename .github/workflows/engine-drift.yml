@@ -6,19 +6,30 @@ name: Engine drift
 # hand-written expectations are satisfied by a stale parser exactly as well as
 # by a current one (carve#735).
 #
-# The pin here is EXACT (`"@markup-carve/carve": "0.1.4"`, deliberately - the
-# server reports positions and an engine changing its position units mid-range
-# would move every column it reports). An exact pin makes the first distance
-# below sharper than it is in the sibling repos: a `^0.1.4` range at least
-# picks up a `0.1.5`, an exact pin does not move for anything. It is also a
-# REGISTRY pin, not a commit: a `github:` spec in `dependencies` makes every
-# consumer clone the engine over git, so the git arm below now describes a
-# state that ci.yml rejects on the pull request that would introduce it.
+# The pin here is a CARET RANGE (`"@markup-carve/carve": "^0.1.5"`). It used to
+# be exact, for a real reason: the server reports positions, and an engine that
+# changes its position units mid-range moves every column it reports - which has
+# happened inside a `0.1.x` line. The range was widened anyway, because an exact
+# pin also meant a fix in the engine could not reach a user without a release of
+# THIS repo, and both halves of the table-continuation lint fix sat unreachable
+# behind one (carve-js#1571, carve-js#1572).
+#
+# That trade is what makes question 3 below load-bearing rather than
+# informational: a range that moves on its own needs the corpus driven through
+# the built server against the engine that is coming, and CI runs the same
+# check per pull request against the pinned corpus. If position units move
+# again inside `0.1.x`, narrow this back to an exact pin and say so here.
+#
+# It is a REGISTRY pin either way, not a commit: a `github:` spec in
+# `dependencies` makes every consumer clone the engine over git, so the git arm
+# below describes a state that ci.yml rejects on the pull request that would
+# introduce it.
 #
 # THREE QUESTIONS, deliberately kept apart:
 #
 #   1. Where is the pin against the registry, and does the lockfile agree with
-#      it? Cheap, and the answer is a version string.
+#      it? Cheap, and the answer is a version string. With a range rather than
+#      an exact pin, the lockfile is the thing that says what actually resolved.
 #
 #   2. Where is the registry against carve-js `main`? This is the one that
 #      actually failed: a June engine sat in six repos while every range was
