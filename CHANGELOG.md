@@ -6,6 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-09-09
+
+### Changed
+
+- The engine dependency `@markup-carve/carve` is a caret range (`^0.1.5`) instead
+  of an exact pin, so an engine fix reaches editors without a release of this
+  server. This release resolves carve 0.1.6 (#163).
+
+### Fixed
+
+- Tracking carve 0.1.6 picks up the engine's table-continuation lint fix: `carve
+  lint` no longer reports `djot-plus-bullet` on a continuation row of a core,
+  documented table construct (markup-carve/carve-js#1571,
+  markup-carve/carve-js#1572).
+
 ## [0.1.4] - 2026-08-27
 
 ### Added
