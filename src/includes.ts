@@ -16,8 +16,14 @@
  * - MUST bound total expanded byte size
  *
  * The other four live in {@link ./include-path.js}.
+ *
+ * The SELECTION checks - `#section` and the line range - live here too. They
+ * are not MUSTs, but they are decidable from the child's own source without
+ * merging anything, so a directive that names a section the child does not
+ * have is a real error this server can report rather than a silent no-op.
  */
 import { findDirectives } from './include-directive.js'
+import { lineCount, sections } from './include-selection.js'
 import type { IncludeResolver } from './include-path.js'
 
 /** Warning emitted by {@link resolveIncludes}. Shape mirrors the engine's. */
@@ -201,6 +207,20 @@ function visit(
     // client has open. `file` says where it actually arose.
     const at = anchor ?? { start: directive.start, end: directive.end }
 
+    // A directive may select a section or a line range, never both. Purely
+    // syntactic, so it is decided before anything is read - which also matches
+    // the engine, where it is the first rejection in `resolveChild`.
+    if (directive.section !== undefined && directive.lines !== undefined) {
+      warn(
+        state,
+        'include-selection-conflict',
+        `Include "${directive.path}" cannot use both a section and a line range.`,
+        at,
+        file,
+      )
+      continue
+    }
+
     // GUARD 4 (§19: MUST bound recursion depth). Checked before the resolver
     // is called, so the over-deep target is never read - but it is still
     // reported as a dependency, since a host may want to watch it.
@@ -286,6 +306,40 @@ function visit(
         file,
       )
       continue
+    }
+
+    // The line range is measured on the child's RAW source, the same way the
+    // engine measures it, so a range that starts past the end is reportable
+    // without expanding anything.
+    if (directive.lines !== undefined && directive.lines.start > lineCount(resolved.source)) {
+      warn(
+        state,
+        'include-lines-out-of-range',
+        `Include line range for "${directive.path}" starts past end of file.`,
+        at,
+        file,
+      )
+      continue
+    }
+
+    // A named section the child does not declare. Checked only when the child
+    // pulls in nothing itself: the engine selects AFTER the child's own
+    // includes are expanded, so a section that arrives through a grandchild is
+    // legitimate, and this server does not expand. Staying quiet there is the
+    // safe direction - a false "no such section" on a working document costs
+    // more than a missing one.
+    if (directive.section !== undefined && findDirectives(resolved.source).length === 0) {
+      const ids = sections(resolved.source)
+      if (!ids.some((section) => section.id === directive.section)) {
+        warn(
+          state,
+          'include-section',
+          `Include "${directive.path}" has no section "#${directive.section}".`,
+          at,
+          file,
+        )
+        continue
+      }
     }
 
     if (!state.documents.has(resolved.id)) {
