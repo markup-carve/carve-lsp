@@ -20,12 +20,17 @@ import path from 'node:path'
 import type { IncludeSourceCache } from './include-cache.js'
 
 /**
- * Why a resolver refused a target. Reported on {@link IncludeWarning.detail},
- * never folded into the diagnostic message: §19 I7 requires a
- * processor-generated message naming the failure class, and the
- * include-conformance goldens (`i10-fs-*`) spell every containment denial as
- * the single rule `include-unresolved` so that a denial cannot be used to probe
- * host layout. The class is kept available for tooling and tests.
+ * Why a resolver refused a target. Carried on `IncludeWarning.denial` and
+ * mapped to a published diagnostic code and message by
+ * {@link ./include-denial.js}.
+ *
+ * The cross-engine RULE id stays `include-unresolved` for every refusal: the
+ * include-conformance goldens (`i10-fs-*`) pin it, and §19 I7 still forbids
+ * surfacing a resolver's own error text. What §19 I7 requires is a
+ * processor-generated message naming the failure class, which is exactly what
+ * the mapping produces - and no class here discloses anything the author did
+ * not write, since a target outside the root is refused identically whether or
+ * not it exists.
  */
 export type IncludeDenial =
   | 'remote-not-allowed'

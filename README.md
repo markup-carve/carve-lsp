@@ -124,10 +124,18 @@ ordinary layout. Remote URLs are never fetched. Recursion depth and total
 expanded bytes are both bounded, so a file that includes another many times
 cannot amplify without limit.
 
-A refused target produces an `include-unresolved` diagnostic on the directive,
-and the directive stays literal. The diagnostic deliberately does not say WHICH
-check refused it: a distinguishable denial is a way to probe the layout of the
-machine the server runs on.
+A target that is simply missing produces an `include-unresolved` diagnostic on
+the directive. A target that was REFUSED produces `include-denied` instead, and
+says which policy refused it - outside the include root, an absolute path, or a
+remote URL - because being told a file "could not be resolved" when it is
+sitting right there sends an author looking for a typo that is not there. A
+target that is not a regular file reports `include-non-text`. In every case the
+directive stays literal.
+
+The distinction discloses nothing about the machine: a path outside the root is
+refused identically whether or not it exists, and the absolute and remote
+refusals are decided from the spelling the author wrote, before any path is
+joined. The resolver's own error text is still never published.
 
 A directive can select part of the child, and the selection is checked too. A
 section the child does not declare reports `include-section`, a line range

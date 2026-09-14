@@ -373,16 +373,17 @@ test('an enabled include publishes its warning as a diagnostic on the directive 
 })
 
 test('a denial class never reaches the published diagnostic message', () => {
-  // §19 I7: the message names the failure class in the processor's own words.
-  // The internal denial (`outside-root`) is diagnostic detail, not author text,
-  // because a distinguishable denial is a probe for host layout.
+  // §19 I7: the message names the failure class in the processor's OWN words.
+  // The internal token (`outside-root`) is not author text. The class itself is
+  // published - as the `include-denied` code and prose wording, see
+  // include-denial.test.ts - because it discloses nothing about the host.
   const result = analyzeCarve('{{ ../secret.crv }}\n', {
     includes: {
       resolver: (includePath) => ({ ok: false, id: includePath, denial: 'outside-root' }),
       sourcePath: '/doc.crv',
     },
   })
-  const diagnostic = result.diagnostics.find((d) => d.code === 'include-unresolved')
+  const diagnostic = result.diagnostics.find((d) => d.code === 'include-denied')
   assert.ok(diagnostic)
   assert.ok(!diagnostic.message.includes('outside-root'))
 })

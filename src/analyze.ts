@@ -21,6 +21,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { smartPunctuationText } from './inline-text.js'
 import { panelLetter } from './captions.js'
+import { includeDenialCode } from './include-denial.js'
 import { resolveIncludes, type IncludeDependency, type IncludeOptions } from './includes.js'
 import type { IncludeParseCache } from './include-cache.js'
 import { tableDiagnostics } from './table-diagnostics.js'
@@ -152,11 +153,14 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
         end: positionAt(norm, warning.end),
       },
       source: 'carve',
-      code: warning.rule,
-      // `warning.detail` is deliberately not folded in: §19 I7 keeps the
-      // failure class out of author-visible text so a denial cannot be used
-      // to probe host layout. The attributed child is named relative to the
-      // include root for the same reason - never as an absolute path.
+      // A refusal publishes its own code, so an author whose include was
+      // DENIED is not sent looking for a typo. The warning's rule id is left
+      // alone; `include-denial.ts` holds the mapping and why it is safe.
+      code: (warning.denial && includeDenialCode(warning.denial)) ?? warning.rule,
+      // `warning.detail` is deliberately not folded in: §19 I7 keeps a thrown
+      // resolver's own error out of author-visible text, and it routinely
+      // carries absolute host paths. The attributed child is named relative to
+      // the include root for the same reason - never as an absolute path.
       message: attributeToChild(warning.message, warning.file, options.includes),
     })
   }

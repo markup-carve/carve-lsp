@@ -34,7 +34,8 @@
  */
 import { findDirectives } from './include-directive.js'
 import { lineCount, sections } from './include-selection.js'
-import type { IncludeResolver } from './include-path.js'
+import { includeDenialMessage } from './include-denial.js'
+import type { IncludeDenial, IncludeResolver } from './include-path.js'
 
 /** Warning emitted by {@link resolveIncludes}. Shape mirrors the engine's. */
 export interface IncludeWarning {
@@ -47,13 +48,22 @@ export interface IncludeWarning {
   /** Human-readable explanation of the include degradation. */
   message: string
   /**
-   * Failure class, when one exists. Kept OUT of `message` on purpose: §19 I7
+   * Raw text of a resolver that THREW. Kept OUT of `message` on purpose: §19 I7
    * requires a processor-generated message naming the failure class rather
    * than a resolver's own error, which routinely embeds absolute filesystem
    * paths. Tools that want it (a log sink, a test) read it here; the published
-   * diagnostic does not print it.
+   * diagnostic does not print it. A resolver that REFUSED rather than threw
+   * reports its class on {@link denial}, which is typed and safe to publish.
    */
   detail?: string
+  /**
+   * Resolver refusal class, when the failure came from a resolver that reports
+   * one. Typed, unlike {@link detail}, which is overloaded with the raw text of
+   * a resolver that THREW and must never reach an author. The published
+   * diagnostic maps this to its code and wording; see
+   * {@link ./include-denial.js}.
+   */
+  denial?: IncludeDenial
   /** 0-based start offset in the ROOT document, inclusive. */
   start: number
   /** 0-based end offset in the ROOT document, exclusive. */
@@ -178,6 +188,7 @@ function warn(
   at: Anchor,
   file: string | undefined,
   detail?: string,
+  denial?: IncludeDenial,
 ): void {
   const warning: IncludeWarning = {
     ...locate(state, at.start),
@@ -188,6 +199,7 @@ function warn(
   }
   if (file !== undefined) warning.file = file
   if (detail !== undefined) warning.detail = detail
+  if (denial !== undefined) warning.denial = denial
   state.warnings.push(warning)
 }
 
@@ -317,12 +329,18 @@ function visit(
 
     if (!resolved.ok) {
       note(state, resolved.id, false, resolved.watch)
+      // The RULE id stays `include-unresolved` for every refusal: four
+      // include-conformance goldens pin it, and the engine's resolver returns a
+      // bare `null` that could not carry anything else. The class rides along
+      // typed, and the DIAGNOSTIC is where a refusal stops reading as a miss.
       warn(
         state,
         'include-unresolved',
-        `Include "${directive.path}" could not be resolved.`,
+        includeDenialMessage(resolved.denial, directive.path) ??
+          `Include "${directive.path}" could not be resolved.`,
         at,
         file,
+        undefined,
         resolved.denial,
       )
       continue
