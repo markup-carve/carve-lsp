@@ -25,7 +25,7 @@ The server communicates over **stdio** (`--stdio` flag).
 | Diagnostics | Push, document-pull, and workspace-pull diagnostics for syntax, migration hazards, silent failures, include failures, table metadata, dead references, and duplicate declarations |
 | Symbols | Nested document outline plus queryable workspace symbols, including included files |
 | Hover | Markup, cross-reference, include, citation, and table-marker explanations |
-| Completion | Admonitions, attributes, semantic spans, citations, references, workspace anchors, and contained include paths/fragments |
+| Completion | Admonitions, attributes, semantic spans, citations, references, workspace anchors, and contained include paths, sections and options |
 | Navigation | Document links, go-to-definition, highlights, and references for anchors, captions, footnotes, citations, and link labels |
 | Rename | Workspace-wide, namespace-aware rename; generated heading ids become explicit when renamed |
 | Code actions | Migration and lint quick-fixes, table marker repair, and creation of missing definitions |
@@ -129,13 +129,28 @@ and the directive stays literal. The diagnostic deliberately does not say WHICH
 check refused it: a distinguishable denial is a way to probe the layout of the
 machine the server runs on.
 
+A directive can select part of the child, and the selection is checked too. A
+section the child does not declare reports `include-section`, a line range
+starting past its end reports `include-lines-out-of-range`, and naming both a
+section and a line range reports `include-selection-conflict` without reading
+anything. A child that pulls in its own includes is exempt from the section
+check, because the missing heading may legitimately arrive through it.
+
 The server watches every legal include target, including a missing target that
 may be created later. A child change invalidates its cached source and parsed
 tree, then revalidates every open document that includes it. Go to definition
-on a directive opens the resolved child, and child headings appear in the
-including document's symbol result with locations in the child file. All three
-features use the same contained resolver as diagnostics; refused paths are
-never registered as watchers or navigation targets.
+on a directive opens the resolved child - on the selected section, or on the
+first line of the selected range, rather than at the top of the file - and
+child headings appear in the including document's symbol result with locations
+in the child file. All three features use the same contained resolver as
+diagnostics; refused paths are never registered as watchers or navigation
+targets.
+
+Completion inside a directive offers contained `.crv` paths, the target's
+heading ids, the option names, and their value shapes. Every suggestion is
+inserted in the spelling the directive grammar accepts: a fragment typed
+without its separating space is repaired to carry one, since `{{ ch1.crv#id }}`
+is not a directive at all and would silently degrade to prose.
 
 ## Editor setup
 
