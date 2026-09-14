@@ -29,6 +29,8 @@ export interface IncludeSettings {
   allowedRemoteHosts?: string[]
   maxDepth?: number
   maxBytes?: number
+  /** Resolver calls allowed for one walk. Default 1000. */
+  maxResolverCalls?: number
 }
 
 export const DEFAULT_INCLUDE_SETTINGS: IncludeSettings = { enabled: 'auto' }
@@ -55,6 +57,9 @@ export function readIncludeSettings(raw: unknown): IncludeSettings {
   }
   if (typeof source['maxDepth'] === 'number') settings.maxDepth = source['maxDepth']
   if (typeof source['maxBytes'] === 'number') settings.maxBytes = source['maxBytes']
+  if (typeof source['maxResolverCalls'] === 'number') {
+    settings.maxResolverCalls = source['maxResolverCalls']
+  }
   return settings
 }
 
@@ -161,5 +166,8 @@ export function includeOptionsFor(input: IncludeGateInput): IncludeOptions | und
   const options: IncludeOptions = { resolver, sourcePath: documentPath, includeRoot: root }
   if (input.settings.maxDepth !== undefined) options.maxDepth = input.settings.maxDepth
   if (input.settings.maxBytes !== undefined) options.maxBytes = input.settings.maxBytes
+  if (input.settings.maxResolverCalls !== undefined) {
+    options.maxResolverCalls = input.settings.maxResolverCalls
+  }
   return options
 }

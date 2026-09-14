@@ -9,13 +9,23 @@
  * because §19 makes includes processor-level and the pinned engine has no
  * include pass at all.
  *
- * Two of the six §19 MUSTs are properties of the graph rather than of a single
+ * Four of the §19 MUSTs are properties of the graph rather than of a single
  * path, so they are enforced here:
  *
  * - MUST bound recursion depth
  * - MUST bound total expanded byte size
+ * - MUST bound resolver invocations per render
+ * - MUST make refusal terminal: once a whole-render total is spent, every
+ *   later directive degrades WITHOUT being resolved
  *
- * The other four live in {@link ./include-path.js}.
+ * The path-level ones live in {@link ./include-path.js}.
+ *
+ * The byte budget does not subsume the resolver-call bound, and cannot: an
+ * unresolved target charges zero bytes, so a document of directives naming
+ * files that do not exist resolves every one of them with the budget
+ * untouched. Measured on this walk before the bound existed, 10,000 such
+ * directives cost 10,000 filesystem resolutions on a pass the server re-runs
+ * as the author types.
  *
  * The SELECTION checks - `#section` and the line range - live here too. They
  * are not MUSTs, but they are decidable from the child's own source without
@@ -86,6 +96,15 @@ export interface IncludeOptions {
   maxDepth?: number
   /** Total byte budget across the walk. Default max(1 MiB, 8 x root bytes). */
   maxBytes?: number
+  /**
+   * Resolver calls allowed for one walk. Default 1000, the §19 RECOMMENDED
+   * floor and the engine's own default.
+   *
+   * Bounds the WORK, which the byte budget does not: a target is resolved
+   * before its size is known, and a target that fails to resolve is never
+   * charged at all.
+   */
+  maxResolverCalls?: number
 }
 
 export interface IncludeResolution {
@@ -103,6 +122,7 @@ export interface IncludeResolution {
 
 const MIN_BUDGET = 1024 * 1024
 const DEFAULT_MAX_DEPTH = 16
+const DEFAULT_MAX_RESOLVER_CALLS = 1000
 
 interface Anchor {
   start: number
@@ -115,6 +135,16 @@ interface State {
   maxDepth: number
   maxBytes: number
   usedBytes: number
+  maxResolverCalls: number
+  resolverCalls: number
+  /**
+   * Rule of the first whole-walk total to refuse - the byte budget or the
+   * resolver-call bound - or undefined while both have room. Both only ever
+   * grow, so once either is spent no later directive can succeed; §19's
+   * "refusal is terminal" requires the rest to degrade without being resolved
+   * rather than be resolved and then refused.
+   */
+  spent?: 'include-budget' | 'include-call-limit'
   warnings: IncludeWarning[]
   dependencies: Map<string, IncludeDependency>
   documents: Map<string, { source: string; version?: string }>
@@ -183,6 +213,12 @@ function note(state: State, id: string, resolved: boolean, watch?: string): void
   }
 }
 
+function spentMessage(rule: 'include-budget' | 'include-call-limit', path: string): string {
+  return rule === 'include-call-limit'
+    ? `Include resolver call limit exceeded for "${path}".`
+    : `Include byte budget exceeded by "${path}".`
+}
+
 function visit(
   state: State,
   text: string,
@@ -236,21 +272,28 @@ function visit(
       continue
     }
 
-    // GUARD 5a (§19: MUST bound total expanded byte size). Once the budget is
-    // gone, later directives are refused BEFORE the resolver is called, so an
-    // exhausted budget also stops the reads. Without this a document with N
-    // sibling directives still pays N reads after expansion had already
-    // stopped.
-    if (state.usedBytes >= state.maxBytes) {
-      warn(
-        state,
-        'include-budget',
-        `Include byte budget exceeded by "${directive.path}".`,
-        at,
-        file,
-      )
+    // GUARD 5a (§19: refusal is terminal). A whole-walk total is already spent,
+    // so this directive cannot expand whatever it resolves to. It is refused
+    // WITHOUT being resolved - the target is never read - and reported
+    // unresolved, because it genuinely was not.
+    if (state.spent !== undefined) {
+      note(state, directive.path, false)
+      warn(state, state.spent, spentMessage(state.spent, directive.path), at, file)
       continue
     }
+
+    // GUARD 6 (§19: MUST bound resolver invocations per render). Separate from
+    // the byte budget because they bound different things: the budget bounds
+    // expanded OUTPUT, this bounds the WORK. A directive past the bound "MUST
+    // NOT be passed to the resolver", so it is checked before the call, and the
+    // latch carries the refusal to every later directive.
+    if (state.resolverCalls >= state.maxResolverCalls) {
+      state.spent = 'include-call-limit'
+      note(state, directive.path, false)
+      warn(state, 'include-call-limit', spentMessage('include-call-limit', directive.path), at, file)
+      continue
+    }
+    state.resolverCalls += 1
 
     let resolved
     try {
@@ -285,6 +328,24 @@ function visit(
       continue
     }
 
+    // §19 "Text-only": a binary or otherwise non-text target is not an include.
+    // Checked BEFORE the target is noted resolved, charged or cached, so a
+    // binary file named `.crv` degrades to the literal directive with a warning
+    // instead of entering the walk as if it were source. `note` only ever
+    // upgrades, so the order matters: noting it resolved first would make the
+    // downgrade unreachable.
+    if (resolved.source.includes('\u0000')) {
+      note(state, resolved.id, false, resolved.watch)
+      warn(
+        state,
+        'include-non-text',
+        `Include "${directive.path}" did not resolve to text.`,
+        at,
+        file,
+      )
+      continue
+    }
+
     note(state, resolved.id, true, resolved.watch)
 
     if (stack.includes(resolved.id)) {
@@ -297,14 +358,12 @@ function visit(
     // includes the same target N times pays N times - which is the shape an
     // include bomb actually takes.
     state.usedBytes += resolved.bytes
+    // Latched as soon as the budget is fully consumed, not only when it is
+    // overrun: a charge landing exactly on the limit leaves no room either, and
+    // every later directive must then degrade without being resolved.
+    if (state.usedBytes >= state.maxBytes) state.spent = 'include-budget'
     if (state.usedBytes > state.maxBytes) {
-      warn(
-        state,
-        'include-budget',
-        `Include byte budget exceeded by "${directive.path}".`,
-        at,
-        file,
-      )
+      warn(state, 'include-budget', spentMessage('include-budget', directive.path), at, file)
       continue
     }
 
@@ -372,6 +431,8 @@ export function resolveIncludes(source: string, options: IncludeOptions = {}): I
     maxDepth: options.maxDepth ?? DEFAULT_MAX_DEPTH,
     maxBytes: options.maxBytes ?? Math.max(MIN_BUDGET, Buffer.byteLength(normalized, 'utf8') * 8),
     usedBytes: 0,
+    maxResolverCalls: options.maxResolverCalls ?? DEFAULT_MAX_RESOLVER_CALLS,
+    resolverCalls: 0,
     warnings: [],
     dependencies: new Map(),
     documents: new Map(),

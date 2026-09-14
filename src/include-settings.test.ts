@@ -213,3 +213,58 @@ test('settings are read from the carve.includes section', () => {
     maxBytes: 2048,
   })
 })
+
+// ---------------------------------------------------------------------------
+// The resolver-call bound (PART 9 §19), configurable like the other two totals
+// ---------------------------------------------------------------------------
+
+test('the resolver-call bound is read from the carve.includes section', () => {
+  const settings = readIncludeSettings({ carve: { includes: { maxResolverCalls: 25 } } })
+  assert.equal(settings.maxResolverCalls, 25)
+})
+
+test('a non-numeric resolver-call bound is ignored rather than trusted as given', () => {
+  const settings = readIncludeSettings({ carve: { includes: { maxResolverCalls: 'lots' } } })
+  assert.equal(settings.maxResolverCalls, undefined)
+})
+
+test('an unset resolver-call bound leaves the walk on its own default', () => {
+  const settings = readIncludeSettings({ carve: { includes: { enabled: 'on' } } })
+  assert.equal(settings.maxResolverCalls, undefined)
+})
+
+test('a configured resolver-call bound reaches the walk options', () => {
+  const dir = workspace()
+  const options = includeOptionsFor({
+    uri: pathToFileURL(path.join(dir, 'docs/main.crv')).href,
+    settings: { enabled: 'on', maxResolverCalls: 25 },
+    workspaceTrusted: true,
+    workspaceRoots: [dir],
+  })
+  assert.equal(options?.maxResolverCalls, 25)
+})
+
+test('an unconfigured resolver-call bound is left off the options entirely', () => {
+  // Absent rather than undefined-valued, so the walk applies its own default
+  // under exactOptionalPropertyTypes.
+  const dir = workspace()
+  const options = includeOptionsFor({
+    uri: pathToFileURL(path.join(dir, 'docs/main.crv')).href,
+    settings: { enabled: 'on' },
+    workspaceTrusted: true,
+    workspaceRoots: [dir],
+  })
+  assert.ok(options && !('maxResolverCalls' in options))
+})
+
+test('the resolver-call bound does not open the capability on its own', () => {
+  // §19 opt-in: a bound is a limit, never a grant.
+  const dir = workspace()
+  const options = includeOptionsFor({
+    uri: pathToFileURL(path.join(dir, 'docs/main.crv')).href,
+    settings: { enabled: 'auto', maxResolverCalls: 25 },
+    workspaceTrusted: false,
+    workspaceRoots: [dir],
+  })
+  assert.equal(options, undefined)
+})
