@@ -21,7 +21,13 @@ export interface IncludeSettings {
    * OFF: silence is not consent.
    */
   enabled: 'auto' | 'on' | 'off'
-  /** Containment root override. Otherwise the workspace root, then the document's directory. */
+  /**
+   * Containment root override. Otherwise the workspace root, then the
+   * document's directory.
+   *
+   * Only an ABSOLUTE, non-blank path is a root. See {@link usableIncludeRoot}
+   * for why the other spellings are dropped rather than resolved.
+   */
   includeRoot?: string
   /** Allow absolute include paths, still subject to root containment. */
   allowAbsolute?: boolean
@@ -40,7 +46,7 @@ export const DEFAULT_INCLUDE_SETTINGS: IncludeSettings = { enabled: 'auto' }
  * `workspace/didChangeConfiguration` payload. Anything unrecognized falls back
  * to the default rather than being trusted as given.
  */
-export function readIncludeSettings(raw: unknown): IncludeSettings {
+export function readIncludeSettings(raw: unknown, log?: (message: string) => void): IncludeSettings {
   const source = (raw as { carve?: { includes?: Record<string, unknown> } } | undefined)?.carve
     ?.includes
   if (!source || typeof source !== 'object') return DEFAULT_INCLUDE_SETTINGS
@@ -48,7 +54,12 @@ export function readIncludeSettings(raw: unknown): IncludeSettings {
   const settings: IncludeSettings = {
     enabled: enabled === 'on' || enabled === 'off' ? enabled : 'auto',
   }
-  if (typeof source['includeRoot'] === 'string') settings.includeRoot = source['includeRoot']
+  const configuredRoot = source['includeRoot']
+  if (typeof configuredRoot === 'string') {
+    const verdict = usableIncludeRoot(configuredRoot)
+    if (verdict.root !== undefined) settings.includeRoot = verdict.root
+    else log?.(ignoredIncludeRootMessage(configuredRoot, verdict.ignored))
+  }
   if (typeof source['allowAbsolute'] === 'boolean') settings.allowAbsolute = source['allowAbsolute']
   if (Array.isArray(source['allowedRemoteHosts'])) {
     settings.allowedRemoteHosts = source['allowedRemoteHosts'].filter(
@@ -61,6 +72,46 @@ export function readIncludeSettings(raw: unknown): IncludeSettings {
     settings.maxResolverCalls = source['maxResolverCalls']
   }
   return settings
+}
+
+/**
+ * Whether a configured `includeRoot` is usable as a containment root, and why
+ * not when it is not.
+ *
+ * Both rejected spellings resolve against the PROCESS WORKING DIRECTORY, which
+ * is the one root §19 containment must never have: a language server is
+ * commonly spawned from the project the editor opened, from the user's home or
+ * from `/`, and none of those is the workspace.
+ *
+ * - BLANK. `realpathSync('')` returns the process working directory and does
+ *   NOT throw, so a blank value is not a value that fails - it is a value that
+ *   silently succeeds at the wrong root. An editor returns `''` for an unset
+ *   string setting, so a client forwarding its setting unchanged sends one by
+ *   default.
+ * - RELATIVE. The configuration protocol gives a relative path no base, so the
+ *   only base available here is again the working directory. Resolving it
+ *   against the workspace root instead would be a policy this server invented:
+ *   it reads the client's intent, and a value such as `..` would widen the root
+ *   ABOVE the workspace, which is the same escape by another route. Dropping it
+ *   falls back to a root the client did name.
+ *
+ * Dropping is fail-closed in both cases: the fallback chain - workspace root,
+ * then the document's own directory - is never wider than the workspace.
+ */
+export function usableIncludeRoot(
+  value: string,
+): { root: string; ignored?: undefined } | { root?: undefined; ignored: 'blank' | 'relative' } {
+  if (value.trim() === '') return { ignored: 'blank' }
+  if (!path.isAbsolute(value)) return { ignored: 'relative' }
+  return { root: value }
+}
+
+export function ignoredIncludeRootMessage(value: string, reason: 'blank' | 'relative'): string {
+  const because =
+    reason === 'blank'
+      ? 'it is blank'
+      : `it is relative (${JSON.stringify(value)}), and a relative root would resolve against the server's working directory`
+  return `Carve: ignoring carve.includes.includeRoot because ${because}; falling back to the workspace root.`
 }
 
 /** Client-reported workspace trust. Absent means untrusted. */
@@ -133,10 +184,16 @@ export function includeOptionsFor(input: IncludeGateInput): IncludeOptions | und
   // directory to resolve against and gets no capability.
   if (documentPath === undefined) return undefined
 
+  // Defense in depth against a settings object built by hand rather than read
+  // through `readIncludeSettings`: an unusable root is ABSENT here too, so the
+  // fallback chain below is the same one an omitted key already takes.
+  const override =
+    input.settings.includeRoot === undefined
+      ? undefined
+      : usableIncludeRoot(input.settings.includeRoot).root
+
   const configured =
-    input.settings.includeRoot ??
-    workspaceRootFor(documentPath, input.workspaceRoots) ??
-    dirname(documentPath)
+    override ?? workspaceRootFor(documentPath, input.workspaceRoots) ?? dirname(documentPath)
 
   // Canonicalize the root here as well as inside the resolver, so that the
   // root a caller sees on `includeRoot` is in the same coordinate system as
