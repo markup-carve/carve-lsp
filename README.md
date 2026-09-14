@@ -224,14 +224,4 @@ Any editor with LSP support can start the server as an external process:
 
 ## Development
 
-```bash
-npm install
-npm run build
-npm test
-```
-
-Run the server directly over stdio:
-
-```bash
-node dist/server.js --stdio
-```
+Contributor setup, testing, and maintenance notes are in the [development guide](docs/development.md).
