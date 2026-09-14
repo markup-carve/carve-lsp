@@ -268,3 +268,83 @@ test('the resolver-call bound does not open the capability on its own', () => {
   })
   assert.equal(options, undefined)
 })
+
+/**
+ * The reader-level half of the containment fix. The behavior it produces is
+ * pinned end-to-end in `include-root-containment.test.ts`, against the running
+ * server; these pin the seam and the wording the log carries.
+ */
+test('a blank includeRoot is read as absent, not as the working directory', () => {
+  const settings = readIncludeSettings({ carve: { includes: { enabled: 'on', includeRoot: '' } } })
+  assert.equal(settings.includeRoot, undefined)
+})
+
+test('a whitespace-only includeRoot is read as absent too', () => {
+  const settings = readIncludeSettings({
+    carve: { includes: { enabled: 'on', includeRoot: ' \t ' } },
+  })
+  assert.equal(settings.includeRoot, undefined)
+})
+
+test('a relative includeRoot is read as absent, since it has no base but the cwd', () => {
+  const settings = readIncludeSettings({
+    carve: { includes: { enabled: 'on', includeRoot: 'docs' } },
+  })
+  assert.equal(settings.includeRoot, undefined)
+})
+
+test('dropping a blank includeRoot does not disable includes', () => {
+  const settings = readIncludeSettings({ carve: { includes: { enabled: 'on', includeRoot: '' } } })
+  assert.equal(settings.enabled, 'on')
+})
+
+test('an absolute includeRoot is still read as given', () => {
+  const settings = readIncludeSettings({
+    carve: { includes: { enabled: 'on', includeRoot: '/ws/docs' } },
+  })
+  assert.equal(settings.includeRoot, '/ws/docs')
+})
+
+test('a dropped includeRoot is logged once, naming the reason', () => {
+  const logged: string[] = []
+  readIncludeSettings({ carve: { includes: { includeRoot: '' } } }, (m) => logged.push(m))
+  assert.deepEqual(logged, [
+    'Carve: ignoring carve.includes.includeRoot because it is blank; falling back to the workspace root.',
+  ])
+})
+
+test('a dropped relative includeRoot names the value it dropped', () => {
+  const logged: string[] = []
+  readIncludeSettings({ carve: { includes: { includeRoot: 'docs' } } }, (m) => logged.push(m))
+  assert.match(logged[0] ?? '', /relative \("docs"\)/)
+})
+
+test('an honored includeRoot logs nothing', () => {
+  const logged: string[] = []
+  readIncludeSettings({ carve: { includes: { includeRoot: '/ws' } } }, (m) => logged.push(m))
+  assert.deepEqual(logged, [])
+})
+
+test('a blank includeRoot reaching includeOptionsFor directly falls back as well', () => {
+  // `readIncludeSettings` is not the only way an `IncludeSettings` is built;
+  // the containment decision is owned here, so the guard is here too.
+  const dir = workspace()
+  const options = includeOptionsFor({
+    uri: pathToFileURL(path.join(dir, 'docs/main.crv')).href,
+    settings: { enabled: 'on', includeRoot: '' },
+    workspaceTrusted: true,
+    workspaceRoots: [dir],
+  })
+  assert.equal(options?.includeRoot, dir)
+})
+
+test('a relative includeRoot reaching includeOptionsFor directly falls back as well', () => {
+  const dir = workspace()
+  const options = includeOptionsFor({
+    uri: pathToFileURL(path.join(dir, 'docs/main.crv')).href,
+    settings: { enabled: 'on', includeRoot: 'docs' },
+    workspaceTrusted: true,
+    workspaceRoots: [dir],
+  })
+  assert.equal(options?.includeRoot, dir)
+})

@@ -94,8 +94,17 @@ const analysisCache = new VersionedCache<Analysis>()
 let watcherRegistration: Disposable | undefined
 let watcherRefresh = Promise.resolve()
 
+/**
+ * Say so when a configured `includeRoot` was dropped. A root the client
+ * believes is in force but which the server ignored is exactly the kind of
+ * silent disagreement §19 containment should never have.
+ */
+function logIncludeSettings(message: string): void {
+  connection.console.warn(message)
+}
+
 connection.onInitialize((params) => {
-  includeSettings = readIncludeSettings(params.initializationOptions)
+  includeSettings = readIncludeSettings(params.initializationOptions, logIncludeSettings)
   workspaceTrusted = readWorkspaceTrusted(params.initializationOptions)
   // Every folder, not just the first: a multi-root session roots each document
   // at the folder it actually lives in.
@@ -161,7 +170,7 @@ connection.onInitialized(() => {
 })
 
 connection.onDidChangeConfiguration((change) => {
-  includeSettings = readIncludeSettings(change.settings)
+  includeSettings = readIncludeSettings(change.settings, logIncludeSettings)
   const supplied = Boolean((change.settings as { carve?: unknown } | undefined)?.carve)
   if (supplied) clientOwnsCarveSettings = true
   carveSettings = supplied || clientOwnsCarveSettings
