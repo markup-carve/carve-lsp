@@ -75,6 +75,20 @@ export interface IncludeWarning {
    * names; a warning raised while walking a child is attributed to that child.
    */
   file?: string
+  /**
+   * Where the warning actually sits inside {@link file}: that file's own
+   * offsets, and its own 1-based line and column.
+   *
+   * `start`/`end` above stay anchored to the ROOT document, because that is
+   * the only range valid in the document the client has open. This is the
+   * other half, for a host that can also open the child: a diagnostic that
+   * points at the parent for a child's problem sends the author to edit the
+   * wrong file, which is worse than reporting nothing.
+   *
+   * Absent for a warning raised in the root document, where `start`/`end`
+   * already are that position.
+   */
+  within?: { line: number; column: number; start: number; end: number }
 }
 
 /**
@@ -126,8 +140,16 @@ export interface IncludeResolution {
   dependencies: IncludeDependency[]
   /** Bytes charged against the budget. */
   bytes: number
-  /** Successfully read child documents, de-duplicated by canonical id. */
-  documents: Array<{ id: string; source: string; version?: string }>
+  /**
+   * Successfully read child documents, de-duplicated by canonical id.
+   *
+   * `watch` is the resolver's own filesystem path for the child, present only
+   * when the resolver has one. It is what separates a real file from an
+   * identity that merely looks like a path: a virtual-filesystem resolver may
+   * hand back `/virtual/child.crv`, and a host that turned that into a `file:`
+   * URI would offer the author a location that does not exist.
+   */
+  documents: Array<{ id: string; source: string; version?: string; watch?: string }>
 }
 
 const MIN_BUDGET = 1024 * 1024
@@ -135,8 +157,17 @@ const DEFAULT_MAX_DEPTH = 16
 const DEFAULT_MAX_RESOLVER_CALLS = 1000
 
 interface Anchor {
+  /** 0-based start offset in the ROOT document, inclusive. */
   start: number
+  /** 0-based end offset in the ROOT document, exclusive. */
   end: number
+  /**
+   * The same directive located in the file it is actually written in, when
+   * that is not the root. Carried on the anchor rather than as a parameter of
+   * {@link warn}, so every warning gets it without a call site opting in - the
+   * sites that would be forgotten are the nested ones this exists for.
+   */
+  within?: { line: number; column: number; start: number; end: number }
 }
 
 interface State {
@@ -157,7 +188,7 @@ interface State {
   spent?: 'include-budget' | 'include-call-limit'
   warnings: IncludeWarning[]
   dependencies: Map<string, IncludeDependency>
-  documents: Map<string, { source: string; version?: string }>
+  documents: Map<string, { source: string; version?: string; watch?: string }>
   /** Offsets of every line start in the root document, for line/column. */
   lineStarts: number[]
 }
@@ -170,15 +201,19 @@ function lineStarts(source: string): number[] {
   return starts
 }
 
-function locate(state: State, offset: number): { line: number; column: number } {
+function locateIn(starts: number[], offset: number): { line: number; column: number } {
   let low = 0
-  let high = state.lineStarts.length - 1
+  let high = starts.length - 1
   while (low < high) {
     const mid = (low + high + 1) >> 1
-    if (state.lineStarts[mid]! <= offset) low = mid
+    if (starts[mid]! <= offset) low = mid
     else high = mid - 1
   }
-  return { line: low + 1, column: offset - state.lineStarts[low]! + 1 }
+  return { line: low + 1, column: offset - starts[low]! + 1 }
+}
+
+function locate(state: State, offset: number): { line: number; column: number } {
+  return locateIn(state.lineStarts, offset)
 }
 
 function warn(
@@ -198,6 +233,7 @@ function warn(
     end: at.end,
   }
   if (file !== undefined) warning.file = file
+  if (at.within !== undefined) warning.within = at.within
   if (detail !== undefined) warning.detail = detail
   if (denial !== undefined) warning.denial = denial
   state.warnings.push(warning)
@@ -239,12 +275,19 @@ function visit(
   depth: number,
   anchor: Anchor | null,
 ): void {
+  // A child is scanned against its OWN line table, so a span reported for it
+  // is a real location in it rather than a root offset read against the wrong
+  // text. The root reuses the table the state already built.
+  const lines = anchor === null ? state.lineStarts : lineStarts(text)
+  const within = (start: number, end: number): Anchor['within'] =>
+    anchor === null ? undefined : { ...locateIn(lines, start), start, end }
+
   const directives = findDirectives(text, (part, start, end) => {
     warn(
       state,
       'include-unknown-option',
       `Unknown include option "${part}".`,
-      anchor ?? { start, end },
+      anchor === null ? { start, end } : { ...anchor, within: within(start, end) },
       file,
     )
   })
@@ -252,8 +295,12 @@ function visit(
   for (const directive of directives) {
     // A nested warning is reported at the top-level directive that pulled the
     // chain in, because that is the only range valid in the document the
-    // client has open. `file` says where it actually arose.
-    const at = anchor ?? { start: directive.start, end: directive.end }
+    // client has open. `file` says where it actually arose, and `within` says
+    // where in that file.
+    const at: Anchor =
+      anchor === null
+        ? { start: directive.start, end: directive.end }
+        : { ...anchor, within: within(directive.start, directive.end) }
 
     // A directive may select a section or a line range, never both. Purely
     // syntactic, so it is decided before anything is read - which also matches
@@ -364,6 +411,14 @@ function visit(
       continue
     }
 
+    // Line endings are normalized for the CHILD exactly as they are for the
+    // root, and for the same reason: every offset this pass reports is read
+    // back against this text. A lone `\r` is a line break to a client and not
+    // to a `\n` scan, so a child written with CR endings would otherwise get a
+    // location on line 1 for a directive further down. The BYTE budget is not
+    // affected - it charges `resolved.bytes`, which is what was read off disk.
+    const childSource = resolved.source.replace(/\r\n?/g, '\n')
+
     note(state, resolved.id, true, resolved.watch)
 
     if (stack.includes(resolved.id)) {
@@ -388,7 +443,7 @@ function visit(
     // The line range is measured on the child's RAW source, the same way the
     // engine measures it, so a range that starts past the end is reportable
     // without expanding anything.
-    if (directive.lines !== undefined && directive.lines.start > lineCount(resolved.source)) {
+    if (directive.lines !== undefined && directive.lines.start > lineCount(childSource)) {
       warn(
         state,
         'include-lines-out-of-range',
@@ -405,8 +460,8 @@ function visit(
     // legitimate, and this server does not expand. Staying quiet there is the
     // safe direction - a false "no such section" on a working document costs
     // more than a missing one.
-    if (directive.section !== undefined && findDirectives(resolved.source).length === 0) {
-      const ids = sections(resolved.source)
+    if (directive.section !== undefined && findDirectives(childSource).length === 0) {
+      const ids = sections(childSource)
       if (!ids.some((section) => section.id === directive.section)) {
         warn(
           state,
@@ -421,12 +476,13 @@ function visit(
 
     if (!state.documents.has(resolved.id)) {
       state.documents.set(resolved.id, {
-        source: resolved.source,
+        source: childSource,
+        ...(resolved.watch === undefined ? {} : { watch: resolved.watch }),
         ...(resolved.version === undefined ? {} : { version: resolved.version }),
       })
     }
 
-    visit(state, resolved.source, resolved.id, [...stack, resolved.id], depth + 1, at)
+    visit(state, childSource, resolved.id, [...stack, resolved.id], depth + 1, at)
   }
 }
 
