@@ -128,7 +128,12 @@ jobs:
               # both; `tail -1` alone concatenates the spec onto the version the
               # moment a second matching release exists, yielding
               # `@markup-carve/carve@0.1.20.1.2` rather than a version.
-              resolved="$(npm view "${pkg}@${spec}" version 2>/dev/null | tail -1 | tr -d "'\"" | awk '{print $NF}')"
+              # The whole matching SET is kept, not only the highest: the
+              # lockfile step asks whether what it installs is in it, so npm
+              # evaluates the range and no semver implementation is carried here.
+              matching="$(npm view "${pkg}@${spec}" version 2>/dev/null | tr -d "'\"" | awk 'NF {print $NF}' | tr '\n' ' ')"
+              resolved="${matching% }"
+              resolved="${resolved##* }"
               if [ -z "${resolved}" ]; then
                 echo "::error::${pkg}@${spec} resolves to nothing on the registry - an install here is broken"
                 exit 1
@@ -138,12 +143,15 @@ jobs:
                 *) echo "::error::resolved read back as \"${resolved}\" from the registry, which is not a version - every comparison below it would be meaningless"; exit 1 ;;
               esac
               echo "declared        ${spec}"
+              echo "matches         ${matching}"
               echo "resolves to     ${resolved}"
               echo "registry latest ${latest}"
               if [ "${resolved}" != "${latest}" ]; then
-                echo "::warning::${pkg} ${latest} is published, but this repo takes ${resolved} - the pin is exact, so no release arrives on its own"
+                echo "::warning::${pkg} ${latest} is published, but the pin ${spec} takes ${resolved} - the published engine cannot reach this repo without widening it"
               fi
               echo "kind=registry" >> "${GITHUB_OUTPUT}"
+              echo "matching=${matching}" >> "${GITHUB_OUTPUT}"
+              echo "resolved=${resolved}" >> "${GITHUB_OUTPUT}"
               ;;
           esac
           echo "latest=${latest}" >> "${GITHUB_OUTPUT}"
@@ -168,9 +176,19 @@ jobs:
               *"${commit}") ;;
               *) echo "::error::package.json pins carve-js commit ${commit} but the lockfile resolves to ${resolved} - what CI tests is not what the manifest says"; exit 1 ;;
             esac
-          elif [ "${declared}" != "${locked}" ]; then
-            echo "::error::package.json declares ${declared} but the lockfile installs ${locked} - what CI tests is not what the manifest says"
-            exit 1
+          else
+            # The question is whether the lockfile SATISFIES the declared spec,
+            # not whether it repeats it. String equality answered that only while
+            # the pin was exact, and has been false on every install since #163.
+            matching='${{ steps.registry.outputs.matching }}'
+            case " ${matching} " in
+              *" ${locked} "*) ;;
+              *) echo "::error::package.json declares ${declared}, which the registry matches to [${matching% }], but the lockfile installs ${locked} - what CI tests is not what the manifest says"; exit 1 ;;
+            esac
+            best='${{ steps.registry.outputs.resolved }}'
+            if [ "${locked}" != "${best}" ]; then
+              echo "::warning::${locked} is locked, but ${declared} now admits ${best} - the lockfile is behind its own range"
+            fi
           fi
 
       - name: Check out the engine
