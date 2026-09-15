@@ -39,6 +39,11 @@ interface DenialDiagnostic {
  * `not-found` is deliberately absent: a target that is merely missing IS
  * unresolved, and keeping `include-unresolved` on it is what makes the new
  * codes mean something.
+ *
+ * So is the include-security corpus's `no-root` class, for a different reason:
+ * it never reaches a resolver. A configured value that names no root leaves
+ * `includeOptionsFor` with no resolver to build, and the include pass is inert
+ * without one, so no directive is recognized and nothing is refused.
  */
 const DENIALS: Partial<Record<IncludeDenial, DenialDiagnostic>> = {
   'outside-root': {

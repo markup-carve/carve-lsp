@@ -41,7 +41,7 @@ jobs:
       - run: npm test
 
       # The unit suite reads exactly ONE file out of the tests/spec submodule
-      # (tests/include-security-conformance/vectors.json, 14 vectors). It reads no
+      # (tests/include-security-conformance/vectors.json, 19 vectors). It reads no
       # corpus document at all, so every `chore: bump spec corpus` PR was gated by a
       # check that could not tell one corpus from another: measured on this repo,
       # deleting the entire tests/spec/tests/corpus directory left the suite green at
