@@ -49,6 +49,60 @@ test('a malformed shift value is an unknown option (i01-shift-malformed-value)',
   assert.deepEqual(seen, ['@shift:x'])
 })
 
+test('a quoted option value keeps its spaces (PART 4 attribute_value)', () => {
+  const seen: string[] = []
+  const found = findDirectives('{{ child @title:"a b" }}', (part) => seen.push(part))
+  // `title` is not a defined option, so the directive stays literal - but the
+  // warning must name the option the author wrote, not a fragment of it.
+  assert.deepEqual(found, [])
+  assert.deepEqual(seen, ['@title:"a b"'])
+})
+
+test('a quoted value satisfies a known option', () => {
+  const [d] = findDirectives('{{ child @shift:"2" }}')
+  assert.ok(d)
+  assert.equal(d.shift, 2)
+})
+
+test('the closer is the first }} outside a quoted run (markup-carve/carve#2013)', () => {
+  const seen: string[] = []
+  const source = '{{ ch.crv @label:"a }} more" }} {{ b.crv }}'
+  const found = findDirectives(source, (part) => seen.push(part))
+  // The first token ends at the pair AFTER the closing quote, so the second
+  // directive is recognized whole rather than out of the leftovers.
+  assert.deepEqual(seen, ['@label:"a }} more"'])
+  assert.deepEqual(
+    found.map((d) => d.path),
+    ['b.crv'],
+  )
+  assert.equal(found[0]?.start, source.indexOf('{{ b.crv'))
+})
+
+test("a single-quoted value is a run too", () => {
+  const seen: string[] = []
+  assert.deepEqual(findDirectives("{{ ch.crv @label:'a }} b' }}", (part) => seen.push(part)), [])
+  assert.deepEqual(seen, ["@label:'a }} b'"])
+})
+
+test('an unterminated quote opens no run, so the first pair closes the directive', () => {
+  const seen: string[] = []
+  const found = findDirectives('{{ a.crv @k:"x }} said "hi"', (part) => seen.push(part))
+  assert.deepEqual(found, [])
+  assert.deepEqual(seen, ['@k:"x'])
+})
+
+test('a malformed token does not swallow the directive after it', () => {
+  const found = findDirectives('{{ a.crv @k:"x }} {{ b.crv @shift:"2" }}')
+  // The first token is not a directive (its value runs past the closer), so the
+  // scan resumes inside it and still recognizes the second one, the way the
+  // spec's engine-free reader does.
+  assert.deepEqual(
+    found.map((d) => d.path),
+    ['b.crv'],
+  )
+  assert.equal(found[0]?.shift, 2)
+})
+
 test('several directives in one run are all found (i09a-multi-directive-one-run)', () => {
   const found = findDirectives('start {{ a.crv }} mid {{ b.crv }} end')
   assert.deepEqual(
