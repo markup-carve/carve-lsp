@@ -22,7 +22,13 @@ import { pathToFileURL } from 'node:url'
 import { smartPunctuationText } from './inline-text.js'
 import { panelLetter } from './captions.js'
 import { includeDenialCode } from './include-denial.js'
-import { resolveIncludes, type IncludeDependency, type IncludeOptions } from './includes.js'
+import {
+  resolveIncludes,
+  type IncludeDependency,
+  type IncludeOptions,
+  type IncludeResolution,
+  type IncludeWarning,
+} from './includes.js'
 import type { IncludeParseCache } from './include-cache.js'
 import { tableDiagnostics } from './table-diagnostics.js'
 import { colonFenceStructure } from './colon-fences.js'
@@ -146,6 +152,7 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
   // nothing on disk is touched.
   const includes = resolveIncludes(norm, options.includes ?? {})
   for (const warning of includes.warnings) {
+    const child = childLocation(warning, includes.documents)
     diagnostics.push({
       severity: DiagnosticSeverity.Warning,
       range: {
@@ -162,6 +169,11 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
       // carries absolute host paths. The attributed child is named relative to
       // the include root for the same reason - never as an absolute path.
       message: attributeToChild(warning.message, warning.file, options.includes),
+      // The child is NAMED in the message for a client that renders none of
+      // this, and LOCATED here for one that does. Both, because dropping the
+      // prose regresses every client without related information, and dropping
+      // the location leaves the author editing the parent to fix the child.
+      ...(child ? { relatedInformation: [{ location: child, message: warning.message }] } : {}),
     })
   }
 
@@ -265,6 +277,35 @@ function includedSymbols(
     }
   }
   return symbols
+}
+
+/**
+ * Where an include warning actually sits, as a location a client can open.
+ *
+ * Three things have to hold, and each absence is a reason to report no location
+ * rather than invent one: a child-local span, a child whose source this pass
+ * actually read, and a real filesystem path for it.
+ *
+ * That last one is the resolver's `watch`, not a shape test on the id. An id is
+ * whatever the resolver chose - a virtual-filesystem resolver can hand back
+ * `/virtual/child.crv`, which `path.isAbsolute` accepts and which no editor can
+ * open. `watch` is only set by a resolver that read the target off a disk.
+ */
+function childLocation(
+  warning: IncludeWarning,
+  documents: IncludeResolution['documents'],
+): { uri: string; range: Range } | undefined {
+  const { file, within } = warning
+  if (file === undefined || within === undefined) return undefined
+  const child = documents.find((document) => document.id === file)
+  if (child?.watch === undefined) return undefined
+  return {
+    uri: pathToFileURL(child.watch).toString(),
+    range: {
+      start: positionAt(child.source, within.start),
+      end: positionAt(child.source, within.end),
+    },
+  }
 }
 
 /**
