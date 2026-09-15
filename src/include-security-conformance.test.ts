@@ -266,7 +266,7 @@ test('pins the corpus version', () => {
 })
 
 test('pins the vector count, so an addition cannot be skipped unnoticed', () => {
-  assert.equal(corpus.vectors.length, 19)
+  assert.equal(corpus.vectors.length, 25)
 })
 
 test('answers every requirement the corpus states', () => {
