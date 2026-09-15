@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { fileSystemResolver, type IncludeContext, type IncludeResolver } from './include-path.js'
+import { readIncludeSettings } from './include-settings.js'
 import { resolveIncludes } from './includes.js'
 
 const KIND = ['activation', 'filesystem', 'remote', 'graph'] as const
@@ -18,6 +19,7 @@ interface Vector {
   files?: Record<string, string>
   tree?: Record<string, string | { symlink: string }>
   root?: string
+  rootSpec?: string
   from?: string
   request?: string
   trusted?: boolean
@@ -43,13 +45,29 @@ interface Vector {
  * `trusted` is read by the corpus author, not here: the activation vector
  * states both the trust it describes and the `enabled` the host derives from
  * it, and this adapter drives the latter.
+ *
+ * `root` and `rootSpec` are not two spellings of one member: see
+ * {@link filesystemRoot}. Two of the three `rootSpec` vectors PASSED unread,
+ * because `root` defaults to the directory they happen to name - so this list,
+ * not a red assertion, is what caught them.
  */
 const KNOWN_VECTOR_KEYS: ReadonlySet<string> = new Set([
   'name', 'description', 'requirement', 'kind',
-  'entry', 'files', 'tree', 'root', 'from', 'request',
+  'entry', 'files', 'tree', 'root', 'rootSpec', 'from', 'request',
   'trusted', 'enabled', 'allowAbsolute', 'allowedRemoteHosts',
   'maxDepth', 'maxBytes', 'maxResolverCalls',
   'expected',
+])
+
+/**
+ * Every field an `expected` block may carry. The corpus README makes an
+ * unknown one an adapter failure, and without this it is only ever compared
+ * against `undefined` by the per-field test below - a red that names the
+ * vector rather than the observable nobody implemented.
+ */
+const KNOWN_EXPECTED_KEYS: ReadonlySet<string> = new Set([
+  'status', 'denial', 'canonicalId', 'resolverCalls', 'remoteFetches',
+  'maxVisitedDepth', 'chargedBytes',
 ])
 
 /**
@@ -66,6 +84,7 @@ const PINNED_REQUIREMENTS = [
   'S6-post-budget-no-read',
   'S7-call-bound',
   'S8-post-call-bound-no-read',
+  'S9-root-configuration',
 ]
 
 /**
@@ -79,6 +98,36 @@ const DENIAL_BY_RULE: Record<string, string> = {
   'include-budget': 'budget',
   'include-call-limit': 'resolver-calls',
 }
+
+/**
+ * Every portable denial class the corpus asserts, pinned as a SET so a new one
+ * names itself here instead of surfacing as one vector's mismatched string.
+ *
+ * Two of these sit on the far side of the split carve-lsp#193 drew, where a
+ * published diagnostic code may be finer than the cross-engine
+ * `IncludeWarning.rule`, which stays `include-unresolved` for every refusal:
+ *
+ * - `not-found` is this server's resolver class already, and deliberately has
+ *   NO diagnostic code of its own: a target that is merely missing IS
+ *   unresolved, which is what keeps `include-denied` meaning something.
+ * - `no-root` never reaches a resolver. A configured value that names no root
+ *   leaves `includeOptionsFor` with no resolver to build, and `resolveIncludes`
+ *   is inert without one - no directive is recognized, so nothing is resolved
+ *   and nothing is reported. It is therefore not an `IncludeDenial` and gets no
+ *   entry in the mapping either.
+ *
+ * Neither moves the rule id, which is what lets carve-lsp#187 join the denial
+ * back once the engine owns the walk.
+ */
+const PINNED_DENIAL_CLASSES = [
+  'budget',
+  'depth',
+  'no-root',
+  'not-found',
+  'outside-root',
+  'remote-not-allowed',
+  'resolver-calls',
+]
 
 const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const corpusPath = path.join(sourceRoot, 'tests/spec/tests/include-security-conformance/vectors.json')
@@ -96,6 +145,40 @@ function fixture(tree: Vector['tree']): string {
   for (const [full, target] of links) symlinkSync(path.join(dir, target), full)
   test.after(() => rmSync(dir, { recursive: true, force: true }))
   return dir
+}
+
+/** `<ABS:path>` denotes the temporary tree's absolute path to `path`. */
+function materialize(value: string, dir: string): string {
+  return value.replace(/^<ABS:([^>]+)>$/, (_match, rel: string) => path.join(dir, rel))
+}
+
+/**
+ * The containment root for a `filesystem` vector, and the two ways a vector
+ * may name one. They are not interchangeable, and the corpus schema now
+ * refuses both on one vector.
+ *
+ * `root` is the ADAPTER's: materialized and canonicalized here, so containment
+ * is the only question left.
+ *
+ * `rootSpec` is the HOST's configured value, and what this server's own
+ * configuration reader materializes it to is the behavior under test. So it is
+ * passed through UNCHANGED - expanding `<ABS:>` is the corpus spelling out its
+ * temporary tree, not a canonicalization - and the answer comes back from
+ * {@link readIncludeSettings}, which is where carve-lsp#195 put the validation.
+ * Canonicalizing it here first would answer the vector with the adapter's own
+ * `realpathSync` and pin nothing: `realpathSync('')` is the process working
+ * directory, which is the one root §19 forbids by name.
+ */
+function filesystemRoot(vector: Vector, dir: string): { root: string } | { root?: undefined } {
+  if (vector.root !== undefined && vector.rootSpec !== undefined) {
+    throw new Error(`vector names a root two ways: ${vector.name}`)
+  }
+  if (vector.rootSpec === undefined) {
+    return { root: realpathSync(path.join(dir, vector.root ?? 'root')) }
+  }
+  const spec = materialize(vector.rootSpec, dir)
+  const configured = readIncludeSettings({ carve: { includes: { includeRoot: spec } } }).includeRoot
+  return configured === undefined ? {} : { root: configured }
 }
 
 function graph(vector: Vector): Record<string, unknown> {
@@ -148,13 +231,18 @@ function run(vector: Vector): Record<string, unknown> {
   if (vector.kind === 'graph') return graph(vector)
 
   const dir = fixture(vector.tree ?? { 'root/main.crv': '' })
-  const root = realpathSync(path.join(dir, vector.root ?? 'root'))
+  const { root } = filesystemRoot(vector, dir)
+  // No root, no resolver, and an inert include pass behind it: the target is
+  // not resolved even though it exists and sits inside the root the vector
+  // INTENDED. `resolverCalls` is the observable that separates this from a
+  // resolver that looked and refused.
+  if (root === undefined) return { status: 'denied', denial: 'no-root', resolverCalls: [] }
+
   const resolver = fileSystemResolver(root, {
     allowAbsolute: vector.allowAbsolute,
     allowedRemoteHosts: vector.allowedRemoteHosts,
   })
-  const rawRequest = vector.request ?? ''
-  const request = rawRequest.replace(/^<ABS:([^>]+)>$/, (_match, rel: string) => path.join(dir, rel))
+  const request = materialize(vector.request ?? '', dir)
   const context: IncludeContext = vector.from
     ? { stack: [realpathSync(path.join(dir, vector.from))], depth: 0 }
     : { stack: [], depth: 0 }
@@ -178,12 +266,25 @@ test('pins the corpus version', () => {
 })
 
 test('pins the vector count, so an addition cannot be skipped unnoticed', () => {
-  assert.equal(corpus.vectors.length, 14)
+  assert.equal(corpus.vectors.length, 19)
 })
 
 test('answers every requirement the corpus states', () => {
   const stated = [...new Set(corpus.vectors.map((vector) => vector.requirement))].sort()
   assert.deepEqual(stated, [...PINNED_REQUIREMENTS].sort())
+})
+
+test('answers every denial class the corpus asserts', () => {
+  const stated = [...new Set(corpus.vectors.flatMap((vector) =>
+    typeof vector.expected['denial'] === 'string' ? [vector.expected['denial']] : []))].sort()
+  assert.deepEqual(stated, [...PINNED_DENIAL_CLASSES].sort())
+})
+
+test('produces every observable the corpus expects', () => {
+  const unknown = [...new Set(corpus.vectors.flatMap((vector) => Object.keys(vector.expected)))]
+    .filter((key) => !KNOWN_EXPECTED_KEYS.has(key))
+    .sort()
+  assert.deepEqual(unknown, [])
 })
 
 test('reads every member the corpus puts on a vector', () => {
