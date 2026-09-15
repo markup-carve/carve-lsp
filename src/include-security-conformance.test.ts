@@ -212,6 +212,87 @@ function graph(vector: Vector): Record<string, unknown> {
   }
 }
 
+/**
+ * A one-directive entry document naming `includePath`.
+ *
+ * Quoted, because a vector's request is a filesystem path materialized from a
+ * temporary tree, and the bare spelling of a directive path excludes characters
+ * a `mkdtemp` name may legally contain. The quoted and bare forms are the same
+ * directive, so nothing under test depends on the choice.
+ */
+function entryFor(includePath: string): string {
+  return `{{ "${includePath.replace(/([\\"])/g, '\\$1')}" }}\n`
+}
+
+/**
+ * Drive a `filesystem` or `remote` vector through the include pass, rather than
+ * calling the resolver directly.
+ *
+ * WHY THIS IS NOT A DETOUR. Calling `fileSystemResolver` here answered the
+ * vector from the ADAPTER's own side: the corpus pinned the guard in isolation
+ * and said nothing about the server reaching it. Measured on this file before
+ * the change, with the resolver call deleted from `visit` in `includes.ts` so
+ * that the walk resolves nothing at all:
+ *
+ *     S2-contained-paths     22 assertions, all green
+ *     S3-remote-allowlist     5 assertions, all green
+ *     S9-root-configuration  13 assertions, all green
+ *
+ * A server that had stopped resolving includes entirely kept 40 of the 45
+ * filesystem and remote assertions. Only the `graph` requirements, which
+ * already drove the walk, went red. Routing the same vectors through
+ * `resolveIncludes` is what makes the corpus gate the seam it names, and it is
+ * the shape carve-lsp#187 needs when the engine's pass replaces this walk: the
+ * adapter then drives whatever owns resolution, not a second copy of the guard.
+ */
+function throughWalk(vector: Vector): Record<string, unknown> {
+  const dir = fixture(vector.tree ?? { 'root/main.crv': '' })
+  const { root } = filesystemRoot(vector, dir)
+  const entry = entryFor(materialize(vector.request ?? '', dir))
+  const sourcePath = vector.from ? { sourcePath: realpathSync(path.join(dir, vector.from)) } : {}
+  const calls: string[] = []
+
+  // No root means no resolver, and an inert pass behind it: the target is not
+  // resolved even though it exists and sits inside the root the vector
+  // INTENDED. Run rather than stated - a walk that resolved the target anyway
+  // reports a dependency here and fails the vector, which a returned constant
+  // could not notice.
+  if (root === undefined) {
+    const inert = resolveIncludes(entry, sourcePath)
+    return inert.dependencies.length === 0
+      ? { status: 'denied', denial: 'no-root', resolverCalls: calls }
+      : { status: 'allowed', resolverCalls: calls }
+  }
+
+  const guarded = fileSystemResolver(root, {
+    allowAbsolute: vector.allowAbsolute,
+    allowedRemoteHosts: vector.allowedRemoteHosts,
+  })
+  const resolver: IncludeResolver = (includePath, context: IncludeContext) => {
+    calls.push(includePath)
+    return guarded(includePath, context)
+  }
+  const result = resolveIncludes(entry, { resolver, ...sourcePath })
+  const warning = result.warnings[0]
+  const resolved = result.dependencies.find((dependency) => dependency.resolved)
+
+  if (vector.kind === 'remote') {
+    return {
+      status: resolved ? 'allowed' : vector.allowedRemoteHosts?.length ? 'unsupported' : 'denied',
+      denial: warning?.denial,
+      remoteFetches: [],
+      resolverCalls: calls,
+    }
+  }
+
+  // `status` follows the resolved DEPENDENCY rather than the absence of a
+  // warning: a walk that silently acted on nothing would otherwise read as
+  // `allowed` and pass the two vectors that expect a target to be read.
+  return resolved
+    ? { status: 'allowed', canonicalId: resolved.id.replace(root, '<ROOT>'), resolverCalls: calls }
+    : { status: 'denied', denial: warning?.denial, resolverCalls: calls }
+}
+
 function run(vector: Vector): Record<string, unknown> {
   // An unknown kind used to fall through to the filesystem branch, which would
   // materialize no tree, resolve an empty request and answer `denied` - a pass,
@@ -230,35 +311,7 @@ function run(vector: Vector): Record<string, unknown> {
 
   if (vector.kind === 'graph') return graph(vector)
 
-  const dir = fixture(vector.tree ?? { 'root/main.crv': '' })
-  const { root } = filesystemRoot(vector, dir)
-  // No root, no resolver, and an inert include pass behind it: the target is
-  // not resolved even though it exists and sits inside the root the vector
-  // INTENDED. `resolverCalls` is the observable that separates this from a
-  // resolver that looked and refused.
-  if (root === undefined) return { status: 'denied', denial: 'no-root', resolverCalls: [] }
-
-  const resolver = fileSystemResolver(root, {
-    allowAbsolute: vector.allowAbsolute,
-    allowedRemoteHosts: vector.allowedRemoteHosts,
-  })
-  const request = materialize(vector.request ?? '', dir)
-  const context: IncludeContext = vector.from
-    ? { stack: [realpathSync(path.join(dir, vector.from))], depth: 0 }
-    : { stack: [], depth: 0 }
-  const result = resolver(request, context)
-
-  if (vector.kind === 'remote') {
-    return {
-      status: result.ok ? 'allowed' : vector.allowedRemoteHosts?.length ? 'unsupported' : 'denied',
-      denial: result.ok ? undefined : result.denial,
-      remoteFetches: [],
-    }
-  }
-
-  return result.ok
-    ? { status: 'allowed', canonicalId: result.id.replace(root, '<ROOT>') }
-    : { status: 'denied', denial: result.denial }
+  return throughWalk(vector)
 }
 
 test('pins the corpus version', () => {
