@@ -78,14 +78,17 @@ test('the target stays a RESOLVED dependency when its section is missing', () =>
   assert.deepEqual(result.dependencies, [{ id: 'a', resolved: true }])
 })
 
-test('a child that includes something itself is not accused of a missing section', () => {
-  // The engine selects AFTER the child's own includes are expanded, so the
-  // section may arrive through a grandchild. This server does not expand, so
-  // it must stay quiet rather than guess.
+test('a section that only a grandchild would supply is still missing', () => {
+  // Selection happens BEFORE the child's own includes are expanded, so a
+  // section cannot arrive through a grandchild: it has to be declared in the
+  // file the directive names. The grandchild is never resolved either, which
+  // is the point - content outside the wanted section must not be read.
+  const reads: string[] = []
   const result = resolveIncludes('{{ a #Gamma }}', {
-    resolver: virtualResolver({ a: '# Alpha\n\n{{ b }}\n', b: '## Gamma\n' }),
+    resolver: virtualResolver({ a: '# Alpha\n\n{{ b }}\n', b: '## Gamma\n' }, reads),
   })
-  assert.deepEqual(result.warnings, [])
+  assert.deepEqual(rules(result.warnings), ['include-section'])
+  assert.deepEqual(reads, ['a'])
 })
 
 // --- a line range past the end -------------------------------------------

@@ -157,15 +157,20 @@ test('every directive after a spent budget is refused without a read', () => {
   assert.equal(reads.length, 3)
 })
 
-test('a budget consumed exactly to the limit still refuses the next directive', () => {
-  // The boundary the latch exists for: a charge landing ON the limit leaves no
-  // room, so expansion must stop even though nothing was overrun.
+test('a budget consumed exactly to the limit admits that directive and refuses the next', () => {
+  // The boundary: a budget of N bytes admits N bytes, so the charge that lands
+  // ON the limit is the last one that expands. The one after it overruns and
+  // latches, and everything past that degrades without a read.
   const reads: string[] = []
-  resolveIncludes('{{ a }}\n\n{{ a }}', {
+  const result = resolveIncludes('{{ a }}\n\n{{ a }}\n\n{{ a }}', {
     resolver: virtualResolver({ a: 'xxxxx' }, reads),
     maxBytes: 5,
   })
-  assert.deepEqual(reads, ['a'])
+  assert.deepEqual(reads, ['a', 'a'])
+  assert.deepEqual(
+    result.warnings.map((warning) => warning.rule),
+    ['include-budget', 'include-budget'],
+  )
 })
 
 test('a spent call bound keeps reporting include-call-limit, not include-budget', () => {
