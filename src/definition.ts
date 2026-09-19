@@ -4,7 +4,8 @@ import { astColumnToCharacter, sourceLines } from './position.js'
 import { smartPunctuationText } from './inline-text.js'
 import { captionTargetById } from './captions.js'
 import { includeDefinitionAt } from './include-definition.js'
-import type { IncludeOptions } from './includes.js'
+import { resolveIncludes, type IncludeOptions } from './includes.js'
+import { pathToFileURL } from 'node:url'
 
 /**
  * Go-to-definition for Carve constructs:
@@ -35,6 +36,10 @@ export function definitionAt(
   // 2. Cross-reference </#id> or fragment link [text](#id)
   const crossrefTarget = resolveCrossrefAt(uri, source, line, position)
   if (crossrefTarget !== null) return crossrefTarget
+
+  // 2b. The same reference, satisfied by a heading an include contributed.
+  const acrossSeam = resolveCrossrefAcrossSeam(source, line, position, includes)
+  if (acrossSeam !== null) return acrossSeam
 
   // 3. Footnote reference [^name]
   const footnoteTarget = resolveFootnoteAt(lines, line, position)
@@ -111,6 +116,81 @@ function resolveCrossrefAt(uri: string, source: string, line: string, position: 
     return findHeadingById(uri, source, m[1]!)
   }
 
+  return null
+}
+
+/**
+ * A crossref whose target an INCLUDE contributes.
+ *
+ * Resolved through the merged document rather than by searching each child's
+ * own source, because the id the author writes is the id the MERGE produced: a
+ * child heading whose explicit id the parent had already claimed is renamed
+ * (§19 I5), and a child pulled in by `#section` contributes only part of
+ * itself. Searching child sources would answer for the file on disk and miss
+ * both.
+ *
+ * The location is the child's `watch` path, never its id. An id is whatever
+ * the resolver chose, and a virtual-filesystem resolver can return one that
+ * looks like a path and opens nothing.
+ */
+function resolveCrossrefAcrossSeam(
+  source: string,
+  line: string,
+  position: Position,
+  includes: IncludeOptions | undefined,
+): Location | null {
+  if (!includes?.resolver) return null
+  const targetId = crossrefIdAt(line, position)
+  if (targetId === null) return null
+
+  const resolution = resolveIncludes(source, includes)
+  if (!resolution.expanded) return null
+  // Resolved after the merge, so a heading carries the id the whole document
+  // gives it: a slug is generated against the merged content, and an explicit
+  // id the merge renamed is already renamed here.
+  let merged: Document
+  try {
+    merged = resolve(resolution.expanded)
+  } catch {
+    return null
+  }
+  // A crossref reaches a CAPTIONED HOST as well - a figure, a table, a
+  // composite figure or one of its panels (PART 9R R4) - and reaches it in the
+  // open document already. An include seam that resolved only headings would
+  // make the target model depend on which file the host sits in.
+  const pos =
+    findHeadingWithId(merged.children, targetId.toLowerCase())?.pos ??
+    captionTargetById(merged, targetId)?.pos
+  if (!pos || pos.file === undefined) return null
+
+  const child = resolution.documents.find((document) => document.id === pos.file)
+  if (child?.watch === undefined) return null
+
+  const childLine = pos.startLine - 1
+  return {
+    uri: pathToFileURL(child.watch).toString(),
+    range: {
+      start: { line: childLine, character: 0 },
+      end: {
+        line: childLine,
+        character:
+          pos.endColumn === undefined
+            ? 199
+            : astColumnToCharacter(sourceLines(child.source)[childLine] ?? '', pos.endColumn),
+      },
+    },
+  }
+}
+
+/** The crossref id the cursor sits on, in either spelling. */
+function crossrefIdAt(line: string, position: Position): string | null {
+  for (const re of [/<\/#([A-Za-z0-9_.:-]+)>/g, /\[[^\]]*\]\(#([A-Za-z0-9_.:-]+)[^)]*\)/g]) {
+    for (const m of line.matchAll(re)) {
+      const start = m.index!
+      if (position.character < start || position.character >= start + m[0].length) continue
+      return m[1]!
+    }
+  }
   return null
 }
 

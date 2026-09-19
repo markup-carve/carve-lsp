@@ -160,6 +160,17 @@ export interface IncludeResolution {
    * URI would offer the author a location that does not exist.
    */
   documents: Array<{ id: string; source: string; version?: string; watch?: string }>
+  /**
+   * The document with every child merged in, as §19 defines it, or `undefined`
+   * when the pass was inert or the root did not parse.
+   *
+   * Every node a child contributed carries that child's identity on `pos.file`
+   * (§19 source mapping), and carries it AFTER the renames, clamps and section
+   * selection the merge applied. That is what makes it the thing to navigate
+   * through: a crossref in the parent names the id the merged document ended
+   * up with, which is not always the id the child file spells.
+   */
+  expanded?: Document
 }
 
 function lineStarts(source: string): number[] {
@@ -418,6 +429,7 @@ export function resolveIncludes(source: string, options: IncludeOptions = {}): I
     suppressedWarnings: result.suppressedWarnings,
     dependencies,
     bytes: result.chargedBytes,
+    expanded: result.doc,
     documents: [...seam.documents]
       .filter(([id]) => merged.has(id))
       .map(([id, child]) => ({ id, ...child })),
