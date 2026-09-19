@@ -25,6 +25,7 @@ const files: Record<string, string> = {
   '/book/sections.crv': '# Alpha\n\nText.\n\n# Beta\n\nMore.\n',
   '/book/claimed.crv': '{#intro}\n# Child Intro\n',
   '/book/figure.crv': 'Lead.\n\n{#plan}\n![A plan](plan.png)\n^ Figure #: The plan\n',
+  '/book/padded.crv': 'pad one\n\npad two\n\npad three\n\npad four\n\n# Late Heading\n',
 }
 
 const resolver: IncludeResolver = (includePath): IncludeResolved => {
@@ -63,6 +64,18 @@ test('a crossref to a heading an include contributes lands in the child file', (
 test('the angle-bracket spelling of the same crossref resolves too', () => {
   const location = jump('# Book\n\n{{ child.crv }}\n\nSee </#chapter-three>.\n', 'chapter-three', includes)
   assert.equal(location?.uri, pathToFileURL('/book/child.crv').toString())
+})
+
+test('a crossref into a sliced child lands on the heading line in the file', () => {
+  // The merged node carries the child's id and the SLICE's coordinates, so an
+  // untranslated jump opens `padded.crv` at its first padding paragraph.
+  const location = jump(
+    '{{ padded.crv @lines:9-9 }}\n\nSee [](#late-heading).\n',
+    'late-heading',
+    includes,
+  )
+  assert.equal(location?.uri, pathToFileURL('/book/padded.crv').toString())
+  assert.equal(location?.range.start.line, 8)
 })
 
 test('a heading the ROOT declares still resolves in the root', () => {

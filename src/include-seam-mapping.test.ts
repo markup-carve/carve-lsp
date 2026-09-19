@@ -26,12 +26,20 @@ const IN_CHILD = { start: 24, end: 41, line: 5, column: 1 }
 /** Offset of the top-level directive inside {@link ROOT}. */
 const IN_ROOT = { start: 8, end: 23 }
 
+/** Four padding paragraphs, so a directive on line 9 is nowhere near line 1. */
+const PADDING = 'pad one\n\npad two\n\npad three\n\npad four\n\n'
+/** Offset of the failing directive inside `padded.crv`, in that whole file. */
+const IN_PADDED = { start: 39, end: 56, line: 9, column: 1 }
+
 const files: Record<string, string> = {
   '/book/child.crv': CHILD,
   '/book/deep.crv': '{{ nested.crv }}\n',
   '/book/nested.crv': 'text\n\n{{ missing.crv }}\n',
   // Carriage-return endings, which a `\n` scan reads as a single line.
   '/book/classic.crv': CHILD.replace(/\n/g, '\r'),
+  '/book/padded.crv': `${PADDING}{{ missing.crv }}\n`,
+  '/book/slicer.crv': '{{ padded.crv @lines:9-9 }}\n',
+  '/book/quiet.crv': `${PADDING}quiet\n`,
 }
 
 /** Stands in for a filesystem-backed resolver: it reports a `watch` path. */
@@ -76,6 +84,53 @@ test('a grandchild reports its own position, not its parent', () => {
   }).warnings[0]
   assert.equal(warning?.file, '/book/nested.crv')
   assert.deepEqual(warning?.within, { start: 6, end: 23, line: 3, column: 1 })
+})
+
+test('a child pulled in by a line range reports its position in the whole file', () => {
+  // The engine slices the source before parsing it, so its own reading of this
+  // warning is line 1 of a one-line slice. Line 1 of `padded.crv` is a padding
+  // paragraph, and that is where the author would be sent.
+  const warning = warningsFor('{{ padded.crv @lines:9-9 }}\n')[0]
+  assert.equal(warning?.file, '/book/padded.crv')
+  assert.deepEqual(warning?.within, IN_PADDED)
+})
+
+test('a line range written in a child, not in the root, translates the same way', () => {
+  // `slicer.crv` is what carries the `@lines`, so the range cannot be found by
+  // looking at the root's directives.
+  const warning = warningsFor('{{ slicer.crv }}\n')[0]
+  assert.equal(warning?.file, '/book/padded.crv')
+  assert.deepEqual(warning?.within, IN_PADDED)
+})
+
+test('a line range on one child leaves a warning from another child alone', () => {
+  // `quiet.crv` is sliced and warns about nothing; `child.crv` is not sliced.
+  // A translation applied to the pass rather than to the file each position was
+  // measured in would move this warning by the other directive's range.
+  const warning = warningsFor('{{ quiet.crv @lines:9-9 }}\n\n{{ child.crv }}\n')[0]
+  assert.equal(warning?.file, '/book/child.crv')
+  assert.deepEqual(warning?.within, IN_CHILD)
+})
+
+test('a child written once sliced and once whole is left where the engine put it', () => {
+  // Both occurrences stamp the same canonical id and neither warning says which
+  // one it came from, so one correction for the id would move the whole-file
+  // occurrence to line 17 of a nine-line file. Until the engine carries that
+  // identity (#224) the engine's own readings stand: line 1 measured in the
+  // slice, and line 9 measured in the file.
+  const lines = warningsFor('{{ padded.crv @lines:9-9 }}\n\n{{ padded.crv }}\n').map(
+    (warning) => warning.within?.line,
+  )
+  assert.deepEqual(lines, [1, 9])
+})
+
+test('the location of a sliced child is the line the author has to open', () => {
+  const diagnostic = analyzeCarve('{{ padded.crv @lines:9-9 }}\n', { includes: { resolver } })
+    .diagnostics.find((entry) => entry.code === 'include-unresolved')
+  assert.deepEqual(diagnostic?.relatedInformation?.[0]?.location.range, {
+    start: { line: 8, character: 0 },
+    end: { line: 8, character: 17 },
+  })
 })
 
 test('the published diagnostic stays on the top-level directive', () => {

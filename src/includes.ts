@@ -19,6 +19,10 @@
  * - the `watch` candidate and the refusal class, which the engine's resolver
  *   contract has no slot for.
  * - the child sources, which the outline and the seam location read back.
+ * - a sliced child's own coordinates. The engine slices before it parses, so a
+ *   child pulled in with `@lines` reports positions against the slice under the
+ *   whole file's id, which §19 requires to be the file's own. See
+ *   {@link sliceShifts}; markup-carve/carve-js#1861 is the engine-side defect.
  *
  * The path-level security guards are untouched in {@link ./include-path.js}.
  * The resolver is still this server's, so what may be read at all is still
@@ -210,6 +214,118 @@ interface Seam {
   chain: Map<string, string>
   /** Top-level child identity to the directive path the root wrote for it. */
   rootPath: Map<string, string>
+  /** Child identity to every file that pulled it in and the path that file wrote. */
+  pulledBy: Map<string, Array<{ parent?: string; written: string }>>
+}
+
+/** How far into its own file a sliced child's coordinates start. */
+interface SliceShift {
+  /** Lines the slice dropped from the front. */
+  line: number
+  /** Codepoints the slice dropped from the front. */
+  offset: number
+}
+
+/**
+ * Where each child's `@lines` slice starts inside that child's own file, for
+ * the children pulled in with one that does not start at line 1.
+ *
+ * The engine slices a child's source BEFORE parsing it, so every position it
+ * reports for a sliced child is measured against the slice: the warning's own
+ * line, and the `pos` stamps §19 requires to be the child's own coordinates.
+ * The resolver seam cannot supply the slice - the engine hands a resolver the
+ * directive's PATH and keeps its options - so the directive is found again in
+ * the file that wrote it, which for a grandchild is the child rather than the
+ * root.
+ *
+ * A child whose occurrences do not AGREE on a range is left where the engine
+ * put it. Every occurrence stamps the same canonical id, and neither a warning
+ * nor a `pos` says which occurrence it came from, so one correction for the id
+ * would move the occurrences that need a different one - a file written once
+ * sliced and once whole would report the whole one past its own end. That
+ * identity is #224; until the engine carries it, disagreement means no
+ * translation rather than a wrong one.
+ */
+function sliceShifts(
+  seam: Seam,
+  rootSites: DirectiveSite[],
+  sourcePath: string | undefined,
+): Map<string, SliceShift> {
+  const sitesByFile = new Map<string | undefined, DirectiveSite[]>([[sourcePath, rootSites]])
+  sitesByFile.set(undefined, rootSites)
+  const shifts = new Map<string, SliceShift>()
+  for (const [id, edges] of seam.pulledBy) {
+    const starts = new Set<number | undefined>()
+    for (const edge of edges) {
+      let sites = sitesByFile.get(edge.parent)
+      if (sites === undefined) {
+        sites = directiveSitesOf(
+          edge.parent === undefined ? undefined : seam.documents.get(edge.parent)?.source,
+        )
+        sitesByFile.set(edge.parent, sites)
+      }
+      for (const site of sites) {
+        if (site.directive.path === edge.written) starts.add(site.directive.lines?.start)
+      }
+    }
+    const start = starts.size === 1 ? [...starts][0] : undefined
+    const source = seam.documents.get(id)?.source
+    if (start === undefined || start <= 1 || source === undefined) continue
+    shifts.set(id, { line: start - 1, offset: codepointOffsetOfLine(source, start) })
+  }
+  return shifts
+}
+
+function directiveSitesOf(source: string | undefined): DirectiveSite[] {
+  if (source === undefined) return []
+  try {
+    return findDirectiveSites(parse(source, { positions: true }))
+  } catch {
+    return []
+  }
+}
+
+/** Codepoints before the 1-based `line` of `source`. */
+function codepointOffsetOfLine(source: string, line: number): number {
+  if (line <= 1) return 0
+  const before = source.split('\n').slice(0, line - 1).join('\n')
+  return [...before].length + 1
+}
+
+/**
+ * Put a sliced child's own coordinates back on the nodes it contributed.
+ *
+ * §19 requires a node an include pulled in to keep the coordinates of its own
+ * file alongside that file's id, and the engine reports slice coordinates under
+ * the whole file's id. Both ends of the seam read these: `within` on a warning,
+ * and go-to-definition through the merged document.
+ */
+function unslicePositions(doc: Document, shifts: Map<string, SliceShift>): void {
+  if (shifts.size === 0) return
+  const done = new Set<object>()
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item)
+      return
+    }
+    if (value === null || typeof value !== 'object') return
+    const pos = (value as { pos?: Record<string, unknown> }).pos
+    const shift = typeof pos?.file === 'string' ? shifts.get(pos.file) : undefined
+    if (pos !== undefined && shift !== undefined && !done.has(pos)) {
+      done.add(pos)
+      for (const key of ['startLine', 'endLine'] as const) {
+        if (typeof pos[key] === 'number') pos[key] = pos[key] + shift.line
+      }
+      for (const key of ['startOffset', 'endOffset'] as const) {
+        if (typeof pos[key] === 'number') pos[key] = pos[key] + shift.offset
+      }
+    }
+    for (const [key, inner] of Object.entries(value)) {
+      if (key !== 'pos') visit(inner)
+    }
+  }
+  visit(doc.children)
+  if (doc.footnoteDefs) visit(Object.values(doc.footnoteDefs))
 }
 
 /**
@@ -286,15 +402,21 @@ export function resolveIncludes(source: string, options: IncludeOptions = {}): I
     documents: new Map(),
     chain: new Map(),
     rootPath: new Map(),
+    pulledBy: new Map(),
   }
 
   const link = (id: string, ctx: EngineContext, written: string): void => {
+    const parent = ctx.stack[ctx.stack.length - 1]
+    const edges = seam.pulledBy.get(id) ?? []
+    if (!edges.some((edge) => edge.parent === parent && edge.written === written)) {
+      edges.push({ ...(parent === undefined ? {} : { parent }), written })
+      seam.pulledBy.set(id, edges)
+    }
     if (ctx.depth === 0) {
       seam.chain.set(id, id)
       if (!seam.rootPath.has(id)) seam.rootPath.set(id, written)
       return
     }
-    const parent = ctx.stack[ctx.stack.length - 1]
     seam.chain.set(id, (parent !== undefined ? seam.chain.get(parent) : undefined) ?? id)
   }
 
@@ -372,6 +494,9 @@ export function resolveIncludes(source: string, options: IncludeOptions = {}): I
   // since a dependency is resolved as soon as it is read.
   const merged = mergedFiles(result.doc)
 
+  const shifts = sliceShifts(seam, sites, options.sourcePath)
+  unslicePositions(result.doc, shifts)
+
   const starts = lineStarts(normalized)
   const dealt = new Map<string, number>()
   const warnings: IncludeWarning[] = []
@@ -388,11 +513,12 @@ export function resolveIncludes(source: string, options: IncludeOptions = {}): I
     }
     if (warning.file !== undefined) mapped.file = warning.file
     if (inChild) {
+      const shift = shifts.get(warning.file!) ?? { line: 0, offset: 0 }
       mapped.within = {
-        line: warning.line,
+        line: warning.line + shift.line,
         column: warning.column,
-        start: warning.start,
-        end: warning.end,
+        start: warning.start + shift.offset,
+        end: warning.end + shift.offset,
       }
     }
     if (warning.detail !== undefined) mapped.detail = warning.detail
