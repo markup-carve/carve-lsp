@@ -67,7 +67,7 @@ const KNOWN_VECTOR_KEYS: ReadonlySet<string> = new Set([
  */
 const KNOWN_EXPECTED_KEYS: ReadonlySet<string> = new Set([
   'status', 'denial', 'canonicalId', 'resolverCalls', 'remoteFetches',
-  'maxVisitedDepth', 'chargedBytes',
+  'maxVisitedDepth', 'chargedBytes', 'dependencies',
 ])
 
 /**
@@ -207,6 +207,7 @@ function graph(vector: Vector): Record<string, unknown> {
     resolverCalls: calls,
     maxVisitedDepth,
     chargedBytes: result.bytes,
+    dependencies: dependenciesOf(result),
     status: warning ? 'denied' : 'allowed',
     denial: warning === undefined ? undefined : DENIAL_BY_RULE[warning.rule],
   }
@@ -222,6 +223,24 @@ function graph(vector: Vector): Record<string, unknown> {
  */
 function entryFor(includePath: string): string {
   return `{{ "${includePath.replace(/([\\"])/g, '\\$1')}" }}\n`
+}
+
+/**
+ * The I11 set as the corpus schema declares it: `id` and `resolved`, and
+ * nothing else. Both come from the resolution the server published - the
+ * corpus makes this a processor observable, so an adapter that rebuilt it from
+ * the resolver calls it watched would pin nothing. `watch` is this server's own
+ * addition and is dropped, and `<ROOT>` stands in for the materialized tree as
+ * it does for a canonical id.
+ */
+function dependenciesOf(
+  resolution: { dependencies: Array<{ id: string; resolved: boolean }> },
+  root?: string,
+): Array<{ id: string; resolved: boolean }> {
+  return resolution.dependencies.map(({ id, resolved }) => ({
+    id: root === undefined ? id : id.replace(root, '<ROOT>'),
+    resolved,
+  }))
 }
 
 /**
@@ -259,9 +278,10 @@ function throughWalk(vector: Vector): Record<string, unknown> {
   // could not notice.
   if (root === undefined) {
     const inert = resolveIncludes(entry, sourcePath)
-    return inert.dependencies.length === 0
-      ? { status: 'denied', denial: 'no-root', resolverCalls: calls }
-      : { status: 'allowed', resolverCalls: calls }
+    const dependencies = dependenciesOf(inert)
+    return dependencies.length === 0
+      ? { status: 'denied', denial: 'no-root', resolverCalls: calls, dependencies }
+      : { status: 'allowed', resolverCalls: calls, dependencies }
   }
 
   const guarded = fileSystemResolver(root, {
@@ -275,6 +295,7 @@ function throughWalk(vector: Vector): Record<string, unknown> {
   const result = resolveIncludes(entry, { resolver, ...sourcePath })
   const warning = result.warnings[0]
   const resolved = result.dependencies.find((dependency) => dependency.resolved)
+  const dependencies = dependenciesOf(result, root)
 
   if (vector.kind === 'remote') {
     return {
@@ -282,6 +303,7 @@ function throughWalk(vector: Vector): Record<string, unknown> {
       denial: warning?.denial,
       remoteFetches: [],
       resolverCalls: calls,
+      dependencies,
     }
   }
 
@@ -289,8 +311,8 @@ function throughWalk(vector: Vector): Record<string, unknown> {
   // warning: a walk that silently acted on nothing would otherwise read as
   // `allowed` and pass the two vectors that expect a target to be read.
   return resolved
-    ? { status: 'allowed', canonicalId: resolved.id.replace(root, '<ROOT>'), resolverCalls: calls }
-    : { status: 'denied', denial: warning?.denial, resolverCalls: calls }
+    ? { status: 'allowed', canonicalId: resolved.id.replace(root, '<ROOT>'), resolverCalls: calls, dependencies }
+    : { status: 'denied', denial: warning?.denial, resolverCalls: calls, dependencies }
 }
 
 function run(vector: Vector): Record<string, unknown> {
@@ -305,8 +327,8 @@ function run(vector: Vector): Record<string, unknown> {
       calls.push(request)
       return { ok: false, id: request, denial: 'not-found' }
     }
-    resolveIncludes(vector.entry ?? '', vector.enabled ? { resolver } : {})
-    return { resolverCalls: calls }
+    const result = resolveIncludes(vector.entry ?? '', vector.enabled ? { resolver } : {})
+    return { resolverCalls: calls, dependencies: dependenciesOf(result) }
   }
 
   if (vector.kind === 'graph') return graph(vector)
@@ -319,7 +341,7 @@ test('pins the corpus version', () => {
 })
 
 test('pins the vector count, so an addition cannot be skipped unnoticed', () => {
-  assert.equal(corpus.vectors.length, 25)
+  assert.equal(corpus.vectors.length, 27)
 })
 
 test('answers every requirement the corpus states', () => {
