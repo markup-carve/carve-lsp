@@ -99,6 +99,7 @@ re-publishes diagnostics for every open document.
 | `allowedRemoteHosts` | `[]` | Hosts a remote include may name. This server has no fetcher, so a remote target is refused either way; the list exists so the gate is explicit. |
 | `maxDepth` | `16` | Maximum transitive include depth. |
 | `maxBytes` | `max(1 MiB, 8x document)` | Total byte budget across the whole include graph, charged per occurrence. |
+| `maxResolverCalls` | `1000` | Resolver calls one walk may make. Bounds the work the byte budget cannot: a target is resolved before its size is known, and a target that fails to resolve is never charged. |
 
 Client trust is read from `initializationOptions.workspaceTrusted`.
 

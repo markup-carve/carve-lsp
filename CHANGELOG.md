@@ -6,6 +6,45 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-09-20
+
+### Added
+
+- **Include selections.** A `@lines` range or a section named on an include
+  directive is diagnosed, navigable and completable: an unknown section, a range
+  past the child's end and a directive naming both are reported, go to
+  definition lands on the selected part rather than the top of the file, and
+  completion offers the sections a target declares (#186).
+- A crossref whose target an included file supplies now resolves, for headings
+  and for captioned hosts, because it is answered from the merged document
+  rather than from each child's source (#226).
+- An include warning raised inside a child is located there: the diagnostic
+  keeps a range in the open document and carries `relatedInformation` pointing
+  at the position in the file the problem is actually in (#204, #228).
+- §19 resolver bounds: `carve.includes.maxResolverCalls` caps the resolver calls
+  one walk may make, a refusal is terminal instead of retried, and a target that
+  is not a regular file is rejected and reported as `include-non-text` (#191).
+
+### Changed
+
+- The include walk is the engine's. `resolveIncludes` is an adapter over
+  `expandIncludes` and `findDirectiveSites` instead of a second copy of the
+  walk, so §19's merge rules have one spelling again. The engine dependency
+  floor moves to `^0.1.7` (#225).
+
+### Fixed
+
+- A refused include reads as a refusal rather than a missing file. A denial
+  publishes `include-denied` and names the policy that refused it, instead of
+  sending the author after a typo that is not there (#193).
+- A blank or relative `carve.includes.includeRoot` is treated as absent rather
+  than as the server's working directory (#195).
+- A quoted include option value is read as one value, so a path or section name
+  containing a space survives (#212).
+- An include diagnostic no longer drifts when an astral character precedes the
+  directive. An AST offset counts codepoints and was being used to index a
+  UTF-16 string (#230).
+
 ## [0.1.6] - 2026-09-09
 
 ### Changed
