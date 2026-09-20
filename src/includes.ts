@@ -40,6 +40,7 @@ import {
   type IncludeWarning as EngineWarning,
 } from '@markup-carve/carve'
 import { includeDenialMessage } from './include-denial.js'
+import { engineColumnUnit } from './position.js'
 import type { IncludeDenial, IncludeResolver } from './include-path.js'
 
 /** Warning emitted by {@link resolveIncludes}. */
@@ -177,10 +178,21 @@ export interface IncludeResolution {
   expanded?: Document
 }
 
-function lineStarts(source: string): number[] {
+/**
+ * Offset of each line's first character, counted in the unit the installed
+ * parser's offsets are in, so `locateIn` can be given one directly.
+ *
+ * Exported for the test that drives the branch the installed engine does not
+ * take. A test that built its own table would agree with this one under either
+ * unit and so could not see the branch at all.
+ */
+export function lineStarts(source: string): number[] {
+  const perCharacter = engineColumnUnit() === 'codepoint'
   const starts = [0]
-  for (let i = 0; i < source.length; i += 1) {
-    if (source[i] === '\n') starts.push(i + 1)
+  let offset = 0
+  for (const character of source) {
+    offset += perCharacter ? 1 : character.length
+    if (character === '\n') starts.push(offset)
   }
   return starts
 }

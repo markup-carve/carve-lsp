@@ -146,3 +146,28 @@ export function astColumnToCharacter(lineText: string, column: number): number {
 export function characterToAstColumn(lineText: string, character: number): number {
   return engineColumnUnit() === 'codepoint' ? utf16CharToCodepointColumn(lineText, character) : character + 1
 }
+
+/**
+ * An OFFSET as the installed parser reports it, to the index a JavaScript
+ * string is sliced by.
+ *
+ * The same divergence as the column pair above, one axis over: an offset into
+ * the whole document rather than into a line. It is the conversion a position
+ * computed by slicing the source needs, and only for offsets the PARSER
+ * produced - `djotMigrationWarnings` reports UTF-16 offsets, and passing one
+ * through here would move it.
+ */
+export function astOffsetToIndex(source: string, offset: number): number {
+  if (engineColumnUnit() !== 'codepoint') return offset
+
+  let index = 0
+  let counted = 0
+  while (index < source.length && counted < offset) {
+    index += (source.codePointAt(index) ?? 0) > 0xffff ? 2 : 1
+    counted += 1
+  }
+
+  // An offset past the end keeps its distance rather than collapsing onto it,
+  // for the same reason the column conversion does: an end offset is exclusive.
+  return index + Math.max(0, offset - counted)
+}
