@@ -2,8 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { hoverAt } from './hover.js'
 import { semanticTokens } from './semantic.js'
+import { analyzeCarve } from './analyze.js'
+import { lineStarts, resolveIncludes } from './includes.js'
 import {
   astColumnToCharacter,
+  astOffsetToIndex,
   characterToAstColumn,
   engineColumnUnit,
   setEngineColumnUnit,
@@ -11,6 +14,8 @@ import {
   COLUMN_PROBE,
   probeEndColumn,
 } from './position.js'
+import { pathToFileURL } from 'node:url'
+import type { IncludeResolved, IncludeResolver } from './include-path.js'
 import type { Hover } from 'vscode-languageserver/node.js'
 
 function hoverText(hover: Hover): string {
@@ -170,4 +175,110 @@ test('a BMP-only document is unaffected either way', () => {
     start: { line: 0, character: line.indexOf('*') },
     end: { line: 0, character: line.lastIndexOf('*') + 1 },
   })
+})
+
+/*
+ * The same divergence on the OFFSET axis.
+ *
+ * A diagnostic range is computed by slicing the source at an offset the parser
+ * reported, and the parser counts codepoints while a JavaScript string is
+ * indexed in UTF-16 code units. One emoji before a construct is one code unit
+ * of drift, which is enough to put the range on the line before.
+ */
+
+/** An emoji, then the whole of line 3 is a directive that cannot resolve. */
+const ASTRAL_ROOT = '\u{1F600}pad\n\n{{ missing.crv }}\n'
+const DIRECTIVE_LINE = 2
+const DIRECTIVE_END = '{{ missing.crv }}'.length
+
+const refusing: IncludeResolver = (includePath): IncludeResolved => ({
+  ok: false,
+  id: `/book/${includePath}`,
+  denial: 'not-found',
+})
+
+/** Reports a `watch` path, so the child location can be published. */
+const childResolver: IncludeResolver = (includePath): IncludeResolved => {
+  const id = `/book/${includePath}`
+  if (includePath !== 'child.crv') return { ok: false, id, denial: 'not-found' }
+  return { ok: true, id, watch: id, source: ASTRAL_ROOT, bytes: Buffer.byteLength(ASTRAL_ROOT) }
+}
+
+function includeDiagnostic(source: string, resolver: IncludeResolver) {
+  return analyzeCarve(source, { includes: { resolver } }).diagnostics.find(
+    (entry) => entry.code === 'include-unresolved',
+  )
+}
+
+test('an emoji before a directive does not shift its diagnostic range', () => {
+  assert.deepEqual(includeDiagnostic(ASTRAL_ROOT, refusing)?.range, {
+    start: { line: DIRECTIVE_LINE, character: 0 },
+    end: { line: DIRECTIVE_LINE, character: DIRECTIVE_END },
+  })
+})
+
+test('an emoji in a CHILD does not shift the location published for it', () => {
+  const diagnostic = includeDiagnostic('{{ child.crv }}\n', childResolver)
+  assert.deepEqual(diagnostic?.relatedInformation?.[0]?.location, {
+    uri: pathToFileURL('/book/child.crv').toString(),
+    range: {
+      start: { line: DIRECTIVE_LINE, character: 0 },
+      end: { line: DIRECTIVE_LINE, character: DIRECTIVE_END },
+    },
+  })
+})
+
+test("a warning's own line and column stay in the parser's unit", () => {
+  // The range above is UTF-16, because a client indexes that way. These are
+  // the parser's numbers, and converting them here would leave the two halves
+  // of the same warning measured differently.
+  const line = '\u{1F600} {{ missing.crv }}\n'
+  const warning = resolveIncludes(line, { resolver: refusing, sourcePath: '/book/main.crv' })
+    .warnings[0]
+  assert.equal(warning?.line, 1)
+  assert.equal(warning?.column, [...line.slice(0, line.indexOf('{{'))].length + 1)
+  assert.equal(includeDiagnostic(line, refusing)?.range.start.character, line.indexOf('{{'))
+
+  // An emoji on an EARLIER line moves the line number rather than the column,
+  // so the line table has to be counted in the offsets' own unit too.
+  const later = resolveIncludes(ASTRAL_ROOT, {
+    resolver: refusing,
+    sourcePath: '/book/main.crv',
+  }).warnings[0]
+  assert.equal(later?.line, DIRECTIVE_LINE + 1)
+})
+
+test('both parser readings map the same offset to the same string index', () => {
+  // `LINE` opens with one emoji: two code units, one codepoint. Only one branch
+  // is live with the installed engine, so the other is driven explicitly.
+  try {
+    setEngineColumnUnit('codepoint')
+    assert.equal(astOffsetToIndex(LINE, 1), 2)
+
+    setEngineColumnUnit('utf16')
+    assert.equal(astOffsetToIndex(LINE, 1), 1)
+  } finally {
+    setEngineColumnUnit(undefined)
+  }
+})
+
+test('the line table is counted in the same unit as the offsets looked up in it', () => {
+  // Under a UTF-16 parser the offsets ARE string indices, so a table of
+  // codepoint counts would put a warning after an emoji on the wrong line.
+  const source = `${LINE}\nsecond`
+  try {
+    setEngineColumnUnit('codepoint')
+    assert.deepEqual(lineStarts(source), [0, [...LINE].length + 1])
+
+    setEngineColumnUnit('utf16')
+    assert.deepEqual(lineStarts(source), [0, LINE.length + 1])
+  } finally {
+    setEngineColumnUnit(undefined)
+  }
+})
+
+test('an offset past the end keeps its distance instead of collapsing', () => {
+  // An end offset is exclusive, so a construct ending the document reports one
+  // past the last character. Clamping it would invert the range.
+  assert.equal(astOffsetToIndex(LINE, [...LINE].length + 1), LINE.length + 1)
 })

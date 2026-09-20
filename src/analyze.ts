@@ -32,6 +32,7 @@ import {
 import type { IncludeParseCache } from './include-cache.js'
 import { tableDiagnostics } from './table-diagnostics.js'
 import { colonFenceStructure } from './colon-fences.js'
+import { astOffsetToIndex } from './position.js'
 
 export interface AnalyzeOptions {
   /** URI used for diagnostic related-information locations. */
@@ -156,8 +157,8 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
     diagnostics.push({
       severity: DiagnosticSeverity.Warning,
       range: {
-        start: positionAt(norm, warning.start),
-        end: positionAt(norm, warning.end),
+        start: positionAt(norm, astOffsetToIndex(norm, warning.start)),
+        end: positionAt(norm, astOffsetToIndex(norm, warning.end)),
       },
       source: 'carve',
       // A refusal publishes its own code, so an author whose include was
@@ -302,8 +303,8 @@ function childLocation(
   return {
     uri: pathToFileURL(child.watch).toString(),
     range: {
-      start: positionAt(child.source, within.start),
-      end: positionAt(child.source, within.end),
+      start: positionAt(child.source, astOffsetToIndex(child.source, within.start)),
+      end: positionAt(child.source, astOffsetToIndex(child.source, within.end)),
     },
   }
 }
