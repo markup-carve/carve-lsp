@@ -15,7 +15,7 @@
  * properties of the include GRAPH rather than of one path, so they live in
  * {@link ./includes.js} where the walk is.
  */
-import { closeSync, fstatSync, openSync, readSync, realpathSync } from 'node:fs'
+import { closeSync, fstatSync, openSync, readSync, realpathSync, statSync } from 'node:fs'
 import path from 'node:path'
 import type { IncludeSourceCache } from './include-cache.js'
 
@@ -183,6 +183,14 @@ export function fileSystemResolver(
     // of it, and an absolute path outside it.
     if (!contains(real)) {
       return { ok: false, id: includePath, denial: 'outside-root' }
+    }
+
+    // Checked before opening: opening a FIFO for reading blocks until a writer
+    // appears, so the fstat check below would never run.
+    try {
+      if (!statSync(real).isFile()) return { ok: false, id: real, denial: 'not-a-file' }
+    } catch {
+      return { ok: false, id: includePath, denial: 'not-found' }
     }
 
     let fd: number

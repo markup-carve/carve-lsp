@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -183,6 +184,29 @@ test('a directory is not a document', () => {
   const result = resolve('sub', CTX)
   assert.equal(result.ok, false)
   assert.equal(result.ok === false && result.denial, 'not-a-file')
+})
+
+// Unlike a directory, a FIFO cannot be refused after opening: the open itself
+// blocks. The resolver runs in a child with a deadline, so a hang fails the
+// test instead of stalling the suite.
+test('a FIFO is refused without being opened', { skip: process.platform === 'win32' }, () => {
+  const dir = fixture({ 'main.crv': 'x\n' })
+  const made = spawnSync('mkfifo', [path.join(dir, 'pipe.crv')])
+  assert.equal(made.status, 0, String(made.stderr))
+  const script = `
+    const { fileSystemResolver } = await import(${JSON.stringify(new URL('./include-path.js', import.meta.url).href)})
+    const r = fileSystemResolver(${JSON.stringify(dir)})('pipe.crv', { stack: [], depth: 0 })
+    process.stdout.write(JSON.stringify(r))
+  `
+  const run = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    timeout: 5000,
+    encoding: 'utf8',
+  })
+  assert.equal(run.signal, null, 'the resolver did not return within 5 s')
+  assert.equal(run.status, 0, run.stderr)
+  const result = JSON.parse(run.stdout)
+  assert.equal(result.ok, false)
+  assert.equal(result.denial, 'not-a-file')
 })
 
 test('bytes are counted as encoded UTF-8, not as JavaScript characters', () => {
