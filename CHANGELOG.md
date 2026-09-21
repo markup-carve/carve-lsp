@@ -6,7 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [0.1.7] - 2026-09-20
+## [0.1.7] - 2026-09-21
 
 ### Added
 
@@ -24,13 +24,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - §19 resolver bounds: `carve.includes.maxResolverCalls` caps the resolver calls
   one walk may make, a refusal is terminal instead of retried, and a target that
   is not a regular file is rejected and reported as `include-non-text` (#191).
+- `carve.previewHtml` expands includes when `carve.includes.includeRoot` is
+  configured, through the same resolver and limits as diagnostics. Without a
+  root the preview renders the source as before (#235).
 
 ### Changed
 
 - The include walk is the engine's. `resolveIncludes` is an adapter over
   `expandIncludes` and `findDirectiveSites` instead of a second copy of the
-  walk, so §19's merge rules have one spelling again. The engine dependency
-  floor moves to `^0.1.7` (#225).
+  walk, so §19's merge rules have one spelling again (#225).
+- The engine dependency is pinned exactly to `@markup-carve/carve` `0.1.7`
+  instead of a caret range. This release corrects for 0.1.7 reporting a
+  line-range child's positions in slice coordinates, and carve-js `main` already
+  reports them in file coordinates, so a caret would let a later engine shift
+  them twice (#233).
 
 ### Fixed
 
@@ -44,6 +51,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - An include diagnostic no longer drifts when an astral character precedes the
   directive. An AST offset counts codepoints and was being used to index a
   UTF-16 string (#230).
+- A named pipe inside the include root no longer hangs diagnostics or the
+  preview. The resolver refuses anything that is not a regular file before
+  opening it (#236).
 
 ## [0.1.6] - 2026-09-09
 

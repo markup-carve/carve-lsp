@@ -6,19 +6,18 @@ name: Engine drift
 # hand-written expectations are satisfied by a stale parser exactly as well as
 # by a current one (carve#735).
 #
-# The pin here is a CARET RANGE (`"@markup-carve/carve": "^0.1.5"`). It used to
-# be exact, for a real reason: the server reports positions, and an engine that
-# changes its position units mid-range moves every column it reports - which has
-# happened inside a `0.1.x` line. The range was widened anyway, because an exact
-# pin also meant a fix in the engine could not reach a user without a release of
-# THIS repo, and both halves of the table-continuation lint fix sat unreachable
-# behind one (carve-js#1571, carve-js#1572).
+# The pin here is EXACT (`"@markup-carve/carve": "0.1.7"`). It was a caret
+# range from 0.1.6 on, so an engine fix could reach editors without a release of
+# THIS repo (carve-js#1571, carve-js#1572). It went back to exact because the
+# position units moved inside `0.1.x` again: this server corrects for carve-js
+# 0.1.7 reporting a line-range include's positions in slice coordinates, and
+# carve-js main reports file coordinates, so a caret would let a later engine
+# shift them twice (#233). Widen it only together with dropping that
+# correction (#237).
 #
-# That trade is what makes question 3 below load-bearing rather than
-# informational: a range that moves on its own needs the corpus driven through
-# the built server against the engine that is coming, and CI runs the same
-# check per pull request against the pinned corpus. If position units move
-# again inside `0.1.x`, narrow this back to an exact pin and say so here.
+# Under a range, question 3 below is load-bearing rather than informational: a
+# range that moves on its own needs the corpus driven through the built server
+# against the engine that is coming.
 #
 # It is a REGISTRY pin either way, not a commit: a `github:` spec in
 # `dependencies` makes every consumer clone the engine over git, so the git arm
