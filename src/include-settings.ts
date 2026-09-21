@@ -228,3 +228,13 @@ export function includeOptionsFor(input: IncludeGateInput): IncludeOptions | und
   }
   return options
 }
+
+/**
+ * Include options for `carve.previewHtml`. The preview expands only under an
+ * explicitly configured root; otherwise it renders the source as written.
+ */
+export function previewIncludeOptionsFor(input: IncludeGateInput): IncludeOptions | undefined {
+  const configured = input.settings.includeRoot
+  if (configured === undefined || usableIncludeRoot(configured).root === undefined) return undefined
+  return includeOptionsFor(input)
+}
