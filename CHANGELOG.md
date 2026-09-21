@@ -6,7 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [0.1.7] - 2026-09-20
+## [0.1.7] - 2026-09-21
 
 ### Added
 
@@ -20,7 +20,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   rather than from each child's source (#226).
 - An include warning raised inside a child is located there: the diagnostic
   keeps a range in the open document and carries `relatedInformation` pointing
-  at the position in the file the problem is actually in (#204, #228).
+  at the position in the file the problem is actually in, including for a child
+  pulled in with a line range (#204, #228, #237).
+- `carve.previewHtml` expands includes when `carve.includes.includeRoot` is
+  configured, through the same resolver and limits as diagnostics. Without a
+  root the preview renders the source as before (#235).
 - §19 resolver bounds: `carve.includes.maxResolverCalls` caps the resolver calls
   one walk may make, a refusal is terminal instead of retried, and a target that
   is not a regular file is rejected and reported as `include-non-text` (#191).
@@ -29,8 +33,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - The include walk is the engine's. `resolveIncludes` is an adapter over
   `expandIncludes` and `findDirectiveSites` instead of a second copy of the
-  walk, so §19's merge rules have one spelling again. The engine dependency
-  floor moves to `^0.1.7` (#225).
+  walk, so §19's merge rules have one spelling again (#225).
+- The engine dependency floor moves to `^0.1.8`, which reports a sliced include
+  child's positions in its own file's coordinates
+  (markup-carve/carve-js#1862, #237).
 
 ### Fixed
 
@@ -44,6 +50,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - An include diagnostic no longer drifts when an astral character precedes the
   directive. An AST offset counts codepoints and was being used to index a
   UTF-16 string (#230).
+- A named pipe inside the include root no longer hangs diagnostics or the
+  preview. The resolver refuses anything that is not a regular file before
+  opening it (#236).
 
 ## [0.1.6] - 2026-09-09
 
