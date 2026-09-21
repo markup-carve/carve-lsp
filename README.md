@@ -94,7 +94,7 @@ re-publishes diagnostics for every open document.
 | Setting | Default | Meaning |
 |---|---|---|
 | `enabled` | `"auto"` | `"auto"` enables inclusion only for a workspace the client reports as trusted; `"on"` always; `"off"` never. A client that reports no trust gets inclusion off. |
-| `includeRoot` | workspace root | Containment root override. With no workspace, the document's own directory is used - never the server's working directory. |
+| `includeRoot` | workspace root | Containment root override. With no workspace, the document's own directory is used - never the server's working directory. Setting it also makes the preview expand includes, see below. |
 | `allowAbsolute` | `false` | Allow absolute include paths. They still have to canonicalize inside the root. |
 | `allowedRemoteHosts` | `[]` | Hosts a remote include may name. This server has no fetcher, so a remote target is refused either way; the list exists so the gate is explicit. |
 | `maxDepth` | `16` | Maximum transitive include depth. |
@@ -154,6 +154,12 @@ child headings appear in the including document's symbol result with locations
 in the child file. All three features use the same contained resolver as
 diagnostics; refused paths are never registered as watchers or navigation
 targets.
+
+The `carve.previewHtml` command renders the expanded document only when
+`includeRoot` is set. It reads children through the same resolver and under the
+same limits as diagnostics, so a refused or over-budget directive stays literal
+in the preview. Without `includeRoot` the preview renders the source as
+written, with every directive literal.
 
 Completion inside a directive offers contained `.crv` paths, the target's
 heading ids, the option names, and their value shapes. Every suggestion is

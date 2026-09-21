@@ -36,10 +36,13 @@ import {
 import { TextDocument } from 'vscode-languageserver-textdocument'
 import { carveToCarve } from '@markup-carve/carve'
 import { analyzeCarve, type Analysis } from './analyze.js'
+import { previewHtml } from './preview.js'
 import {
   DEFAULT_INCLUDE_SETTINGS,
   fsPath,
   includeOptionsFor,
+  previewIncludeOptionsFor,
+  type IncludeGateInput,
   readIncludeSettings,
   readWorkspaceTrusted,
   type IncludeSettings,
@@ -320,7 +323,7 @@ connection.onRequest(ExecuteCommandRequest.type, async (params) => {
   const document = uri ? documents.get(uri) : undefined
   if (!document) return null
   const engine = await import('@markup-carve/carve')
-  if (params.command === 'carve.previewHtml') return engine.carveToHtml(document.getText())
+  if (params.command === 'carve.previewHtml') return previewHtml(document.getText(), previewIncludeOptions(document))
   if (params.command === 'carve.showAst') return engine.carveToAstJson(document.getText())
   return null
 })
@@ -487,14 +490,22 @@ function analysisFor(document: TextDocument, includes = includeOptions(document)
   }))
 }
 
-function includeOptions(document: TextDocument) {
-  return includeOptionsFor({
+function includeGateInput(document: TextDocument): IncludeGateInput {
+  return {
     uri: document.uri,
     settings: includeSettings,
     workspaceTrusted,
     workspaceRoots,
     cache: includeCache,
-  })
+  }
+}
+
+function includeOptions(document: TextDocument) {
+  return includeOptionsFor(includeGateInput(document))
+}
+
+function previewIncludeOptions(document: TextDocument) {
+  return previewIncludeOptionsFor(includeGateInput(document))
 }
 
 function refreshWatchers(): void {
