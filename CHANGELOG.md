@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Source actions *Export as Markdown* and *Export as HTML* write the rendered
+  document next to the source, replacing an existing export.
+
 ## [0.1.7] - 2026-09-21
 
 ### Added

@@ -1,4 +1,4 @@
-import { carveToHtml, renderDocument } from '@markup-carve/carve'
+import { carveToHtml, carveToMarkdown, renderDocument, renderMarkdown } from '@markup-carve/carve'
 import { resolveIncludes, type IncludeOptions } from './includes.js'
 
 /**
@@ -10,4 +10,11 @@ export function previewHtml(source: string, includes?: IncludeOptions): string {
   if (includes === undefined) return carveToHtml(source)
   const expanded = resolveIncludes(source, includes).expanded
   return expanded === undefined ? carveToHtml(source) : renderDocument(expanded)
+}
+
+/** Markdown for the export action, with includes expanded like the preview. */
+export function previewMarkdown(source: string, includes?: IncludeOptions): string {
+  if (includes === undefined) return carveToMarkdown(source)
+  const expanded = resolveIncludes(source, includes).expanded
+  return expanded === undefined ? carveToMarkdown(source) : renderMarkdown(expanded)
 }

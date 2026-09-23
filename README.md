@@ -28,7 +28,7 @@ The server communicates over **stdio** (`--stdio` flag).
 | Completion | Admonitions, attributes, semantic spans, citations, references, workspace anchors, and contained include paths, sections and options |
 | Navigation | Document links, go-to-definition, highlights, and references for anchors, captions, footnotes, citations, and link labels |
 | Rename | Workspace-wide, namespace-aware rename; generated heading ids become explicit when renamed |
-| Code actions | Migration and lint quick-fixes, table marker repair, and creation of missing definitions |
+| Code actions | Migration and lint quick-fixes, table marker repair, creation of missing definitions, and export to Markdown or HTML |
 | Code lens | Reference counts for anchors, captions, citations, footnotes, and link labels |
 | Selection and folding | Syntax-aware selection expansion and folding, with tolerant fallbacks during incomplete edits |
 | Formatting | Conservative document/range formatting, on-type continuation, or explicit migration formatting |
@@ -160,6 +160,14 @@ The `carve.previewHtml` command renders the expanded document only when
 same limits as diagnostics, so a refused or over-budget directive stays literal
 in the preview. Without `includeRoot` the preview renders the source as
 written, with every directive literal.
+
+The source actions *Export as Markdown* and *Export as HTML* (kind
+`source.export`) write the rendered document next to the source: `notes.crv`
+becomes `notes.md` or `notes.html`. They expand includes on the same terms as
+the preview. A missing target is created, an existing one is replaced as a
+whole. The actions are offered only to clients that support creating files in a
+workspace edit. Most editors apply the edit to a buffer and leave saving to the
+user.
 
 Completion inside a directive offers contained `.crv` paths, the target's
 heading ids, the option names, and their value shapes. Every suggestion is
