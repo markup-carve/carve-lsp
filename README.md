@@ -58,6 +58,7 @@ watches it for changes.
 | `platforms` | `[]` | Extra platform lint profiles. Currently supports `"github"`. |
 | `extensions` | `[]` | Enabled extension names, for example `"semantic-span"`. |
 | `inlayHints` | `true` | Show generated heading identifiers. |
+| `exportActions` | `true` | Offer the *Export as Markdown* / *Export as HTML* source actions. Editors with their own export commands can turn this off. |
 | `formatter` | `"conservative"` | Use whitespace-only conservative formatting; `"migration"` opts into canonical whole-document conversion. |
 | `severities` | `{}` | Override a diagnostic code with `"error"`, `"warning"`, `"information"`, `"hint"`, or `"off"`. |
 
@@ -166,8 +167,8 @@ The source actions *Export as Markdown* and *Export as HTML* (kind
 becomes `notes.md` or `notes.html`. They expand includes on the same terms as
 the preview. A missing target is created, an existing one is replaced as a
 whole. The actions are offered only to clients that support creating files in a
-workspace edit. Most editors apply the edit to a buffer and leave saving to the
-user.
+workspace edit, and can be turned off with the `exportActions` setting. Most
+editors apply the edit to a buffer and leave saving to the user.
 
 Completion inside a directive offers contained `.crv` paths, the target's
 heading ids, the option names, and their value shapes. Every suggestion is
