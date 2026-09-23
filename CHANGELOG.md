@@ -6,11 +6,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-09-25
+
 ### Added
 
 - Source actions *Export as Markdown* and *Export as HTML* write the rendered
-  document next to the source, replacing an existing export. The new
-  `exportActions` setting turns them off.
+  document next to the source, replacing an existing export (#261). The new
+  `exportActions` setting turns them off, so an editor that ships its own
+  export command does not list it twice (#262).
+
+### Fixed
+
+- A fenced code or raw block no longer carries a `string` semantic token over
+  its body, so the editor's own grammar colors it (#263). Only the fence lines
+  are tokenized: the delimiter as `operator`, the language as `type`. In VS Code
+  every fenced language had been flattened to one string color. The generic line
+  scanners now skip code and raw block lines themselves, which the whole-block
+  token used to do for them, and an unclosed fence keeps its last content line
+  as code.
 
 ## [0.1.7] - 2026-09-21
 
