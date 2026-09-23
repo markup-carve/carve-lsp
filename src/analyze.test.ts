@@ -221,9 +221,9 @@ test('returns semantic tokens for fenced blocks', () => {
   assert.deepEqual(
     result.map((token) => [token.line, token.character, token.length, token.type]),
     [
-      [0, 0, 6, 'string'],
-      [1, 0, 11, 'string'],
-      [2, 0, 3, 'string'],
+      [0, 0, 3, 'operator'],
+      [0, 4, 2, 'type'],
+      [2, 0, 3, 'operator'],
     ],
   )
 })

@@ -77,6 +77,7 @@ function astSemanticTokens(doc: Document, source: string): Token[] {
   const tokens: Token[] = []
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   for (const node of doc.children) collectBlock(tokens, lines, node)
+  const codeBlock = codeBlockLines(doc)
 
   // Emit frontmatter tokens. The AST stores the parsed YAML in doc.frontmatter
   // but has no position info for the --- delimiters, so we walk source lines.
@@ -91,6 +92,8 @@ function astSemanticTokens(doc: Document, source: string): Token[] {
       if (close) inFrontmatter = false
       continue
     }
+
+    if (codeBlock.has(i)) continue
 
     const commentStart = findTrailingComment(text)
     if (commentStart !== -1) {
@@ -117,7 +120,7 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode): void {
       break
     case 'code_block':
     case 'raw_block':
-      pushPosition(tokens, lines, node.pos, 'string')
+      pushFenceLines(tokens, lines, node.pos)
       break
     case 'comment':
       pushPosition(tokens, lines, node.pos, 'comment')
@@ -293,6 +296,44 @@ function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[]): v
   }
 }
 
+// A code body is left without tokens: a semantic token overrides the editor's
+// grammar, and a single `string` over the body hid its language highlighting.
+function pushFenceLines(tokens: Token[], lines: string[], pos: Position | undefined): void {
+  if (pos?.startLine === undefined || pos.endLine === undefined) return
+  const opener = lines[pos.startLine - 1] ?? ''
+  const open = /(`{3,}|~{3,})[ \t]*(=?[^\s`~{"[]+)?/.exec(opener)
+  if (!open) return
+  push(tokens, pos.startLine - 1, open.index, open[1]!.length, 'operator')
+  if (open[2]) push(tokens, pos.startLine - 1, open.index + open[0].lastIndexOf(open[2]), open[2].length, 'type')
+  if (pos.endLine === pos.startLine) return
+  const closer = lines[pos.endLine - 1] ?? ''
+  const close = new RegExp(`(${escapeRegExp(open[1]![0]!)}{${open[1]!.length},})[ \t]*$`).exec(closer)
+  if (close && closer.slice(0, close.index).trim().replace(/^[>\s]*/, '') === '') {
+    push(tokens, pos.endLine - 1, close.index, close[1]!.length, 'operator')
+  }
+}
+
+// Zero-based lines of code and raw blocks, fences included, at any nesting depth.
+// pushFenceLines owns their tokens; the generic scanners must not add to them.
+function codeBlockLines(doc: Document): Set<number> {
+  const body = new Set<number>()
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item)
+      return
+    }
+    if (value === null || typeof value !== 'object') return
+    const node = value as { type?: unknown; pos?: Position }
+    if ((node.type === 'code_block' || node.type === 'raw_block') && node.pos?.startLine !== undefined && node.pos.endLine !== undefined) {
+      for (let line = node.pos.startLine - 1; line < node.pos.endLine; line++) body.add(line)
+      return
+    }
+    for (const key of Object.keys(node)) if (key !== 'pos') visit((node as Record<string, unknown>)[key])
+  }
+  visit(doc.children)
+  return body
+}
+
 function pushPosition(
   tokens: Token[],
   lines: string[],
@@ -450,10 +491,10 @@ function lexicalSemanticTokens(source: string): Token[] {
     }
 
     if (inFence) {
-      pushRun(tokens, line, text, inFence.type)
-      if (new RegExp(`^\\s*${escapeRegExp(inFence.marker)}\\s*$`).test(text)) {
-        inFence = undefined
-      }
+      const closes = new RegExp(`^\\s*${escapeRegExp(inFence.marker)}\\s*$`).test(text)
+      if (inFence.type === 'comment') pushRun(tokens, line, text, 'comment')
+      else if (closes) push(tokens, line, text.indexOf(inFence.marker), inFence.marker.length, 'operator')
+      if (closes) inFence = undefined
       continue
     }
 
