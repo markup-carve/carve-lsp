@@ -122,3 +122,42 @@ test('classifies table pipes and two-axis alignment runs', () => {
   assert.ok(tokens.some((token) => token.type === 'operator' && token.length === 1))
   assert.ok(tokens.some((token) => token.type === 'keyword' && token.length === 2))
 })
+
+/*
+ * A semantic token overrides the editor's grammar. A single `string` over a
+ * code body turned every fenced language into one flat color in VS Code, so
+ * the body carries no token and only the fence lines do.
+ */
+const at = (source: string, line: number) =>
+  semanticTokens(source).filter((t) => t.line === line).map((t) => `${t.character}+${t.length}:${t.type}`)
+
+test('a code body carries no semantic token', () => {
+  const source = '```js\nconst a = 1\n[l](u) %% not a comment\n```\n'
+  assert.deepEqual(at(source, 0), ['0+3:operator', '3+2:type'])
+  assert.deepEqual(at(source, 1), [])
+  assert.deepEqual(at(source, 2), [])
+  assert.deepEqual(at(source, 3), ['0+3:operator'])
+})
+
+test('a code body inside a list item carries no semantic token', () => {
+  const source = '- item\n\n  ```py\n  x = 1\n  ```\n'
+  assert.deepEqual(at(source, 3), [])
+  assert.ok(at(source, 2).includes('2+3:operator'))
+  assert.ok(at(source, 4).includes('2+3:operator'))
+})
+
+test('a raw block body carries no semantic token', () => {
+  const source = '```=html\n<b>x</b>\n```\n'
+  assert.deepEqual(at(source, 1), [])
+  assert.deepEqual(at(source, 0), ['0+3:operator', '3+5:type'])
+})
+
+test('the last line of an unclosed fence is still code', () => {
+  const source = '```js\nconst a = 1\n[l](u) %% still code'
+  assert.deepEqual(at(source, 2), [])
+})
+
+test('fence metadata is not scanned as inline markup', () => {
+  const source = '```js "price $x$"\nconst a = 1\n```\n'
+  assert.deepEqual(at(source, 0), ['0+3:operator', '3+2:type'])
+})
