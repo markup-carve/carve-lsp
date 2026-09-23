@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import {
+  CodeActionKind,
   CodeActionRequest,
+  CodeActionResolveRequest,
   CodeLensRequest,
   CompletionRequest,
   createConnection,
@@ -36,7 +38,8 @@ import {
 import { TextDocument } from 'vscode-languageserver-textdocument'
 import { carveToCarve } from '@markup-carve/carve'
 import { analyzeCarve, type Analysis } from './analyze.js'
-import { previewHtml } from './preview.js'
+import { previewHtml, previewMarkdown } from './preview.js'
+import { EXPORT_KIND, exportCodeActions, exportSupport, resolveExportAction, type ExportFormat, type ExportSupport } from './export-actions.js'
 import {
   DEFAULT_INCLUDE_SETTINGS,
   fsPath,
@@ -86,6 +89,7 @@ const documents = new TextDocuments(TextDocument)
 let includeSettings: IncludeSettings = DEFAULT_INCLUDE_SETTINGS
 let carveSettings: CarveSettings = DEFAULT_CARVE_SETTINGS
 let workspaceTrusted = false
+let exportClient: ExportSupport = { createFile: false, resolveEdit: false }
 let workspaceRoots: string[] = []
 let clientOwnsCarveSettings = false
 const includeCache = new IncludeSourceCache()
@@ -109,6 +113,7 @@ function logIncludeSettings(message: string): void {
 connection.onInitialize((params) => {
   includeSettings = readIncludeSettings(params.initializationOptions, logIncludeSettings)
   workspaceTrusted = readWorkspaceTrusted(params.initializationOptions)
+  exportClient = exportSupport(params.capabilities)
   // Every folder, not just the first: a multi-root session roots each document
   // at the folder it actually lives in.
   const folders = (params.workspaceFolders ?? []).map((folder) => fsPath(folder.uri))
@@ -125,7 +130,10 @@ connection.onInitialize((params) => {
       documentSymbolProvider: true,
       workspaceSymbolProvider: true,
       hoverProvider: true,
-      codeActionProvider: true,
+      codeActionProvider: {
+        codeActionKinds: [CodeActionKind.QuickFix, CodeActionKind.SourceFixAll, EXPORT_KIND],
+        resolveProvider: true,
+      },
       documentFormattingProvider: true,
       documentRangeFormattingProvider: true,
       documentOnTypeFormattingProvider: { firstTriggerCharacter: '\n' },
@@ -339,9 +347,32 @@ connection.onRequest(CodeActionRequest.type, (params) => {
     ? [
         ...migrationCodeActions(params.textDocument.uri, document.getText(), params.context.diagnostics),
         ...lintCodeActions(params.textDocument.uri, document.getText(), params.context.diagnostics),
+        ...exportCodeActions(params.textDocument.uri, exportClient, params.context.only, (format) => renderExport(document, format), readExportTarget),
       ]
     : []
 })
+
+connection.onRequest(CodeActionResolveRequest.type, (action) =>
+  resolveExportAction(action, (uri, format) => {
+    const document = documents.get(uri)
+    return document ? renderExport(document, format) : null
+  }, readExportTarget),
+)
+
+function readExportTarget(target: string): string | null {
+  const path = fsPath(target)
+  if (!path) return null
+  try {
+    return readFileSync(path, 'utf8')
+  } catch {
+    return null
+  }
+}
+
+function renderExport(document: TextDocument, format: ExportFormat): string {
+  const includes = previewIncludeOptions(document)
+  return format === 'html' ? previewHtml(document.getText(), includes) : previewMarkdown(document.getText(), includes)
+}
 
 connection.onRequest(CompletionRequest.type, (params) => {
   const document = documents.get(params.textDocument.uri)
