@@ -34,6 +34,9 @@ const IN_PADDED = { start: 39, end: 56, line: 9, column: 1 }
 const files: Record<string, string> = {
   '/book/child.crv': CHILD,
   '/book/deep.crv': '{{ nested.crv }}\n',
+  // A second route to `nested.crv`, so one canonical child is reached under
+  // two different top-level directives.
+  '/book/deeper.crv': '{{ nested.crv }}\n',
   '/book/nested.crv': 'text\n\n{{ missing.crv }}\n',
   // Carriage-return endings, which a `\n` scan reads as a single line.
   '/book/classic.crv': CHILD.replace(/\n/g, '\r'),
@@ -107,6 +110,43 @@ test('a line range on one child leaves a warning from another child alone', () =
   const warning = warningsFor('{{ quiet.crv @lines:9-9 }}\n\n{{ child.crv }}\n')[0]
   assert.equal(warning?.file, '/book/child.crv')
   assert.deepEqual(warning?.within, IN_CHILD)
+})
+
+// The two shapes #224 was filed for. Both are about occurrence identity, which
+// only the engine has: the same target resolves under one canonical id however
+// many times it is written. The engine reports the directive that pulled each
+// warning's file in, so each occurrence anchors at itself.
+
+test('the occurrence that degraded is the one the warning anchors at', () => {
+  // `padded.crv` is written twice and only the second slice holds the failing
+  // directive. Dealing the warnings over the matching directives in document
+  // order - all an adapter can do without the engine's reach - would anchor
+  // this one at the first occurrence, which degraded not at all.
+  const source = '{{ padded.crv @lines:1-1 }}\n\n{{ padded.crv @lines:9-9 }}\n'
+  const second = source.lastIndexOf('{{ padded.crv')
+  const warnings = warningsFor(source)
+  assert.equal(warnings.length, 1)
+  assert.equal(warnings[0]?.start, second)
+  assert.equal(warnings[0]?.end, source.length - 1)
+})
+
+test('one child reached under two top-level directives anchors each warning at its own', () => {
+  // `deep.crv` and `deeper.crv` both pull in `nested.crv`. A chain keyed by
+  // child identity holds one of them, so the earlier traversal's warning used
+  // to anchor at the later directive.
+  const source = '{{ deep.crv }}\n\n{{ deeper.crv }}\n'
+  const warnings = warningsFor(source)
+  assert.deepEqual(
+    warnings.map((warning) => warning.file),
+    ['/book/nested.crv', '/book/nested.crv'],
+  )
+  assert.deepEqual(
+    warnings.map((warning) => [warning.start, warning.end]),
+    [
+      [0, '{{ deep.crv }}'.length],
+      [source.indexOf('{{ deeper.crv }}'), source.length - 1],
+    ],
+  )
 })
 
 test('a child written once sliced and once whole reports the file line for both', () => {
