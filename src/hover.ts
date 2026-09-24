@@ -177,7 +177,11 @@ function collectBlock(
       break
     case 'table':
       if (node.caption) collectInline(matches, node.caption, position, resolveRef)
-      node.rows.forEach((row) => row.cells.forEach((cell) => collectInline(matches, cell.children, position, resolveRef)))
+      // A cell carries EITHER inline children or imported `blocks` (carve-js#1980), never both.
+      // Carve source always yields the inline half, and this server only ever parses source.
+      node.rows.forEach((row) =>
+        row.cells.forEach((cell) => collectInline(matches, cell.children ?? [], position, resolveRef)),
+      )
       break
   }
 }
