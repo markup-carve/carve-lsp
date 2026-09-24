@@ -176,7 +176,9 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode): void {
       }
       if (node.caption) collectInline(tokens, lines, node.caption)
       for (const row of node.rows) {
-        for (const cell of row.cells) collectInline(tokens, lines, cell.children)
+        // A cell carries EITHER inline children or imported `blocks` (carve-js#1980), never both.
+        // Carve source always yields the inline half, and this server only ever parses source.
+        for (const cell of row.cells) collectInline(tokens, lines, cell.children ?? [])
       }
       break
     case 'image':

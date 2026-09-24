@@ -338,3 +338,71 @@ jobs:
           else
             echo "no document is read differently under carve-js main"
           fi
+
+  future-types:
+    name: The server typechecks against the engine that is coming
+    runs-on: ubuntu-latest
+    # A SEPARATE job from future-engine, on purpose. The two want opposite
+    # things from the same swap: the measurement above must NOT rebuild,
+    # because a `case` arm naming a node type the newer engine dropped is the
+    # dead code it exists to count, and a compiler would turn that count into
+    # an error. This job wants exactly that compiler. Running both in one job
+    # means one of the two questions goes unanswered.
+    #
+    # What it catches is a TYPE drift, which nothing else here can see. When a
+    # property this server reads becomes optional upstream, the running server
+    # keeps working, every corpus document still parses, and the per-document
+    # manifest above is unchanged - so future-engine reports "no document is
+    # read differently" and is right. The damage is deferred to the first pin
+    # bump, in a repo whose `prepare` script is `npm run build`: the manifest
+    # change that ought to be a version string is a package that will not
+    # install. carve-js#1980 made `TableCell.children` optional and landed
+    # exactly that state on `main` (#286).
+    #
+    # It FAILS rather than warns, for the same reason question 3 fails: an
+    # engine moving is not this repo's defect, but a server that cannot be
+    # built against it is. `skipLibCheck` keeps the verdict about this repo's
+    # own sources rather than the engine's declarations.
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Check out and build carve-js main
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/markup-carve/carve-js.git upstream-carve-js
+          npm --prefix upstream-carve-js ci
+          npm --prefix upstream-carve-js run build
+          echo "carve-js main: $(git -C upstream-carve-js rev-parse HEAD)"
+          # The declarations are the whole point of this job, so their absence
+          # is an error and not a typecheck that passes over nothing: without
+          # dist/*.d.ts the import resolves to `any` and every call site below
+          # is trivially well typed.
+          if [ -z "$(find upstream-carve-js/dist -name '*.d.ts' -print -quit)" ]; then
+            echo "::error::carve-js main built no .d.ts files, so there is nothing here to typecheck against"
+            exit 1
+          fi
+
+      - name: Install against the pinned engine
+        run: npm ci
+
+      - name: Swap in carve-js main
+        run: |
+          set -euo pipefail
+          rm -rf node_modules/@markup-carve/carve
+          mkdir -p node_modules/@markup-carve/carve
+          cp -r upstream-carve-js/dist node_modules/@markup-carve/carve/dist
+          cp upstream-carve-js/package.json node_modules/@markup-carve/carve/package.json
+          cp -r upstream-carve-js/node_modules node_modules/@markup-carve/carve/node_modules
+
+      - name: Typecheck against carve-js main
+        run: |
+          set -euo pipefail
+          if ! npx tsc --noEmit; then
+            echo '::error::this server does not typecheck against carve-js main. The pin cannot move until these are fixed, and since the prepare script builds, moving it as it stands publishes a package that fails to install.'
+            exit 1
+          fi
+          echo "the server typechecks against carve-js main"
