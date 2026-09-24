@@ -9,7 +9,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Source actions *Export as Markdown* and *Export as HTML* write the rendered
-  document next to the source, replacing an existing export.
+  document next to the source, replacing an existing export. The new
+  `exportActions` setting turns them off.
 
 ## [0.1.7] - 2026-09-21
 

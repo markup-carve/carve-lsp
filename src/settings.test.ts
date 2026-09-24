@@ -8,10 +8,10 @@ import { DEFAULT_CARVE_SETTINGS, readCarveSettings, readProjectSettings } from '
 test('reads safe project settings and rejects unknown platform names', () => {
   assert.deepEqual(readCarveSettings(undefined), DEFAULT_CARVE_SETTINGS)
   assert.deepEqual(readCarveSettings({ carve: {
-    platforms: ['github', 'unknown'], extensions: ['semantic-span'], inlayHints: false, formatter: 'migration',
+    platforms: ['github', 'unknown'], extensions: ['semantic-span'], inlayHints: false, exportActions: false, formatter: 'migration',
     severities: { 'table-width-total': 'error', bogus: 'loud' },
   } }), {
-    platforms: ['github'], extensions: ['semantic-span'], inlayHints: false, formatter: 'migration',
+    platforms: ['github'], extensions: ['semantic-span'], inlayHints: false, exportActions: false, formatter: 'migration',
     severities: { 'table-width-total': 'error' },
   })
 })

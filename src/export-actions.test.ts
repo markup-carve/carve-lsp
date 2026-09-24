@@ -29,10 +29,12 @@ test('reads create and resolve support from client capabilities', () => {
     }),
     { createFile: true, resolveEdit: true },
   )
+  // Neovim's declaration: create without documentChanges.
   assert.equal(
-    exportSupport({ workspace: { workspaceEdit: { documentChanges: false, resourceOperations: ['create'] } } }).createFile,
-    false,
+    exportSupport({ workspace: { workspaceEdit: { resourceOperations: ['rename', 'create', 'delete'] } } }).createFile,
+    true,
   )
+  assert.equal(exportSupport({ workspace: { workspaceEdit: { documentChanges: true } } }).createFile, false)
 })
 
 test('offers nothing when the client cannot create files', () => {

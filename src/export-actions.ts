@@ -25,7 +25,10 @@ export interface ExportActionData {
 
 /** What the client declared it can do with export actions. */
 export interface ExportSupport {
-  /** `workspaceEdit.documentChanges` plus the `create` resource operation. */
+  /**
+   * The `create` resource operation. `documentChanges` is not required as well:
+   * Neovim declares `create` without it and applies such edits correctly.
+   */
   createFile: boolean
   /** `codeAction/resolve` may fill in `edit`, so rendering can wait. */
   resolveEdit: boolean
@@ -37,7 +40,7 @@ export function exportSupport(capabilities: {
 }): ExportSupport {
   const workspaceEdit = capabilities.workspace?.workspaceEdit
   return {
-    createFile: Boolean(workspaceEdit?.documentChanges) && (workspaceEdit?.resourceOperations ?? []).includes('create'),
+    createFile: (workspaceEdit?.resourceOperations ?? []).includes('create'),
     resolveEdit: (capabilities.textDocument?.codeAction?.resolveSupport?.properties ?? []).includes('edit'),
   }
 }

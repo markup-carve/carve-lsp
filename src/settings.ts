@@ -6,6 +6,7 @@ export interface CarveSettings {
   platforms: LintPlatform[]
   extensions: string[]
   inlayHints: boolean
+  exportActions: boolean
   formatter: 'conservative' | 'migration'
   severities: Record<string, 'error' | 'warning' | 'information' | 'hint' | 'off'>
 }
@@ -14,6 +15,7 @@ export const DEFAULT_CARVE_SETTINGS: CarveSettings = {
   platforms: [],
   extensions: [],
   inlayHints: true,
+  exportActions: true,
   formatter: 'conservative',
   severities: {},
 }
@@ -31,6 +33,7 @@ export function readCarveSettings(raw: unknown): CarveSettings {
     platforms,
     extensions,
     inlayHints: carve['inlayHints'] !== false,
+    exportActions: carve['exportActions'] !== false,
     formatter: carve['formatter'] === 'migration' ? 'migration' : 'conservative',
     severities: severitySettings(carve['severities']),
   }
