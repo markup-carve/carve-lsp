@@ -6,13 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [0.1.8] - 2026-09-26
+## [0.1.8] - 2026-09-30
 
 ### Fixes
 
 - A fenced code or raw block no longer carries a whole-block `string` semantic
   token, so the editor's own grammar colors the body and only the fence lines
-  are tokenized (#263).
+  are tokenized (#263, #264).
 - Hover and semantic tokens tolerate a table cell that carries no inline
   children, a shape the engine's schema now admits for a cell imported from
   another format (#287).
