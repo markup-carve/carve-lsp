@@ -24,13 +24,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Improvements
 
-- The engine dependency is a caret range again, `^0.1.8` on the published carve
+- The engine dependency is a caret range again, `^0.1.9` on the published carve
   package, so an engine fix reaches editors without a release of this server.
   It was exact for 0.1.7 only because position units moved inside the `0.1.x`
-  line (#237).
+  line (#237, #390).
 - Installing this release resolves the engine onto carve-js 0.1.9, which stops
   `unattached-block-attribute` firing on the canonical `{empty}` sentinel this
   server's own formatter emits (markup-carve/carve-js#2409).
+
 
 ## [0.1.8] - 2026-09-30
 
