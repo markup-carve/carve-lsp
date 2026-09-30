@@ -280,7 +280,11 @@ jobs:
         id: pinned
         run: |
           set -euo pipefail
-          out="$(node tools/corpus-through-server.mjs carve-main/tests/corpus --manifest pinned-manifest.tsv | tee /dev/stderr)"
+          # --allow-throws: this job compares two runs, so it needs the numbers
+          # from both even when one engine throws. The comparison below is what
+          # gates it; the script's own exit gates the pull-request check, where
+          # there is nothing to compare against.
+          out="$(node tools/corpus-through-server.mjs carve-main/tests/corpus --manifest pinned-manifest.tsv --allow-throws | tee /dev/stderr)"
           for key in documents threw tokens diagnostics; do
             printf '%s=%s\n' "${key}" "$(printf '%s\n' "$out" | sed -n "s/^${key}=//p")" >> "${GITHUB_OUTPUT}"
           done
@@ -314,7 +318,7 @@ jobs:
           # overwrite the engine that was just swapped in.
           cp -r upstream-carve-js/node_modules node_modules/@markup-carve/carve/node_modules
 
-          out="$(node tools/corpus-through-server.mjs carve-main/tests/corpus --manifest current-manifest.tsv | tee /dev/stderr)"
+          out="$(node tools/corpus-through-server.mjs carve-main/tests/corpus --manifest current-manifest.tsv --allow-throws | tee /dev/stderr)"
           threw="$(printf '%s\n' "$out" | sed -n 's/^threw=//p')"
           documents="$(printf '%s\n' "$out" | sed -n 's/^documents=//p')"
           tokens="$(printf '%s\n' "$out" | sed -n 's/^tokens=//p')"
