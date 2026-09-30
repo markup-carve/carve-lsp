@@ -67,8 +67,7 @@ test('the angle-bracket spelling of the same crossref resolves too', () => {
 })
 
 test('a crossref into a sliced child lands on the heading line in the file', () => {
-  // The merged node carries the child's id and the SLICE's coordinates, so an
-  // untranslated jump opens `padded.crv` at its first padding paragraph.
+  // A slice-relative position would open `padded.crv` at its first padding paragraph.
   const location = jump(
     '{{ padded.crv @lines:9-9 }}\n\nSee [](#late-heading).\n',
     'late-heading',

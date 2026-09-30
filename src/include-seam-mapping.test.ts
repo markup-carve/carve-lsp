@@ -87,15 +87,13 @@ test('a grandchild reports its own position, not its parent', () => {
 })
 
 test('a child pulled in by a line range reports its position in the whole file', () => {
-  // The engine slices the source before parsing it, so its own reading of this
-  // warning is line 1 of a one-line slice. Line 1 of `padded.crv` is a padding
-  // paragraph, and that is where the author would be sent.
+  // A slice-relative reading would be line 1, a padding paragraph of `padded.crv`.
   const warning = warningsFor('{{ padded.crv @lines:9-9 }}\n')[0]
   assert.equal(warning?.file, '/book/padded.crv')
   assert.deepEqual(warning?.within, IN_PADDED)
 })
 
-test('a line range written in a child, not in the root, translates the same way', () => {
+test('a line range written in a child, not in the root, reports the same position', () => {
   // `slicer.crv` is what carries the `@lines`, so the range cannot be found by
   // looking at the root's directives.
   const warning = warningsFor('{{ slicer.crv }}\n')[0]
@@ -104,24 +102,18 @@ test('a line range written in a child, not in the root, translates the same way'
 })
 
 test('a line range on one child leaves a warning from another child alone', () => {
-  // `quiet.crv` is sliced and warns about nothing; `child.crv` is not sliced.
-  // A translation applied to the pass rather than to the file each position was
-  // measured in would move this warning by the other directive's range.
+  // `quiet.crv` is sliced and warns about nothing; `child.crv` is not sliced,
+  // so nothing may move this warning by the other directive's range.
   const warning = warningsFor('{{ quiet.crv @lines:9-9 }}\n\n{{ child.crv }}\n')[0]
   assert.equal(warning?.file, '/book/child.crv')
   assert.deepEqual(warning?.within, IN_CHILD)
 })
 
-test('a child written once sliced and once whole is left where the engine put it', () => {
-  // Both occurrences stamp the same canonical id and neither warning says which
-  // one it came from, so one correction for the id would move the whole-file
-  // occurrence to line 17 of a nine-line file. Until the engine carries that
-  // identity (#224) the engine's own readings stand: line 1 measured in the
-  // slice, and line 9 measured in the file.
+test('a child written once sliced and once whole reports the file line for both', () => {
   const lines = warningsFor('{{ padded.crv @lines:9-9 }}\n\n{{ padded.crv }}\n').map(
     (warning) => warning.within?.line,
   )
-  assert.deepEqual(lines, [1, 9])
+  assert.deepEqual(lines, [9, 9])
 })
 
 test('the location of a sliced child is the line the author has to open', () => {
