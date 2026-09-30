@@ -6,7 +6,7 @@ name: Engine drift
 # hand-written expectations are satisfied by a stale parser exactly as well as
 # by a current one (carve#735).
 #
-# The pin here is a CARET RANGE (`"@markup-carve/carve": "^0.1.8"`). It was
+# The pin here is a CARET RANGE (`"@markup-carve/carve": "^0.1.9"`). It was
 # exact at 0.1.7 for one release, because the position units moved inside the
 # `0.1.x` line: 0.1.7 reported a line-range include's positions in slice
 # coordinates and this server corrected for that, so a caret would have let a
@@ -14,6 +14,12 @@ name: Engine drift
 # (carve-js#1862), the correction is gone (#239), and the range is back so an
 # engine fix can reach editors without a release of THIS repo (carve-js#1571,
 # carve-js#1572).
+#
+# The FLOOR is 0.1.9 rather than 0.1.8 on purpose. 0.1.8 reports
+# `unattached-block-attribute` on the canonical `{empty}` sentinel that this
+# server's own formatter writes, so an editor resolving to it sees the server
+# diagnose its own output (carve-js#2408, fixed in carve-js#2409). A lockfile
+# would not protect a dependent, since only `dist` is published.
 #
 # That trade is what makes question 3 below load-bearing rather than
 # informational: a range that moves on its own needs the corpus driven through
