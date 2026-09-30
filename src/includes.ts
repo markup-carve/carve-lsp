@@ -14,8 +14,10 @@
  *
  * - the ROOT anchor for every warning. The engine reports a child's problem at
  *   the child's own offsets, which is right for a renderer and unusable as an
- *   LSP range: the client has the root open. Each warning keeps its root span
- *   and gains {@link IncludeWarning.within} for the other end.
+ *   LSP range: the client has the root open. The engine names the top-level
+ *   directive on `includedBy`, so the anchor is a read rather than a
+ *   reconstruction; each warning keeps that root span and gains
+ *   {@link IncludeWarning.within} for the other end.
  * - the `watch` candidate and the refusal class, which the engine's resolver
  *   contract has no slot for.
  * - the child sources, which the outline and the seam location read back.
@@ -218,57 +220,29 @@ interface Seam {
   denial: Map<string, IncludeDenial>
   /** Child source as read, line endings normalized, by identity. */
   documents: Map<string, { source: string; version?: string; watch?: string }>
-  /** Any child identity to the top-level child whose chain it belongs to. */
-  chain: Map<string, string>
-  /** Top-level child identity to the directive path the root wrote for it. */
-  rootPath: Map<string, string>
 }
 
 /**
  * Root span for a warning the engine anchored somewhere else.
  *
- * A warning from the root document already carries root offsets, but over the
- * enclosing inline node rather than the token: the engine anchors on the `Text`
- * a directive starts in, which for `See {{ a.crv }} here.` is the whole
- * sentence. Narrowing to the one directive site inside that span restores the
- * token. Where two sites share a node the span stays as the engine drew it -
- * coarse, never wrong.
- *
  * A warning from a CHILD carries that child's offsets, which name nothing in
- * the open document. It anchors at the top-level directive that pulled the
- * chain in, and {@link IncludeWarning.within} keeps the real position.
+ * the open document. `includedBy` is the engine's report of how that child was
+ * reached, root first, so its first entry is the top-level directive and is
+ * already the token rather than the node around it.
  *
- * Where the root writes the same target more than once, the engine expands it
- * once per occurrence and raises the same warning each time, but it reports no
- * occurrence identity - only the file. The warnings are therefore dealt over
- * the matching directives in document order, so every occurrence carries a
- * diagnostic instead of the first one carrying all of them. Two cases stay
- * approximate for want of that identity: occurrences that degrade DIFFERENTLY
- * pair up by position rather than by cause, and a child reached under two
- * different top-level directives anchors both chains at the later one. Both
- * need the including site on the engine's warning (#224).
+ * A warning from the root document carries no reach, and already carries root
+ * offsets - but over the enclosing inline node rather than the token: the
+ * engine anchors on the `Text` a directive starts in, which for
+ * `See {{ a.crv }} here.` is the whole sentence. Narrowing to the one
+ * directive site inside that span restores the token. Where two sites share a
+ * node the span stays as the engine drew it - coarse, never wrong.
  */
-function rootSpan(
-  warning: EngineWarning,
-  sites: DirectiveSite[],
-  seam: Seam,
-  sourcePath: string | undefined,
-  dealt: Map<string, number>,
-): { start: number; end: number } | undefined {
-  if (warning.file === undefined || warning.file === sourcePath) {
-    const inside = sites.filter((site) => site.start >= warning.start && site.end <= warning.end)
-    const only = inside.length === 1 ? inside[0]! : undefined
-    return only ? { start: only.start, end: only.end } : { start: warning.start, end: warning.end }
-  }
-  const top = seam.chain.get(warning.file) ?? warning.file
-  const written = seam.rootPath.get(top)
-  if (written === undefined) return undefined
-  const matching = sites.filter((site) => site.directive.path === written)
-  if (matching.length === 0) return undefined
-  const turn = dealt.get(written) ?? 0
-  dealt.set(written, turn + 1)
-  const site = matching[turn % matching.length]!
-  return { start: site.start, end: site.end }
+function rootSpan(warning: EngineWarning, sites: DirectiveSite[]): { start: number; end: number } {
+  const top = warning.includedBy?.[0]
+  if (top !== undefined) return { start: top.start, end: top.end }
+  const inside = sites.filter((site) => site.start >= warning.start && site.end <= warning.end)
+  const only = inside.length === 1 ? inside[0]! : undefined
+  return only ? { start: only.start, end: only.end } : { start: warning.start, end: warning.end }
 }
 
 /**
@@ -296,18 +270,6 @@ export function resolveIncludes(source: string, options: IncludeOptions = {}): I
     watch: new Map(),
     denial: new Map(),
     documents: new Map(),
-    chain: new Map(),
-    rootPath: new Map(),
-  }
-
-  const link = (id: string, ctx: EngineContext, written: string): void => {
-    if (ctx.depth === 0) {
-      seam.chain.set(id, id)
-      if (!seam.rootPath.has(id)) seam.rootPath.set(id, written)
-      return
-    }
-    const parent = ctx.stack[ctx.stack.length - 1]
-    seam.chain.set(id, (parent !== undefined ? seam.chain.get(parent) : undefined) ?? id)
   }
 
   const resolve = (
@@ -327,12 +289,10 @@ export function resolveIncludes(source: string, options: IncludeOptions = {}): I
       // one watcher - which is exactly the case includes exist for, since
       // creating either file has to invalidate.
       const id = result.watch ?? result.id
-      link(id, ctx, written)
       seam.denial.set(refusalKey(ctx.stack[ctx.stack.length - 1], written), result.denial)
       if (result.watch !== undefined) seam.watch.set(id, result.watch)
       return { source: null, id }
     }
-    link(result.id, ctx, written)
     if (result.watch !== undefined) seam.watch.set(result.id, result.watch)
     // A LONE carriage return is a line break to a client, to the engine's line
     // counting and to nothing else here: `positionAt` scans for `\n`, so a
@@ -385,12 +345,13 @@ export function resolveIncludes(source: string, options: IncludeOptions = {}): I
   const merged = mergedFiles(result.doc)
 
   const starts = lineStarts(normalized)
-  const dealt = new Map<string, number>()
   const warnings: IncludeWarning[] = []
   for (const warning of result.warnings) {
-    const span = rootSpan(warning, sites, seam, options.sourcePath, dealt)
-    if (span === undefined) continue
-    const inChild = warning.file !== undefined && warning.file !== options.sourcePath
+    const span = rootSpan(warning, sites)
+    // A reach is what the engine reports for a warning raised while expanding
+    // a child, and only for one, so it decides both halves: where the warning
+    // anchors in the open document, and whether it needs a `within` at all.
+    const inChild = warning.includedBy !== undefined
     const mapped: IncludeWarning = {
       ...locateIn(starts, span.start),
       rule: warning.rule,
