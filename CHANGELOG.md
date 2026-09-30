@@ -6,6 +6,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-09-30
+
+### Fixes
+
+- An include warning raised inside a child anchors at the directive that pulled
+  that child in, which the engine now reports on the warning itself. An
+  occurrence that degrades on its own no longer anchors at a sibling occurrence
+  of the same target, and a child reached under two top-level directives no
+  longer anchors both at the later one (#224, #268,
+  markup-carve/carve-js#1956).
+- A child pulled in with an `@lines` range reports its positions in its own file
+  rather than in the slice, for include warnings and for go to definition alike.
+  The engine rebases them from 0.1.8 on, so this server's compensation for slice
+  coordinates is gone and a target written once sliced and once whole reports
+  its file line for both (#233, #239, markup-carve/carve-js#1862).
+
+### Improvements
+
+- The engine dependency is a caret range again, `@markup-carve/carve` `^0.1.8`,
+  so an engine fix reaches editors without a release of this server. It was
+  exact for 0.1.7 only because position units moved inside the `0.1.x` line
+  (#237).
+- Installing this release resolves the engine onto carve-js 0.1.9, which stops
+  `unattached-block-attribute` firing on the canonical `{empty}` sentinel this
+  server's own formatter emits (markup-carve/carve-js#2409).
+
 ## [0.1.8] - 2026-09-30
 
 ### Fixes
