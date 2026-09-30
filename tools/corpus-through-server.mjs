@@ -16,10 +16,19 @@
 // is exactly the state this measures.
 //
 // Usage: node tools/corpus-through-server.mjs <corpus-dir> [--manifest <file>]
+//                                                [--allow-throws]
 // Prints `documents=`, `threw=`, `tokens=`, `diagnostics=` lines, and one line
 // per document that threw. Exits 1 without measuring anything when the corpus
 // is not the whole corpus - see the population guard below for why that is a
-// failure rather than a smaller run.
+// failure rather than a smaller run, and exits 1 after measuring when any
+// document threw.
+//
+// That second exit is the one a caller reads without parsing stdout. Without
+// it the script counted throwing documents and exited 0 regardless, so the CI
+// step that runs it bare was green whatever `threw=` said: the input it was
+// added for was the one input it could not report. `--allow-throws` keeps the
+// measurement and drops the exit, for the drift comparison that wants both
+// runs' numbers even when one of the engines throws.
 //
 // The totals alone cannot answer the question the two runs are compared for.
 // They are SUMS over the corpus, so a document that loses semantic tokens and
@@ -43,6 +52,7 @@ if (!corpusDir) {
   exit(2)
 }
 
+const allowThrows = argv.includes('--allow-throws')
 const manifestFlag = argv.indexOf('--manifest')
 const manifestPath = manifestFlag === -1 ? null : argv[manifestFlag + 1]
 if (manifestFlag !== -1 && !manifestPath) {
@@ -186,3 +196,10 @@ stdout.write(`documents=${documents.length}\n`)
 stdout.write(`threw=${threw}\n`)
 stdout.write(`tokens=${tokens}\n`)
 stdout.write(`diagnostics=${diagnostics}\n`)
+
+if (threw > 0 && !allowThrows) {
+  stdout.write(
+    `::error::the server threw on ${threw} of ${documents.length} corpus documents\n`,
+  )
+  exit(1)
+}
