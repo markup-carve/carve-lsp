@@ -112,8 +112,8 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode): void {
   switch (node.type) {
     case 'heading':
       pushLinePrefix(tokens, lines, node.pos, /^#{1,6}/, 'operator')
-      pushHeadingTitle(tokens, lines, node.pos)
       collectInline(tokens, lines, node.children)
+      pushHeadingTitle(tokens, lines, node.pos)
       break
     case 'paragraph':
       collectInline(tokens, lines, node.children)
@@ -380,12 +380,23 @@ function pushLinePrefix(
 
 function pushHeadingTitle(tokens: Token[], lines: string[], pos: Position | undefined): void {
   if (!pos?.startLine) return
-  const line = lines[pos.startLine - 1] ?? ''
-  const match = /^(#{1,6})(\s+)(.*)$/.exec(line)
+  const lineNumber = pos.startLine - 1
+  const line = lines[lineNumber] ?? ''
+  const match = /^(?:[ \t]*> )*[ \t]*#{1,6} +/.exec(line)
   if (!match) return
-  push(tokens, pos.startLine - 1, match[1]!.length + match[2]!.length, match[3]!.length, 'type', [
-    'definition',
-  ])
+  const comment = findTrailingComment(line)
+  const end = comment === -1 ? line.length : comment
+  let cursor = match[0].length
+  const occupied = tokens.filter((token) => token.line === lineNumber)
+    .sort((a, b) => a.character - b.character)
+  for (const token of occupied) {
+    if (token.character >= end) break
+    if (token.character > cursor) {
+      push(tokens, lineNumber, cursor, token.character - cursor, 'type', ['definition'])
+    }
+    cursor = Math.max(cursor, token.character + token.length)
+  }
+  if (cursor < end) push(tokens, lineNumber, cursor, end - cursor, 'type', ['definition'])
 }
 
 /**
@@ -666,14 +677,23 @@ function modifierMask(modifiers: TokenModifier[]): number {
  * an inline backtick code span.
  */
 function findTrailingComment(text: string): number {
-  let inCode = false
+  let codeWidth = 0
   for (let i = 0; i < text.length; i++) {
     const ch = text[i]!
-    if (ch === '`') {
-      inCode = !inCode
+    if (codeWidth === 0 && ch === '\\') {
+      i++
       continue
     }
-    if (inCode) continue
+    if (ch === '`') {
+      let end = i + 1
+      while (text[end] === '`') end++
+      const width = end - i
+      if (codeWidth === 0) codeWidth = width
+      else if (codeWidth === width) codeWidth = 0
+      i = end - 1
+      continue
+    }
+    if (codeWidth !== 0) continue
     if (ch === '\\') {
       i++ // skip the escaped character
       continue
