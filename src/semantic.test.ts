@@ -161,3 +161,40 @@ test('fence metadata is not scanned as inline markup', () => {
   const source = '```js "price $x$"\nconst a = 1\n```\n'
   assert.deepEqual(at(source, 0), ['0+3:operator', '3+2:type'])
 })
+
+
+test('heading and caption verbatim runs protect percent markers without hiding trailing comments', () => {
+  for (const prefix of ['# a ', '> # a ', '![alt](x.png)\n^ cap ', '> ![alt](x.png)\n> ^ cap ']) {
+    for (const body of ['`x %% b` c', '``x %% b`` c', '!`x %% b` c', '$`x %% b` c', '`x %% b']) {
+      const source = prefix + body + '\n\nplain tail'
+      const tokens = semanticTokens(source)
+      const line = prefix.split('\n').length - 1
+      const at = (prefix + body).split('\n')[line]!.indexOf('%%')
+      const over = tokens.filter((token) => token.line === line && token.character <= at && at < token.character + token.length)
+      assert.equal(over.length, 1, source)
+      assert.equal(over[0]!.type, 'string', source)
+      assert.ok(!tokens.some((token) => token.line === line + 2), source)
+    }
+    for (const gap of [' ', '\t']) {
+      const source = prefix + '`x`' + gap + '%% hidden'
+      const tokens = semanticTokens(source)
+      assert.ok(tokens.some((token) => token.type === 'comment'), source)
+      for (let i = 1; i < tokens.length; i++) {
+        const prev = tokens[i - 1]!, next = tokens[i]!
+        assert.ok(prev.line !== next.line || prev.character + prev.length <= next.character, source)
+      }
+    }
+  }
+})
+
+
+test('heading comments respect delimiter widths and escaped openers', () => {
+  for (const prefix of ['# a ', '![alt](x.png)\n^ cap ']) {
+    for (const body of ['`` x ` y `` %% hidden', '\\`x %% hidden']) {
+      assert.ok(semanticTokens(prefix + body).some((token) => token.type === 'comment'), body)
+    }
+    for (const body of ['` x `` y %% hidden', '\\\\`x %% hidden']) {
+      assert.ok(!semanticTokens(prefix + body).some((token) => token.type === 'comment'), body)
+    }
+  }
+})
