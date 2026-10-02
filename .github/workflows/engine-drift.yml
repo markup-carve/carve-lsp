@@ -252,7 +252,7 @@ jobs:
   future-engine:
     name: The server survives the engine that is coming
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
