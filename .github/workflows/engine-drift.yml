@@ -65,10 +65,13 @@ on:
     - cron: "0 5 * * *"
   workflow_dispatch:
 
+# Every job below carries a timeout-minutes bound, so a hung step fails in
+# minutes instead of running to GitHub's 360-minute default.
 jobs:
   engine-pin:
     name: The pin, the lockfile and the registry agree
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -249,6 +252,7 @@ jobs:
   future-engine:
     name: The server survives the engine that is coming
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
 
@@ -354,6 +358,7 @@ jobs:
   future-types:
     name: The server typechecks against the engine that is coming
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # A SEPARATE job from future-engine, on purpose. The two want opposite
     # things from the same swap: the measurement above must NOT rebuild,
     # because a `case` arm naming a node type the newer engine dropped is the
