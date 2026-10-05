@@ -51,10 +51,9 @@ export function captionTargets(doc: Document): CaptionTarget[] {
   return targets
 }
 
-/** The target an id names, or null. Ids match case-insensitively, as elsewhere. */
+/** The target an id names, or null. Ids compare exactly. */
 export function captionTargetById(doc: Document, id: string): CaptionTarget | null {
-  const wanted = id.toLowerCase()
-  return captionTargets(doc).find((target) => target.id.toLowerCase() === wanted) ?? null
+  return captionTargets(doc).find((target) => target.id === id) ?? null
 }
 
 /**

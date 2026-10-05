@@ -271,7 +271,7 @@ function dedupe(tokens: IndexedToken[]): IndexedToken[] {
 
 function sameIdentity(token: IndexedToken, kind: IndexedKind, key: string): boolean {
   const sameKind = token.kind === kind || (anchorKind(token.kind) && anchorKind(kind))
-  return sameKind && token.key.toLocaleLowerCase() === key.toLocaleLowerCase()
+  return sameKind && token.key === key
 }
 
 function anchorKind(kind: IndexedKind): boolean {

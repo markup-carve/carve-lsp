@@ -239,7 +239,7 @@ test('a collapsed reference is not a usage of a caption id', () => {
 test('a collapsed reference IS a usage of a heading id', () => {
   // CONTROL. The scan is not removed, it is scoped: the same spelling still
   // reaches a heading, which is the target it actually resolves to.
-  const source = '# Foo\n\nSee [foo][] and </#Foo>.\n'
+  const source = '# Foo\n\nSee [Foo][] and </#Foo>.\n'
   const locations = referencesAt('file:///d.crv', source, { line: 2, character: 20 }, {
     includeDeclaration: false,
   })

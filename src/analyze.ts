@@ -236,7 +236,7 @@ function firstDuplicateDeclaration(source: string, rule: string, message: string
     const match = headingKey
       ? /^\{[^}]*#([^\s}]+)[^}]*\}\s*$/.exec(text)
       : /^(?: {0,3})\[\^([^\]]+)\]:/.exec(text)
-    if (!match || match[1]!.toLocaleLowerCase() !== key.toLocaleLowerCase()) continue
+    if (!match || match[1] !== key) continue
     const character = text.indexOf(match[1]!)
     if (line >= repeatedLine - 1) break
     declarations.push({

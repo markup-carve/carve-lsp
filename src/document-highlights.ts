@@ -12,7 +12,7 @@ export function documentHighlights(uri: string, source: string, position: Positi
     position.character <= token.range.end.character)
   if (!target) return []
   return tokens
-    .filter((token) => token.kind === target.kind && token.key.toLocaleLowerCase() === target.key.toLocaleLowerCase())
+    .filter((token) => token.kind === target.kind && token.key === target.key)
     .map((token) => ({
       range: token.range,
       kind: token.declaration ? DocumentHighlightKind.Write : DocumentHighlightKind.Read,

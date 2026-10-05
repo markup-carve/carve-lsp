@@ -40,8 +40,7 @@ export function codeLenses(source: string): CodeLens[] {
   for (const declaration of tokens) {
     if (!declaration.declaration || declaration.kind === 'footnote') continue
     const count = tokens.filter((token) =>
-      !token.declaration && token.kind === declaration.kind &&
-      token.key.toLocaleLowerCase() === declaration.key.toLocaleLowerCase()).length
+      !token.declaration && token.kind === declaration.kind && token.key === declaration.key).length
     lenses.push({
       range: declaration.range,
       command: { title: count === 1 ? '1 reference' : `${count} references`, command: '' },
