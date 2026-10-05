@@ -9,17 +9,22 @@ const URI = 'file:///doc.crv'
 // ---------------------------------------------------------------------------
 
 test('crossref </#id> jumps to the matching heading', () => {
-  const source = '# Introduction\n\nSee </#introduction>.'
+  const source = '# Introduction\n\nSee </#Introduction>.'
   const loc = definitionAt(URI, source, { line: 2, character: 6 })
   assert.ok(loc, 'expected a location')
   assert.equal(loc.uri, URI)
   assert.equal(loc.range.start.line, 0)
 })
 
+test('crossref </#id> compares the id exactly: a case-only spelling jumps nowhere', () => {
+  const source = '# Introduction\n\nSee </#introduction>.'
+  assert.equal(definitionAt(URI, source, { line: 2, character: 6 }), null)
+})
+
 test('crossref resolves to a heading containing an inline literal', () => {
   // The literal's content is part of the visible heading text, so it must be
   // included when matching a crossref against heading text.
-  const source = '# The !`/kaet/` sound\n\nSee </#the-kaet-sound>.'
+  const source = '# The !`/kaet/` sound\n\nSee </#The-kaet-sound>.'
   const loc = definitionAt(URI, source, { line: 2, character: 8 })
   assert.ok(loc, 'expected the crossref to resolve')
   assert.equal(loc.range.start.line, 0)
@@ -45,10 +50,15 @@ test('crossref </#id> returns null for unknown id', () => {
 // ---------------------------------------------------------------------------
 
 test('fragment link [text](#id) jumps to heading', () => {
-  const source = '# Getting Started\n\n[jump](#getting-started)'
+  const source = '# Getting Started\n\n[jump](#Getting-Started)'
   const loc = definitionAt(URI, source, { line: 2, character: 8 })
   assert.ok(loc)
   assert.equal(loc.range.start.line, 0)
+})
+
+test('fragment link compares the id exactly', () => {
+  const source = '# Getting Started\n\n[jump](#getting-started)'
+  assert.equal(definitionAt(URI, source, { line: 2, character: 8 }), null)
 })
 
 test('fragment link returns null for missing heading', () => {
@@ -143,11 +153,9 @@ test('wikilink [[Page]] jumps to matching heading', () => {
   assert.equal(loc.range.start.line, 0)
 })
 
-test('wikilink [[Page]] is case-insensitive', () => {
+test('wikilink [[Page]] compares the heading text exactly', () => {
   const source = '# Tigers\n\nSee [[tigers]].'
-  const loc = definitionAt(URI, source, { line: 2, character: 6 })
-  assert.ok(loc)
-  assert.equal(loc.range.start.line, 0)
+  assert.equal(definitionAt(URI, source, { line: 2, character: 6 }), null)
 })
 
 test('wikilink returns null when no matching heading exists', () => {

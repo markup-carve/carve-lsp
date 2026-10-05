@@ -159,7 +159,7 @@ function resolveCrossrefAcrossSeam(
   // open document already. An include seam that resolved only headings would
   // make the target model depend on which file the host sits in.
   const pos =
-    findHeadingWithId(merged.children, targetId.toLowerCase())?.pos ??
+    findHeadingWithId(merged.children, targetId)?.pos ??
     captionTargetById(merged, targetId)?.pos
   if (!pos || pos.file === undefined) return null
 
@@ -202,7 +202,7 @@ function findHeadingById(uri: string, source: string, targetId: string): Locatio
     return null
   }
 
-  const heading = findHeadingWithId(doc.children, targetId.toLowerCase())
+  const heading = findHeadingWithId(doc.children, targetId)
   if (!heading || !heading.pos) {
     // A crossref reaches a CAPTIONED HOST as well - a figure, a table, a
     // composite figure or one of its panels (PART 9R R4). Only headings were
@@ -249,7 +249,7 @@ function findHeadingWithId(
   for (const node of nodes) {
     if (node.type === 'heading') {
       const headingId = node.attrs?.id
-      if (headingId && headingId.toLowerCase() === targetId) return node
+      if (headingId === targetId) return node
     }
     if ('children' in node && Array.isArray(node.children)) {
       const found = findHeadingWithId(
@@ -358,8 +358,7 @@ function findHeadingByText(uri: string, source: string, text: string): Location 
     return null
   }
 
-  const target = text.toLowerCase()
-  const heading = findHeadingWithText(doc.children, target)
+  const heading = findHeadingWithText(doc.children, text)
   if (!heading || !heading.pos) return null
 
   const line = heading.pos.startLine - 1
@@ -402,7 +401,7 @@ function findHeadingWithText(
 ): import('@markup-carve/carve').Heading | null {
   for (const node of nodes) {
     if (node.type === 'heading') {
-      const text = headingPlainText(node.children).toLowerCase()
+      const text = headingPlainText(node.children)
       if (text === targetText) return node
     }
     if ('children' in node && Array.isArray(node.children)) {

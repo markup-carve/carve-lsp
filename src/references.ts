@@ -73,9 +73,16 @@ function resolveHeadingGroup(
   // Determine if cursor is on a heading line
   const headingMatch = /^(#{1,6})\s+/.exec(line)
   if (headingMatch) {
-    const id = getHeadingId(source, position.line)
-    if (id) {
-      return collectRefs(uri, source, lines, id, { line: position.line, kind: 'heading' }, context)
+    const heading = getHeadingAt(source, position.line)
+    if (heading) {
+      return collectRefs(
+        uri,
+        source,
+        lines,
+        heading.id,
+        { line: position.line, kind: 'heading', text: heading.text },
+        context,
+      )
     }
   }
 
@@ -163,7 +170,7 @@ function captionIdDeclaredAt(source: string, lineIndex: number): string | null {
   return null
 }
 
-function getHeadingId(source: string, lineIndex: number): string | null {
+function getHeadingAt(source: string, lineIndex: number): { id: string; text: string } | null {
   let doc: Document
   try {
     doc = resolve(parse(source))
@@ -171,7 +178,17 @@ function getHeadingId(source: string, lineIndex: number): string | null {
     return null
   }
   const heading = findHeadingAtLine(doc.children, lineIndex + 1) // pos is 1-based
-  return heading?.attrs?.id ?? null
+  const id = heading?.attrs?.id
+  if (!heading || !id) return null
+  return { id, text: referenceKey(headingPlainText(heading.children)) }
+}
+
+/**
+ * The key a collapsed `[Heading][]` matches against heading text (PART 9R R1):
+ * NFC and collapsed whitespace, compared exactly - case is significant.
+ */
+function referenceKey(text: string): string {
+  return text.normalize('NFC').replace(/\s+/g, ' ').trim()
 }
 
 function findHeadingAtLine(
@@ -188,6 +205,8 @@ function findHeadingAtLine(
   return null
 }
 
+type Declaration = { line: number; kind: 'heading' | 'caption'; text?: string }
+
 /**
  * Where a crossref id is declared, and WHAT declares it: a heading's own line,
  * or a captioned host's first line. Headings alone were searched here, so
@@ -202,15 +221,21 @@ function findHeadingAtLine(
 function findDeclarationById(
   source: string,
   targetId: string,
-): { line: number; kind: 'heading' | 'caption' } | null {
+): Declaration | null {
   let doc: Document
   try {
     doc = resolve(parse(source, { positions: true }))
   } catch {
     return null
   }
-  const heading = findHeadingWithId(doc.children, targetId.toLowerCase())
-  if (heading?.pos) return { line: heading.pos.startLine - 1, kind: 'heading' }
+  const heading = findHeadingWithId(doc.children, targetId)
+  if (heading?.pos) {
+    return {
+      line: heading.pos.startLine - 1,
+      kind: 'heading',
+      text: referenceKey(headingPlainText(heading.children)),
+    }
+  }
   const caption = captionTargetById(doc, targetId)
   if (caption?.pos) return { line: caption.pos.startLine - 1, kind: 'caption' }
   return null
@@ -223,7 +248,7 @@ function findHeadingWithId(
   for (const node of nodes) {
     if (node.type === 'heading') {
       const id = node.attrs?.id
-      if (id && id.toLowerCase() === targetId) return node
+      if (id === targetId) return node
     }
     if ('children' in node && Array.isArray(node.children)) {
       const found = findHeadingWithId((node.children as BlockNode[]).filter(isBlockNode), targetId)
@@ -248,7 +273,7 @@ function collectRefs(
   source: string,
   lines: string[],
   id: string,
-  declaration: { line: number; kind: 'heading' | 'caption' },
+  declaration: Declaration,
   context: ReferenceContext,
 ): Location[] {
   const locs: Location[] = []
@@ -259,13 +284,11 @@ function collectRefs(
     locs.push(lineLocation(uri, defLine, 0, lines[defLine]?.length ?? 0))
   }
 
-  const idLower = id.toLowerCase()
-
   // Collect </#id> usages
   const crossrefRe = /<\/#([A-Za-z0-9_.:-]+)>/g
   for (let i = 0; i < lines.length; i++) {
     for (const m of lines[i]!.matchAll(crossrefRe)) {
-      if (m[1]!.toLowerCase() === idLower) {
+      if (m[1] === id) {
         locs.push(lineLocation(uri, i, m.index!, m.index! + m[0].length))
       }
     }
@@ -275,23 +298,23 @@ function collectRefs(
   const fragLinkRe = /\[[^\]]*\]\(#([A-Za-z0-9_.:-]+)[^)]*\)/g
   for (let i = 0; i < lines.length; i++) {
     for (const m of lines[i]!.matchAll(fragLinkRe)) {
-      if (m[1]!.toLowerCase() === idLower) {
+      if (m[1] === id) {
         locs.push(lineLocation(uri, i, m.index!, m.index! + m[0].length))
       }
     }
   }
 
-  // Collect implicit heading references [Heading text][] via resolve()
-  // These are resolved to `href` in the AST, so we check the link pool from
-  // semantic analysis. For simplicity we scan for [text][] where text lowercased
-  // matches the heading id (djot implicit ref: whitespace-collapsed, lowercase).
-  // HEADINGS ONLY - see the note on this function.
-  if (declaration.kind === 'heading') {
+  // Implicit heading references [Heading text][]: the label matches the
+  // heading's TEXT exactly, not its id. HEADINGS ONLY - see the note on this
+  // function. The engine's own resolution gates it too, so a label that a
+  // `[label]:` definition claims, or that names a duplicate heading's first
+  // occurrence, is not counted here.
+  if (declaration.kind === 'heading' && declaration.text !== undefined) {
+    const resolved = collapsedRefsTo(source, id)
     const implicitRefRe = /\[([^\]\n]+)\]\[\]/g
     for (let i = 0; i < lines.length; i++) {
       for (const m of lines[i]!.matchAll(implicitRefRe)) {
-        const slug = m[1]!.trim().toLowerCase().replace(/\s+/g, '-')
-        if (slug === idLower) {
+        if (referenceKey(m[1]!) === declaration.text && resolved.has(`${i}\0${m[0]}`)) {
           locs.push(lineLocation(uri, i, m.index!, m.index! + m[0].length))
         }
       }
@@ -299,6 +322,38 @@ function collectRefs(
   }
 
   return dedup(locs)
+}
+
+/** `line\0rawRef` of every collapsed reference the engine resolved to `#id`. */
+function collapsedRefsTo(source: string, id: string): Set<string> {
+  const found = new Set<string>()
+  let doc: Document
+  try {
+    doc = resolve(parse(source, { positions: true }))
+  } catch {
+    return found
+  }
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(walk)
+      return
+    }
+    if (!value || typeof value !== 'object') return
+    const node = value as Record<string, unknown>
+    const pos = node.pos as { startLine?: number } | undefined
+    if (
+      node.type === 'link' &&
+      node.href === `#${id}` &&
+      typeof node.rawRef === 'string' &&
+      node.rawRef.endsWith('][]') &&
+      pos?.startLine !== undefined
+    ) {
+      found.add(`${pos.startLine - 1}\0${node.rawRef}`)
+    }
+    for (const child of Object.values(node)) if (child && typeof child === 'object') walk(child)
+  }
+  walk(doc.children)
+  return found
 }
 
 // ---------------------------------------------------------------------------
@@ -538,21 +593,20 @@ function collectWikilinkRefs(
   context: ReferenceContext,
 ): Location[] {
   const locs: Location[] = []
-  const pageLower = page.toLowerCase()
 
   // Optionally include the heading that this wikilink resolves to
   if (context.includeDeclaration) {
-    const defLine = findHeadingLineByText(source, pageLower)
+    const defLine = findHeadingLineByText(source, page)
     if (defLine !== null) {
       locs.push(lineLocation(uri, defLine, 0, lines[defLine]?.length ?? 0))
     }
   }
 
-  // Collect all [[Page]] usages matching the same page (case-insensitive)
+  // Collect all [[Page]] usages naming the same page, compared exactly
   const wikilinkRe = /\[\[([^\]|#]+?)(?:[|#][^\]]*)?]]/g
   for (let i = 0; i < lines.length; i++) {
     for (const m of lines[i]!.matchAll(wikilinkRe)) {
-      if (m[1]!.trim().toLowerCase() === pageLower) {
+      if (m[1]!.trim() === page) {
         locs.push(lineLocation(uri, i, m.index!, m.index! + m[0].length))
       }
     }
@@ -580,7 +634,7 @@ function findHeadingWithText(
 ): import('@markup-carve/carve').Heading | null {
   for (const node of nodes) {
     if (node.type === 'heading') {
-      const text = headingPlainText(node.children).toLowerCase()
+      const text = headingPlainText(node.children)
       if (text === targetText) return node
     }
     if ('children' in node && Array.isArray(node.children)) {

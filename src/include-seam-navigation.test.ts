@@ -56,21 +56,21 @@ function jump(source: string, id: string, options: typeof includes | undefined) 
 }
 
 test('a crossref to a heading an include contributes lands in the child file', () => {
-  const location = jump('# Book\n\n{{ child.crv }}\n\nSee [](#chapter-three).\n', 'chapter-three', includes)
+  const location = jump('# Book\n\n{{ child.crv }}\n\nSee [](#Chapter-Three).\n', 'Chapter-Three', includes)
   assert.equal(location?.uri, pathToFileURL('/book/child.crv').toString())
   assert.equal(location?.range.start.line, 0)
 })
 
 test('the angle-bracket spelling of the same crossref resolves too', () => {
-  const location = jump('# Book\n\n{{ child.crv }}\n\nSee </#chapter-three>.\n', 'chapter-three', includes)
+  const location = jump('# Book\n\n{{ child.crv }}\n\nSee </#Chapter-Three>.\n', 'Chapter-Three', includes)
   assert.equal(location?.uri, pathToFileURL('/book/child.crv').toString())
 })
 
 test('a crossref into a sliced child lands on the heading line in the file', () => {
   // A slice-relative position would open `padded.crv` at its first padding paragraph.
   const location = jump(
-    '{{ padded.crv @lines:9-9 }}\n\nSee [](#late-heading).\n',
-    'late-heading',
+    '{{ padded.crv @lines:9-9 }}\n\nSee [](#Late-Heading).\n',
+    'Late-Heading',
     includes,
   )
   assert.equal(location?.uri, pathToFileURL('/book/padded.crv').toString())
@@ -79,7 +79,7 @@ test('a crossref into a sliced child lands on the heading line in the file', () 
 
 test('a heading the ROOT declares still resolves in the root', () => {
   // The negative control: the seam lookup must not capture what already worked.
-  const location = jump('# Book\n\n# Chapter Three\n\nSee [](#chapter-three).\n', 'chapter-three', includes)
+  const location = jump('# Book\n\n# Chapter Three\n\nSee [](#Chapter-Three).\n', 'Chapter-Three', includes)
   assert.equal(location?.uri, 'file:///book/main.crv')
   assert.equal(location?.range.start.line, 2)
 })
@@ -88,7 +88,7 @@ test('with includes off the crossref resolves to nothing', () => {
   // §19 opt-in: without a resolver nothing is read, so there is no heading to
   // find and none is invented.
   assert.equal(
-    jump('# Book\n\n{{ child.crv }}\n\nSee [](#chapter-three).\n', 'chapter-three', undefined),
+    jump('# Book\n\n{{ child.crv }}\n\nSee [](#Chapter-Three).\n', 'Chapter-Three', undefined),
     null,
   )
 })
@@ -101,7 +101,7 @@ test('a crossref naming nothing at all still resolves to nothing', () => {
 })
 
 test('a heading a GRANDCHILD contributes lands in the grandchild', () => {
-  const location = jump('# Book\n\n{{ deep.crv }}\n\nSee [](#deep-heading).\n', 'deep-heading', includes)
+  const location = jump('# Book\n\n{{ deep.crv }}\n\nSee [](#Deep-Heading).\n', 'Deep-Heading', includes)
   assert.equal(location?.uri, pathToFileURL('/book/nested.crv').toString())
   assert.equal(location?.range.start.line, 2)
 })
@@ -110,13 +110,13 @@ test('a section selection drops the headings it did not select', () => {
   // The reason this reads the merged document rather than the child's file:
   // `#Alpha` contributes Alpha and not Beta, so a crossref to Beta names
   // nothing even though the file on disk declares it.
-  const source = '# Book\n\n{{ sections.crv #Alpha }}\n\nSee [](#beta).\n'
-  assert.equal(jump(source, 'beta', includes), null)
+  const source = '# Book\n\n{{ sections.crv #Alpha }}\n\nSee [](#Beta).\n'
+  assert.equal(jump(source, 'Beta', includes), null)
 })
 
 test('the section that WAS selected still resolves', () => {
-  const source = '# Book\n\n{{ sections.crv #Alpha }}\n\nSee [](#alpha).\n'
-  const location = jump(source, 'alpha', includes)
+  const source = '# Book\n\n{{ sections.crv #Alpha }}\n\nSee [](#Alpha).\n'
+  const location = jump(source, 'Alpha', includes)
   assert.equal(location?.uri, pathToFileURL('/book/sections.crv').toString())
   assert.equal(location?.range.start.line, 0)
 })
@@ -147,8 +147,8 @@ test('an id that merely LOOKS like a path produces no jump', () => {
         }
   }
   const location = jump(
-    '# Book\n\n{{ child.crv }}\n\nSee [](#chapter-three).\n',
-    'chapter-three',
+    '# Book\n\n{{ child.crv }}\n\nSee [](#Chapter-Three).\n',
+    'Chapter-Three',
     { resolver: virtual, sourcePath: '/book/main.crv', includeRoot: '/book' },
   )
   assert.equal(location, null)

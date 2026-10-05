@@ -12,3 +12,8 @@ test('highlights a colon fence and its exact closer', () => {
   const found = documentHighlights('file:///a.crv', ':::: note\nbody\n::::\n', { line: 2, character: 2 })
   assert.deepEqual(found.map((item) => item.range.start.line), [0, 2])
 })
+
+test('a key that differs only in case is a different name', () => {
+  const found = documentHighlights('file:///a.crv', 'a[^Fn] b[^fn]\n\n[^Fn]: x\n', { line: 0, character: 3 })
+  assert.deepEqual(found.map((item) => [item.range.start.line, item.range.start.character]), [[0, 3], [2, 2]])
+})
