@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-10-08
+
+### Fixes
+
+- A heading title keeps the highlighting of the inline markup inside it, and a
+  trailing comment on the heading line is colored as a comment rather than as
+  part of the title. Code spans in a title are recognized by their backtick-run
+  width, and an escape before an opening backtick no longer opens a span
+  (#408, markup-carve/carve#2682).
+- Go to definition, find references, document highlights and code lenses
+  compare every name exactly, matching what the engines resolve. `</#id>` and
+  `[text](#id)` find a heading or captioned host only by its exact id, inside
+  an include seam too; a collapsed `[Heading][]` counts as a usage only when
+  its label equals the heading's text; `[[Page]]` compares the page name
+  exactly. Ids stay case-preserving, and workspace symbol search keeps its
+  case-insensitive substring match (#420, markup-carve/carve#2732).
+
 ## [0.1.9] - 2026-09-30
 
 ### Fixes
