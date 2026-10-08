@@ -42,7 +42,7 @@ CHANGELOG = """# Changelog
 
 [0.1.5]: https://github.com/markup-carve/carve-wasm/compare/v0.1.4...v0.1.5
 """
-LINK = "Details in the [CHANGELOG](https://github.com/markup-carve/carve-wasm/blob/v0.1.5/CHANGELOG.md)."
+LINK = ""
 FOOTER = "**Full Changelog**: https://github.com/markup-carve/carve-wasm/compare/v0.1.4...v0.1.5"
 CONDENSED = f"""### Breaking
 
@@ -101,12 +101,13 @@ class ReleaseNotesTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "cite none"):
             self.check("Bug fixes and improvements.\n\n" + LINK + "\n" + FOOTER, changelog=changelog)
 
-    def test_changelog_link_must_be_this_repository_at_this_tag(self):
-        for other in ["https://github.com/markup-carve/carve-py/blob/v0.1.5/CHANGELOG.md",
-                      "https://github.com/markup-carve/carve-wasm/blob/v0.1.4/CHANGELOG.md",
-                      "https://example.test/CHANGELOG.md"]:
-            with self.assertRaisesRegex(ValueError, "need a link"):
-                self.check(CONDENSED.replace("https://github.com/markup-carve/carve-wasm/blob/v0.1.5/CHANGELOG.md", other) + "\n" + FOOTER)
+    def test_a_changelog_link_is_refused_whatever_its_target(self):
+        for other in ["https://github.com/markup-carve/carve-wasm/blob/v0.1.5/CHANGELOG.md",
+                      "https://github.com/markup-carve/carve-py/blob/v0.1.5/CHANGELOG.md",
+                      "https://example.test/CHANGELOG.md",
+                      "https://github.com/markup-carve/carve-wasm/blob/v0.1.5/CHANGELOG.md#015---2026-09-29"]:
+            with self.assertRaisesRegex(ValueError, "must not link CHANGELOG.md"):
+                self.check(CONDENSED + f"Details in the [CHANGELOG]({other}).\n" + FOOTER)
 
     def test_shared_reference_does_not_cover_two_breaking_changes(self):
         changelog = CHANGELOG.replace("- Refuse unsafe destinations under a new loss code (#158, #159; markup-carve/carve#2679).",
@@ -121,17 +122,13 @@ class ReleaseNotesTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "reference of its own"):
             self.check("### Breaking\n\n- Refused destinations and a renamed field (#158, #170).\n\n" + LINK + "\n" + FOOTER, changelog=changelog)
 
-    def test_missing_changelog_link_fails(self):
-        with self.assertRaisesRegex(ValueError, "need a link"):
-            self.check(CONDENSED.replace(LINK, "") + "\n" + FOOTER)
+    def test_notes_without_a_changelog_link_pass(self):
+        self.check(CONDENSED + "\n" + FOOTER)
 
     def test_relative_link_fails(self):
         with self.assertRaisesRegex(ValueError, "relative link"):
-            self.check(CONDENSED.replace(LINK, "Details in the [CHANGELOG](CHANGELOG.md).") + "\n" + FOOTER)
+            self.check(CONDENSED + "Details in the [measurements](reports/parser.md).\n" + FOOTER)
 
-    def test_anchor_in_changelog_link_is_not_a_reference(self):
-        anchored = LINK.replace("CHANGELOG.md)", "CHANGELOG.md#015---2026-09-29)")
-        self.check(CONDENSED.replace(LINK, anchored) + "\n" + FOOTER)
 
     def test_literal_link_syntax_is_unchanged_inside_code(self):
         for source in ["`[t](a.md)`", "``[t](a.md)``", "```carve\n[t](a.md)\n```", "~~~\n[t](a.md)\n~~~"]:
@@ -145,7 +142,7 @@ class ReleaseNotesTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             changelog = Path(directory, "CHANGELOG.md")
             changelog.write_text("## [0.1.0]\n\n- Section §4.2 … corrected.\n", encoding="utf-8")
-            body = ("- Section §4.2 … corrected.\n\nSee the [CHANGELOG](https://github.com/markup-carve/carve-wasm/blob/v0.1.0/CHANGELOG.md).\n"
+            body = ("- Section §4.2 … corrected.\n\n"
                     "**Full Changelog**: https://github.com/markup-carve/carve-wasm/releases/tag/v0.1.0")
             result = subprocess.run([sys.executable, str(Path(__file__).with_name("check-release-notes.py")),
                                      "--tag", "v0.1.0", "--repo", REPO, "--changelog", str(changelog)],
@@ -181,7 +178,7 @@ class ReleaseNotesTest(unittest.TestCase):
 
     def test_first_release_footer(self):
         first = "## [0.1.0]\n\n- Initial release (#1).\n\n[0.1.0]: https://example.test/tag\n"
-        self.check("- Initial release (#1).\n\nSee the [CHANGELOG](https://github.com/markup-carve/carve-wasm/blob/v0.1.0/CHANGELOG.md).\n"
+        self.check("- Initial release (#1).\n\n"
                    "**Full Changelog**: https://github.com/markup-carve/carve-wasm/releases/tag/v0.1.0", changelog=first, tag="v0.1.0")
 
 
