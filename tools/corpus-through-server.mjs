@@ -100,11 +100,43 @@ const documents = readdirSync(corpusDir)
  * against.
  */
 const EXAMPLE_PAGES = ['core.md', 'extensions.md', 'edge-cases.md']
-const COMPARE_OPEN = /^:{3,}\s+compare(\s+\S.*)?$/
 
-// Mirrors the generator's state machine rather than grepping: a `::: compare`
-// line inside an already-open block is content, not a second pair, and a block
-// closes on a bare marker line.
+const leadingRun = (text, ch) => {
+  let n = 0
+  while (n < text.length && text[n] === ch) n++
+  return n
+}
+
+// One declared pair per `carve` fence inside a `::: compare` block (a block may
+// hold several); nothing inside a fence is markup. Same rule as the spec's
+// scripts/lib/example-pair-census.mjs.
+const declaredPairs = (source) => {
+  let pairs = 0
+  let block = null
+  let fence = null
+  for (const line of source.split('\n')) {
+    if (fence !== null) {
+      if (line.startsWith(fence) && line.slice(fence.length).trim() === '') fence = null
+      continue
+    }
+    const ticks = leadingRun(line, '`')
+    if (ticks >= 3) {
+      fence = line.slice(0, ticks)
+      if (block !== null && line.slice(ticks).trim() === 'carve') pairs++
+      continue
+    }
+    const trimmed = line.trim()
+    const colons = leadingRun(trimmed, ':')
+    if (colons < 3) continue
+    if (block === null) {
+      if (/^[ \t]+compare(?:[ \t]|$)/.test(trimmed.slice(colons))) block = trimmed.slice(0, colons)
+    } else if (trimmed === block) {
+      block = null
+    }
+  }
+  return pairs
+}
+
 const declaredCorpusSize = () => {
   const examplesDir = join(corpusDir, '..', '..', 'resources', 'examples')
   let declared = 0
@@ -125,18 +157,7 @@ const declaredCorpusSize = () => {
       )
       exit(1)
     }
-    let marker = null
-    for (const rawLine of source.split('\n')) {
-      const line = rawLine.trim()
-      if (marker !== null) {
-        if (line === marker) marker = null
-        continue
-      }
-      if (COMPARE_OPEN.test(line)) {
-        declared++
-        marker = line.match(/^:{3,}/)[0]
-      }
-    }
+    declared += declaredPairs(source)
   }
   return declared
 }
