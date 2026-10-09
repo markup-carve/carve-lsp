@@ -13,8 +13,8 @@ const repoRoot = fileURLToPath(new URL('../', import.meta.url))
 // than the printed count, because the status is what the step reads.
 const THROW_MARKER = 'TEST_ONLY_THROWING_DOCUMENT'
 
-/** A tree the population guard accepts: N documents and N declared compare blocks. */
-function fixture(documentCount: number, throwing: number) {
+/** A tree the population guard accepts: N documents and N declared pairs (or the given page). */
+function fixture(documentCount: number, throwing: number, page?: string) {
   const root = mkdtempSync(join(tmpdir(), 'corpus-through-server-'))
   const corpus = join(root, 'tests', 'corpus')
   const examples = join(root, 'resources', 'examples')
@@ -27,8 +27,8 @@ function fixture(documentCount: number, throwing: number) {
     const body = i < throwing ? THROW_MARKER : `document ${i}`
     writeFileSync(join(corpus, `doc-${i}.crv`), `${body}\n`)
   }
-  const block = ':::  compare\nhello\n:::\n'
-  writeFileSync(join(examples, 'core.md'), block.repeat(documentCount))
+  const block = ':::  compare\n```carve\nhello\n```\n```html\n<p>hello</p>\n```\n:::\n'
+  writeFileSync(join(examples, 'core.md'), page ?? block.repeat(documentCount))
   writeFileSync(join(examples, 'extensions.md'), '')
   writeFileSync(join(examples, 'edge-cases.md'), '')
 
@@ -103,6 +103,20 @@ test('a short corpus still fails before measuring, for its own reason', () => {
     const { status, stdout } = runTool(root, corpus)
     assert.doesNotMatch(stdout, /^threw=/m)
     assert.equal(status, 1)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('every carve fence in a compare block is a declared pair, a nested one is not', () => {
+  const pair = (n: number) => '```carve\n' + n + '\n```\n```html\n<p>' + n + '</p>\n```\n'
+  const nested = '````carve\n```carve\nnot a pair\n```\n````\n```html\n<p>x</p>\n```\n'
+  const page = '::: compare\n' + pair(1) + nested + pair(3) + ':::\n'
+  const { root, corpus } = fixture(3, 0, page)
+  try {
+    const { status, stdout } = runTool(root, corpus)
+    assert.match(stdout, /^documents=3$/m)
+    assert.equal(status, 0)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
