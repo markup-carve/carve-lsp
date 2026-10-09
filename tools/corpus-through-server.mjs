@@ -174,8 +174,9 @@ if (documents.length !== declared) {
   stdout.write(
     `corpus-through-server: ${corpusDir} holds ${documents.length} documents, ` +
       `but the spec's example pages declare ${declared}.\n` +
-      '  Every ::: compare block in resources/examples/{core,extensions,edge-cases}.md becomes\n' +
-      '  one corpus pair, so a difference means this is not the corpus those pages\n' +
+      '  Every carve fence in a ::: compare block in\n' +
+      '  resources/examples/{core,extensions,edge-cases}.md becomes one corpus pair, so a\n' +
+      '  difference means this is not the corpus those pages\n' +
       '  describe: a truncated or stale checkout, a wrong <corpus-dir>, or a corpus that\n' +
       '  needs regenerating (npm run corpus:build in the spec repository). Every number\n' +
       '  below would describe a population nobody chose.\n',
