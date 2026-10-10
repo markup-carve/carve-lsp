@@ -33,7 +33,7 @@ The server communicates over **stdio** (`--stdio` flag).
 | Selection and folding | Syntax-aware selection expansion and folding, with tolerant fallbacks during incomplete edits |
 | Formatting | Conservative document/range formatting, on-type continuation (see below), or explicit migration formatting |
 | Semantic tokens | Full, ranged, and delta token updates, including table structure and alignment metadata |
-| Inlay hints | Generated heading ids (configurable) |
+| Inlay hints | Generated heading ids, colon-fence closers, and a `list item` / `task` hint after a bare list marker on the line being edited (configurable) |
 | Commands | Preview/AST output plus workspace graph, backlinks, generated navigation, and transitive rebuild impact |
 | File inclusion | Resolves `{{ path }}` directives, watches dependencies, and reports failures as diagnostics - **off by default**, see below |
 
@@ -76,7 +76,7 @@ watches it for changes.
 |---|---|---|
 | `platforms` | `[]` | Extra platform lint profiles. Currently supports `"github"`. |
 | `extensions` | `[]` | Enabled extension names, for example `"semantic-span"`. |
-| `inlayHints` | `true` | Show generated heading identifiers. |
+| `inlayHints` | `true` | Show inlay hints: generated heading identifiers, colon-fence closers, and the bare list marker hint. `false` turns all of them off; an object such as `{ "bareListMarkers": false }` keeps the others and turns that one off. |
 | `exportActions` | `true` | Offer the *Export as Markdown* / *Export as HTML* source actions. Editors with their own export commands can turn this off. |
 | `formatter` | `"conservative"` | Use whitespace-only conservative formatting; `"migration"` opts into canonical whole-document conversion. |
 | `severities` | `{}` | Override a diagnostic code with `"error"`, `"warning"`, `"information"`, `"hint"`, or `"off"`. |
@@ -88,12 +88,22 @@ Example `.carverc.json`:
   "carve": {
     "platforms": ["github"],
     "extensions": ["semantic-span"],
-    "inlayHints": true,
+    "inlayHints": { "bareListMarkers": true },
     "formatter": "conservative",
     "severities": { "table-width-total": "error" }
   }
 }
 ```
+
+### Bare list marker hint
+
+A list marker with no content after it (`- `, `2. `, `- [ ] `) is paragraph
+text, not an empty list item. While a new item is being typed, the server shows
+`list item` (or `task` for `- [ ] `) as an inlay hint after the marker. The
+hint appears only on the line the last edit touched, and only when the previous
+non-blank line belongs to a list item, so a lone `- ` in prose is never hinted
+and the hint goes away once the author edits elsewhere. Turn it off on its own
+with `"inlayHints": { "bareListMarkers": false }`.
 
 ## File inclusion
 

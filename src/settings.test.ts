@@ -11,9 +11,22 @@ test('reads safe project settings and rejects unknown platform names', () => {
     platforms: ['github', 'unknown'], extensions: ['semantic-span'], inlayHints: false, exportActions: false, formatter: 'migration',
     severities: { 'table-width-total': 'error', bogus: 'loud' },
   } }), {
-    platforms: ['github'], extensions: ['semantic-span'], inlayHints: false, exportActions: false, formatter: 'migration',
+    platforms: ['github'], extensions: ['semantic-span'], inlayHints: false, bareListMarkerHints: false, exportActions: false, formatter: 'migration',
     severities: { 'table-width-total': 'error' },
   })
+})
+
+test('inlayHints takes a boolean or per-hint switches', () => {
+  const read = (inlayHints: unknown) => {
+    const { inlayHints: all, bareListMarkerHints } = readCarveSettings({ carve: { inlayHints } })
+    return { all, bareListMarkerHints }
+  }
+  assert.deepEqual(read(true), { all: true, bareListMarkerHints: true })
+  assert.deepEqual(read(false), { all: false, bareListMarkerHints: false })
+  assert.deepEqual(read(undefined), { all: true, bareListMarkerHints: true })
+  assert.deepEqual(read({}), { all: true, bareListMarkerHints: true })
+  assert.deepEqual(read({ bareListMarkers: false }), { all: true, bareListMarkerHints: false })
+  assert.deepEqual(read({ bareListMarkers: true }), { all: true, bareListMarkerHints: true })
 })
 
 test('loads .carverc.json from a workspace root', () => {
