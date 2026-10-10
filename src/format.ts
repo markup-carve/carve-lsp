@@ -53,11 +53,13 @@ export interface ContinuationEdit {
 const BULLET = /^([ \t]*)([-*])([ \t]+)/
 const BARE_DOT = /^([ \t]*)(\.)([ \t]+)/
 const ORDERED = /^([ \t]*)([0-9]+|[A-Za-z]+)([.)])([ \t]+)/
-const TASK = /^\[[ xX-]\]([ \t]+|$)/
+const TASK = /^\[[ xX_>?-]\]( [ \t]*|$)/
 // A marker and its separator alone on a line, as the continuation writes it. A
-// lone `-` with no separator is left alone: it may be prose. Only bullets carry
-// a task box; after an ordered marker `[ ]` is text.
-const BARE_MARKER = /^[ \t]*(?:[-*][ \t]+(?:\[ \][ \t]+)?|(?:\.|(?:[0-9]+|[A-Za-z]|[ivxlcdmIVXLCDM]+)[.)])[ \t]+)$/
+// lone `-` with no separator is left alone: it may be prose. The separator must
+// open with a space and roman numerals are single-case, as the parser reads them;
+// `-<tab>` or `iV.` is text and must not be deleted. Only bullets carry a task
+// box; after an ordered marker `[ ]` is text.
+const BARE_MARKER = /^[ \t]*(?:[-*] [ \t]*(?:\[ \] [ \t]*)?|(?:\.|(?:[0-9]+|[A-Za-z]|[ivxlcdm]+|[IVXLCDM]+)[.)]) [ \t]*)$/
 
 interface ItemLine { olType?: string; delim?: string }
 

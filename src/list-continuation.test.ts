@@ -33,6 +33,10 @@ test('Enter after a list item writes the next marker', () => {
     ['- [x] item', '- [ ] '],
     ['- [-] item', '- [ ] '],
     ['- [ ] item', '- [ ] '],
+    ['- [>] item', '- [ ] '],
+    ['- [?] item', '- [ ] '],
+    ['- [_] item', '- [ ] '],
+    ['- [X] item', '- [ ] '],
     // Ordered items have no task box, so `[x]` there is text.
     ['1. [x] item', '2. '],
     ['. [x] item', '. '],
@@ -106,6 +110,8 @@ test('lines that are not list items are not continued', () => {
   assert.equal(enter('- one\n  > - '), null)
   // Checkbox-shaped text that is not an empty task marker is content.
   for (const text of ['- [x]', '- [x] ', '- [ ]', '1. [ ] ']) assert.notDeepEqual(enter(`- one\n${text}`)?.[0]?.newText, '', text)
+  // `-<tab>` and mixed-case roman are text the parser folds into the item, not markers.
+  for (const text of ['-\t', '*\t', '2.\t', '- [ ]\t', 'iV. ', 'Xi) ']) assert.notDeepEqual(enter(`- one\n${text}`)?.[0]?.newText, '', JSON.stringify(text))
 })
 
 test('a list line inside a closed fence is code', () => {
