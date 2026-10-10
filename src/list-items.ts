@@ -19,6 +19,16 @@ export interface ListItems {
   covered: Set<number>
 }
 
+/**
+ * The UTF-16 offset of an item's marker. The engine starts some items at their
+ * indentation instead (a top-level `  - a` reports column 1, a tab-indented
+ * nested one column 0), so skip the whitespace before the marker.
+ */
+function markerCharacter(line: string, column: number): number {
+  const start = codepointColumnToUtf16(line, column)
+  return start + /^[ \t]*/.exec(line.slice(start))![0].length
+}
+
 interface Node { type?: unknown; pos?: Position; olType?: string; delim?: string }
 
 /**
@@ -61,7 +71,7 @@ export function listItems(source: string): ListItems | null {
       }
       if (list?.pos) {
         starts.set(line, {
-          character: codepointColumnToUtf16(lines[line] ?? '', pos.startColumn),
+          character: markerCharacter(lines[line] ?? '', pos.startColumn),
           olType: list.olType,
           delim: list.delim,
           list: `${list.pos.startLine}:${list.pos.startColumn}`,
@@ -99,4 +109,75 @@ export function bareMarkerItem(source: string, line: number, text: string): Item
   const item = completedItem(source, line, `${text}x`)
   if (!item) return undefined
   return item.continues || listItems(source)?.covered.has(line) ? item : undefined
+}
+
+export interface TreeList {
+  key: string
+  ordered: boolean
+  olType?: string
+  delim?: string
+  bulletChar?: string
+  items: TreeItem[]
+}
+
+export interface TreeItem {
+  key: string
+  /** Zero-based first and last line of the item, nested blocks included. */
+  line: number
+  endLine: number
+  /** UTF-16 offset of the marker in its line. */
+  character: number
+  list: TreeList
+  /** The item whose list holds this one directly, if any. */
+  parent?: TreeItem
+  /** Lists held directly by this item, in source order. */
+  lists: TreeList[]
+  /** Identifies the nearest enclosing block that is not a list or list item. */
+  container: string
+}
+
+/** Zero-based line -> the outermost list item opening it, with its place in the list tree. */
+export function listTree(source: string): Map<number, TreeItem> | null {
+  let doc: unknown
+  try {
+    doc = parse(source, { positions: true })
+  } catch {
+    return null
+  }
+  const lines = sourceLines(source)
+  const byLine = new Map<number, TreeItem>()
+  const key = (pos: Position): string => `${pos.startLine}:${pos.startColumn}`
+  const visit = (value: unknown, container: string, item?: TreeItem, list?: TreeList, direct = false): void => {
+    if (Array.isArray(value)) {
+      for (const entry of value) visit(entry, container, item, list, direct)
+      return
+    }
+    if (value === null || typeof value !== 'object') return
+    const node = value as Node & { ordered?: boolean; bulletChar?: string }
+    const pos = node.pos
+    if (node.type === 'list' && pos) {
+      const next: TreeList = { key: key(pos), ordered: node.ordered === true, olType: node.olType, delim: node.delim, bulletChar: node.bulletChar, items: [] }
+      // A list counts as an item's child only when nothing sits between them.
+      if (direct && item) item.lists.push(next)
+      for (const k of Object.keys(node)) if (k !== 'pos') visit((node as Record<string, unknown>)[k], container, direct ? item : undefined, next, false)
+      return
+    }
+    if (node.type === 'list_item' && pos?.startLine !== undefined && pos.endLine !== undefined && pos.startColumn !== undefined && list) {
+      const line = pos.startLine - 1
+      const next: TreeItem = {
+        key: key(pos), line, endLine: pos.endLine - 1,
+        character: markerCharacter(lines[line] ?? '', pos.startColumn),
+        list, parent: item, lists: [], container,
+      }
+      list.items.push(next)
+      if (!byLine.has(line)) byLine.set(line, next)
+      for (const k of Object.keys(node)) if (k !== 'pos') visit((node as Record<string, unknown>)[k], container, next, undefined, k === 'children')
+      return
+    }
+    const typed = typeof node.type === 'string'
+    const inner = typed ? `${node.type}@${pos ? key(pos) : ''}` : container
+    for (const k of Object.keys(node)) if (k !== 'pos') visit((node as Record<string, unknown>)[k], typed ? inner : `${inner}/${k}`, typed ? undefined : item, list, false)
+  }
+  visit(doc, 'doc')
+  return byLine
 }

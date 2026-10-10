@@ -34,6 +34,7 @@ import {
   type Disposable,
   type DocumentSymbol,
   type SymbolInformation,
+  type TextEdit,
 } from 'vscode-languageserver/node.js'
 import { TextDocument } from 'vscode-languageserver-textdocument'
 import { carveToCarve } from '@markup-carve/carve'
@@ -55,7 +56,7 @@ import { referencesAt } from './references.js'
 import { codeLenses } from './codelens.js'
 import { completionAt } from './completion.js'
 import { foldingRanges } from './folding.js'
-import { continuationPrefix, formatDocument, formatRange, listContinuationEdits } from './format.js'
+import { continuationPrefix, formatDocument, formatRange, listContinuationEdits, listIndentEdits } from './format.js'
 import { hoverAt } from './hover.js'
 import { migrationCodeActions } from './migration-actions.js'
 import { lintCodeActions } from './lint-actions.js'
@@ -159,6 +160,7 @@ connection.onInitialize((params) => {
       executeCommandProvider: { commands: [
         'carve.previewHtml', 'carve.showAst', 'carve.workspaceGraph',
         'carve.backlinks', 'carve.generatedNavigation', 'carve.rebuildImpact',
+        'carve.listIndent',
       ] },
       referencesProvider: true,
       renameProvider: { prepareProvider: true },
@@ -342,6 +344,7 @@ connection.onRequest(LinkedEditingRangeRequest.type, (params) => {
 })
 
 connection.onRequest(ExecuteCommandRequest.type, async (params) => {
+  if (params.command === 'carve.listIndent') return listIndent(params.arguments?.[0])
   const uri = typeof params.arguments?.[0] === 'string' ? params.arguments[0] : undefined
   if (params.command === 'carve.workspaceGraph') return workspaceGraph(workspaceIndex)
   if (params.command === 'carve.backlinks') return uri ? backlinks(workspaceIndex, uri) : []
@@ -354,6 +357,18 @@ connection.onRequest(ExecuteCommandRequest.type, async (params) => {
   if (params.command === 'carve.showAst') return engine.carveToAstJson(document.getText())
   return null
 })
+
+/**
+ * `carve.listIndent` with `{ uri, line, direction }`: the edits for that
+ * document, which the host applies (several lines as one undo step), or null
+ * when there is nothing to do and the host should run its own Tab.
+ */
+function listIndent(args: unknown): TextEdit[] | null {
+  const { uri, line, direction } = (args ?? {}) as { uri?: unknown; line?: unknown; direction?: unknown }
+  if (typeof uri !== 'string' || typeof line !== 'number' || (direction !== 'indent' && direction !== 'outdent')) return null
+  const document = documents.get(uri)
+  return document ? listIndentEdits(document.getText(), line, direction) : null
+}
 
 connection.onRequest(HoverRequest.type, (params) => {
   const document = documents.get(params.textDocument.uri)
