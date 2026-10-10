@@ -57,10 +57,16 @@ it only with `editor.formatOnType` on.
 | `1. item`, `a) item`, `ii. item`, `. item` | next marker in the same style: `2. `, `b) `, `iii. `, `. ` |
 | `- [x] item` | `- [ ] ` |
 | `- `, `2. `, `- [ ] ` (marker only) | the marker is removed and the list ends |
+| `> - item`, `[^a]: - item`, `: - item` | the next marker after the container prefix: `> - `, `  - `, `  - ` |
+| `> - ` (marker only, in a quote) | the line becomes `>` and the next line starts with `> ` |
 | `::: note`, `> quote`, `\| cell`, `: description` | the matching closer or prefix |
 
 The new marker keeps the indent and, where the marker's width allows, the
-content column of the previous item (`9.  item` continues as `10. `). A line
+content column of the previous item (`9.  item` continues as `10. `). Lists
+inside quotes, divs, footnote bodies and descriptions continue too, including
+nested combinations such as `> > - a` or a quote inside a list item; the quote
+prefix and the marker arrive as one edit. Ending a quoted list leaves a blank
+`>` line, so the quote stays open for the next paragraph. A line
 starting with `+` (the continuation marker), `(1)`, and list lines inside code
 or raw blocks are not continued. A lone `-` without a separator is left alone,
 since it may be prose.
@@ -100,8 +106,10 @@ Example `.carverc.json`:
 A list marker with no content after it (`- `, `2. `, `- [ ] `) is paragraph
 text, not an empty list item. While a new item is being typed, the server shows
 `list item` (or `task` for `- [ ] `) as an inlay hint after the marker. The
-hint appears only on the line the last edit touched, and only when the previous
-non-blank line belongs to a list item, so a lone `- ` in prose is never hinted
+hint appears only on the line the last edit touched, and only when the marker
+belongs to a list (it is lazy text of an item, or would continue a list once
+content lands, also inside a quote, div, footnote or description), so a lone
+`- ` in prose is never hinted
 and the hint goes away once the author edits elsewhere. Turn it off on its own
 with `"inlayHints": { "bareListMarkers": false }`.
 
