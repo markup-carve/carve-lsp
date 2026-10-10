@@ -8,7 +8,8 @@
  * line ending, which is render-equivalent and keeps the formatter idempotent.
  */
 
-import { parse, type Document, type Position } from '@markup-carve/carve'
+import { sourceLines } from './position.js'
+import { bareMarkerItem, completedItem, listItems, type ItemSite } from './list-items.js'
 
 export function formatDocument(source: string): string {
   if (source === '' || source.endsWith('\n')) return source
@@ -61,35 +62,51 @@ const TASK = /^\[[ xX_>?-]\]( [ \t]*|$)/
 // box; after an ordered marker `[ ]` is text.
 const BARE_MARKER = /^[ \t]*(?:[-*] [ \t]*(?:\[ \] [ \t]*)?|(?:\.|(?:[0-9]+|[A-Za-z]|[ivxlcdm]+|[IVXLCDM]+)[.)]) [ \t]*)$/
 
-interface ItemLine { olType?: string; delim?: string }
-
 /**
  * Enter after a list item writes the next marker; Enter after a content-less
- * marker removes it, which ends the list. Returns null when the line before
- * the cursor is not a list line, so other continuations can run.
+ * marker removes it, which ends the list. Inside a container the marker comes
+ * after the container's own prefix (`> - `), as one edit. Returns null when
+ * the line before the cursor is not a list line, so other continuations can run.
  */
 export function listContinuationEdits(source: string, position: { line: number; character: number }): ContinuationEdit[] | null {
-  const lines = source.split(/\r?\n/)
+  const lines = sourceLines(source)
   const current = lines[position.line] ?? ''
   if (current.trim() !== '' || position.line === 0) return null
   const prevLine = position.line - 1
   const previous = lines[prevLine] ?? ''
-  const structure = listStructure(source)
-  if (!structure || structure.code.has(prevLine)) return null
+  const item = listItems(source)?.starts.get(prevLine)
 
-  if (BARE_MARKER.test(previous)) {
-    if (!structure.covered.has(prevLine)) return null
-    return [{ range: { start: { line: prevLine, character: 0 }, end: { line: prevLine, character: previous.length } }, newText: '' }]
+  if (!item || BARE_MARKER.test(previous.slice(item.character))) {
+    const bare = bareMarkerItem(source, prevLine, previous)
+    if (!bare || !BARE_MARKER.test(previous.slice(bare.character))) return null
+    // Keep the container open: `> - ` becomes `>`, a blank quote line that ends
+    // the list, and the cursor line gets `> ` so the next paragraph stays quoted.
+    const lead = previous.slice(0, bare.character)
+    const edits: ContinuationEdit[] = [{ range: { start: { line: prevLine, character: 0 }, end: { line: prevLine, character: previous.length } }, newText: lead.trimEnd() }]
+    if (lead.includes('>')) edits.push({ range: { start: { line: position.line, character: 0 }, end: position }, newText: continuationLead(lead) })
+    return edits
   }
 
-  const item = structure.starts.get(prevLine)
-  if (!item) return null
-  const marker = nextMarker(previous, item)
+  const marker = nextMarker(previous.slice(item.character), item)
   if (marker === null) return null
-  return [{ range: { start: { line: position.line, character: 0 }, end: position }, newText: marker }]
+  const text = continuationLead(previous.slice(0, item.character)) + marker
+  // The engine has the last word on whether the guess lands in the same list.
+  if (completedItem(source, position.line, `${text}x`)?.list !== item.list) return null
+  return [{ range: { start: { line: position.line, character: 0 }, end: position }, newText: text }]
 }
 
-function nextMarker(line: string, item: ItemLine): string | null {
+/**
+ * The prefix a new line needs to stay in the containers a marker sits in.
+ * Quote markers repeat; a footnote label gives way to the two-space body
+ * indent; a description colon gives way to spaces up to its body column.
+ */
+function continuationLead(lead: string): string {
+  return lead
+    .replace(/^((?:[ \t]*>)*[ \t]*)\[\^[^\]]*\]: +/, '$1  ')
+    .replace(/(?<=^|[ \t>]):( +)/g, (_, gap: string) => ' ' + gap)
+}
+
+function nextMarker(line: string, item: ItemSite): string | null {
   const bullet = BULLET.exec(line)
   if (bullet) return bullet[1]! + bullet[2]! + bullet[3]! + taskBox(line.slice(bullet[0].length))
   const dot = BARE_DOT.exec(line)
@@ -142,52 +159,4 @@ function fromRoman(text: string): number | null {
   let rest = text
   for (const [amount, digits] of ROMAN) while (rest.startsWith(digits)) { value += amount; rest = rest.slice(digits.length) }
   return rest === '' && value > 0 ? value : null
-}
-
-interface ListStructure {
-  /** Zero-based line -> the outermost list item whose marker opens it. */
-  starts: Map<number, ItemLine>
-  /** Zero-based lines of paragraphs held directly by a list item. */
-  covered: Set<number>
-  /** Zero-based lines of code and raw blocks, fences included. */
-  code: Set<number>
-}
-
-function listStructure(source: string): ListStructure | null {
-  let doc: Document
-  try {
-    doc = parse(source, { positions: true })
-  } catch {
-    return null
-  }
-  const structure: ListStructure = { starts: new Map(), covered: new Set(), code: new Set() }
-  const visit = (value: unknown, list?: ItemLine, inItem = false): void => {
-    if (Array.isArray(value)) {
-      for (const entry of value) visit(entry, list, inItem)
-      return
-    }
-    if (value === null || typeof value !== 'object') return
-    const node = value as { type?: unknown; pos?: Position; olType?: string; delim?: string }
-    const pos = node.pos
-    if ((node.type === 'code_block' || node.type === 'raw_block') && pos?.startLine !== undefined && pos.endLine !== undefined) {
-      for (let line = pos.startLine - 1; line < pos.endLine; line++) structure.code.add(line)
-      return
-    }
-    // A bare marker after an item is lazy paragraph text of that item; one inside a
-    // nested container belongs to the container and is left alone.
-    if (node.type === 'paragraph' && inItem && pos?.startLine !== undefined && pos.endLine !== undefined) {
-      for (let line = pos.startLine - 1; line < pos.endLine; line++) structure.covered.add(line)
-    }
-    if (node.type === 'list') list = { olType: node.olType, delim: node.delim }
-    const item = node.type === 'list_item'
-    if (item && pos?.startLine !== undefined && !structure.starts.has(pos.startLine - 1)) {
-      structure.starts.set(pos.startLine - 1, { ...list })
-    }
-    for (const key of Object.keys(node)) {
-      if (key === 'pos') continue
-      visit((node as Record<string, unknown>)[key], list, item && key === 'children')
-    }
-  }
-  visit(doc.children)
-  return structure
 }

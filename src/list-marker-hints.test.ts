@@ -40,6 +40,26 @@ test('does not hint outside the edited line or outside a list', () => {
   assert.deepEqual(labels('- first\n\n  %%%\n  - \n  %%%\n', 3), [])
 })
 
+test('hints a bare marker in a list inside a container', () => {
+  assert.deepEqual(labels('> - first\n> - ', 1), ['list item'])
+  assert.deepEqual(labels('> - first\r> - ', 1), ['list item'])
+  assert.deepEqual(labels('- first\r- ', 1), ['list item'])
+  assert.deepEqual(labels('> - [x] done\n> - [ ] ', 1), ['task'])
+  assert.deepEqual(labels('> > - a\n> > - ', 1), ['list item'])
+  assert.deepEqual(labels('- item\n  > - a\n  > - ', 2), ['list item'])
+  assert.deepEqual(labels('> ::: note\n> - a\n> - ', 2), ['list item'])
+  assert.deepEqual(labels(':: term\n: - first\n  - ', 2), ['list item'])
+  assert.deepEqual(labels('[^a]:   - first\n  - ', 1), ['list item'])
+  const [hint] = bareListMarkerHints('> - first\n> - ', 1)
+  assert.deepEqual(hint?.position, { line: 1, character: 4 })
+  // A quote with no list, a comment or fence in a quote, and a tab separator stay unhinted.
+  assert.deepEqual(labels('> quoted\n> - ', 1), [])
+  assert.deepEqual(labels('> - first\n>-\t', 1), [])
+  assert.deepEqual(labels('> - first\n>\n> %%%\n> - \n> %%%\n', 3), [])
+  assert.deepEqual(labels('> - first\n>\n> ```\n> - \n> ```\n', 3), [])
+  assert.deepEqual(labels('- one\n  > - ', 1), [])
+})
+
 test('honors the requested range', () => {
   const range = (start: number, end: number) => ({ start: { line: start, character: 0 }, end: { line: end, character: 0 } })
   assert.equal(bareListMarkerHints('- first\n- ', 1, range(0, 0)).length, 0)

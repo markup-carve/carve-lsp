@@ -99,7 +99,6 @@ test('lines that are not list items are not continued', () => {
     'aa. item',
     'plain prose',
     '```\n- item',
-    '> - quoted',
   ]) assert.equal(enter(before), null, before)
   // A bare marker outside a list is prose, and a lone `-` without its
   // separator is never treated as a marker.
@@ -112,6 +111,71 @@ test('lines that are not list items are not continued', () => {
   for (const text of ['- [x]', '- [x] ', '- [ ]', '1. [ ] ']) assert.notDeepEqual(enter(`- one\n${text}`)?.[0]?.newText, '', text)
   // `-<tab>` and mixed-case roman are text the parser folds into the item, not markers.
   for (const text of ['-\t', '*\t', '2.\t', '- [ ]\t', 'iV. ', 'Xi) ']) assert.notDeepEqual(enter(`- one\n${text}`)?.[0]?.newText, '', JSON.stringify(text))
+})
+
+test('a list inside a container continues after the container prefix', () => {
+  for (const [before, next] of [
+    ['> - first', '> - '],
+    ['> 1. first', '> 2. '],
+    ['> - [x] done', '> - [ ] '],
+    ['> - a\n>   - nested', '>   - '],
+    ['> > - a', '> > - '],
+    ['- item\n  > - a', '  > - '],
+    ['- a\n\n  > - b', '  > - '],
+    ['> ::: note\n> - a', '> - '],
+    // A footnote body continues at the two-space body indent, whatever the label's width.
+    ['[^a]: - first', '  - '],
+    ['[^long]:   - first', '  - '],
+    ['[^😀]: - first', '  - '],
+    ['[^a]: - first\n  - second', '  - '],
+    ['[^a]: 1. first', '  2. '],
+    ['> [^a]: - first', '>   - '],
+    // A description body continues at its content column.
+    [':: term\n: - first', '  - '],
+    [':: term\n:   1. first', '    2. '],
+  ] as const) assert.equal(inserted(before), next, before)
+})
+
+test('the container prefix and the marker are one edit', () => {
+  assert.deepEqual(enter('> - first', '  '), [{
+    range: { start: { line: 1, character: 0 }, end: { line: 1, character: 2 } },
+    newText: '> - ',
+  }])
+})
+
+test('Enter on a content-less marker in a container ends the list and keeps the container', () => {
+  // The marker line becomes a blank quote line, which ends the list, and the
+  // cursor line is quoted so the next paragraph stays in the quote.
+  for (const [before, kept, cursor] of [
+    ['> - a\n> - ', '>', '> '],
+    ['> > - a\n> > - ', '> >', '> > '],
+    ['- item\n  > - a\n  > - ', '  >', '  > '],
+    ['> ::: note\n> - a\n> - ', '>', '> '],
+  ] as const) {
+    const markerLine = before.split('\n').length - 1
+    const marker = before.split('\n')[markerLine]!
+    assert.deepEqual(enter(before), [
+      { range: { start: { line: markerLine, character: 0 }, end: { line: markerLine, character: marker.length } }, newText: kept },
+      { range: { start: { line: markerLine + 1, character: 0 }, end: { line: markerLine + 1, character: 0 } }, newText: cursor },
+    ], before)
+  }
+  // An indented body (footnote, description, div) needs no prefix: the marker goes and the host indent stays.
+  for (const before of ['[^a]: - first\n  - ', ':: term\n: - first\n  - ', '::: note\n- a\n- ']) {
+    const markerLine = before.split('\n').length - 1
+    assert.deepEqual(enter(before), [{
+      range: { start: { line: markerLine, character: 0 }, end: { line: markerLine, character: before.split('\n')[markerLine]!.length } },
+      newText: '',
+    }], before)
+  }
+})
+
+test('a list in a container inside a comment or fence is not continued', () => {
+  assert.equal(listContinuationEdits('> %%%\n> - a\n> %%%\n', { line: 2, character: 0 }), null)
+  assert.equal(listContinuationEdits('> - a\n>\n> ```\n> - b\n> ```\n', { line: 4, character: 0 }), null)
+  assert.equal(listContinuationEdits('[^a]: text\n\n  %%%\n  - a\n  %%%\n\nx[^a]\n', { line: 4, character: 0 }), null)
+  assert.equal(listContinuationEdits('[^a]: - first\n\n  ```\n  - code\n\n  ```\n', { line: 4, character: 0 }), null)
+  // Text after a quoted list item is lazy text, not an item, so the quote continuation takes over.
+  assert.equal(enter('> - a\n> b'), null)
 })
 
 test('a list line inside a closed fence is code', () => {
@@ -147,4 +211,9 @@ test('on-type formatting serves list continuation through the server', async (co
     contentChanges: [{ text: '1. one\n2. \n\n' }],
   })
   assert.deepEqual(await typed(2), [{ range: { start: { line: 1, character: 0 }, end: { line: 1, character: 3 } }, newText: '' }])
+  client.notify('textDocument/didChange', {
+    textDocument: { uri: 'untitled:list.crv', version: 3 },
+    contentChanges: [{ text: '> - one\n\n' }],
+  })
+  assert.deepEqual(await typed(1), [{ range: { start: { line: 1, character: 0 }, end: { line: 1, character: 0 } }, newText: '> - ' }])
 })
