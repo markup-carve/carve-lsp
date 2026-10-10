@@ -31,7 +31,7 @@ The server communicates over **stdio** (`--stdio` flag).
 | Code actions | Migration and lint quick-fixes, table marker repair, creation of missing definitions, and export to Markdown or HTML |
 | Code lens | Reference counts for anchors, captions, citations, footnotes, and link labels |
 | Selection and folding | Syntax-aware selection expansion and folding, with tolerant fallbacks during incomplete edits |
-| Formatting | Conservative document/range formatting, on-type continuation, or explicit migration formatting |
+| Formatting | Conservative document/range formatting, on-type continuation (see below), or explicit migration formatting |
 | Semantic tokens | Full, ranged, and delta token updates, including table structure and alignment metadata |
 | Inlay hints | Generated heading ids (configurable) |
 | Commands | Preview/AST output plus workspace graph, backlinks, generated navigation, and transitive rebuild impact |
@@ -45,6 +45,25 @@ The same index exposes `carve.workspaceGraph`, `carve.backlinks`,
 `workspace/executeCommand`. The graph includes semantic references, citation
 usage, document links, includes, and local asset dependencies; unresolved edges
 are reported separately for migration and build tooling.
+
+## On-type continuation
+
+The server answers `textDocument/onTypeFormatting` for Enter. VS Code sends
+it only with `editor.formatOnType` on.
+
+| Line before Enter | Result |
+|---|---|
+| `- item`, `* item` | next line starts with the same bullet |
+| `1. item`, `a) item`, `ii. item`, `. item` | next marker in the same style: `2. `, `b) `, `iii. `, `. ` |
+| `- [x] item` | `- [ ] ` |
+| `- `, `2. `, `- [ ] ` (marker only) | the marker is removed and the list ends |
+| `::: note`, `> quote`, `\| cell`, `: description` | the matching closer or prefix |
+
+The new marker keeps the indent and, where the marker's width allows, the
+content column of the previous item (`9.  item` continues as `10. `). A line
+starting with `+` (the continuation marker), `(1)`, and list lines inside code
+or raw blocks are not continued. A lone `-` without a separator is left alone,
+since it may be prose.
 
 ## Language settings
 
