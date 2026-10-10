@@ -55,7 +55,7 @@ import { referencesAt } from './references.js'
 import { codeLenses } from './codelens.js'
 import { completionAt } from './completion.js'
 import { foldingRanges } from './folding.js'
-import { continuationPrefix, formatDocument, formatRange } from './format.js'
+import { continuationPrefix, formatDocument, formatRange, listContinuationEdits } from './format.js'
 import { hoverAt } from './hover.js'
 import { migrationCodeActions } from './migration-actions.js'
 import { lintCodeActions } from './lint-actions.js'
@@ -416,6 +416,8 @@ connection.onRequest(DocumentOnTypeFormattingRequest.type, (params) => {
   if (params.ch !== '\n') return []
   const document = documents.get(params.textDocument.uri)
   if (!document) return []
+  const list = listContinuationEdits(document.getText(), params.position)
+  if (list) return list
   const prefix = continuationPrefix(document.getText(), params.position.line)
   return prefix ? [{ range: { start: params.position, end: params.position }, newText: prefix }] : []
 })

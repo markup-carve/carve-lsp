@@ -4,7 +4,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { carveToHtml } from '@markup-carve/carve'
 import { analyzeCarve } from './analyze.js'
-import { continuationPrefix, formatDocument } from './format.js'
+import { continuationPrefix, formatDocument, listContinuationEdits } from './format.js'
 
 /**
  * The constructs carve 0.1.4 shipped, pinned against the corpus document that
@@ -82,9 +82,9 @@ test('the continuation marker reaches column 0 and nothing else (PART 9 §17 L3,
     '437-a-leading-continuation-marker-in-a-footnote-body-or-a-quote-is-text',
   ]) serverIsQuietAndPreserving(corpusDocument(name), name)
   // A lone `+` is not a bullet, so nothing may continue a line that is only one -
-  // in either reading of it. This is the server's whole behavior on the marker:
-  // it has no continuation, no fold and no token of its own, and a change that
-  // gave it one would have to decide the two readings apart first.
+  // in either reading of it. The list item above it continues; the `+` does not.
+  assert.equal(listContinuationEdits('- item\n\n', { line: 1, character: 0 })?.[0]?.newText, '- ')
+  assert.equal(listContinuationEdits('- item\n+\n', { line: 2, character: 0 }), null)
   assert.equal(continuationPrefix('- item\n+\n', 2), '')
   assert.equal(continuationPrefix('[^a]: intro\n+\n', 2), '')
 })
