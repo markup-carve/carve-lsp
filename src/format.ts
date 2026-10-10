@@ -9,7 +9,7 @@
  */
 
 import { sourceLines } from './position.js'
-import { bareMarkerItem, completedItem, listItems, type ItemSite } from './list-items.js'
+import { bareMarkerItem, completedItem, listItems, listTree, type ItemSite, type TreeItem } from './list-items.js'
 
 export function formatDocument(source: string): string {
   if (source === '' || source.endsWith('\n')) return source
@@ -104,6 +104,175 @@ function continuationLead(lead: string): string {
   return lead
     .replace(/^((?:[ \t]*>)*[ \t]*)\[\^[^\]]*\]: +/, '$1  ')
     .replace(/(?<=^|[ \t>]):( +)/g, (_, gap: string) => ' ' + gap)
+}
+
+export type ListIndentDirection = 'indent' | 'outdent'
+
+// A list marker and its separator, read at the column the parse puts the item.
+const ITEM_MARKER = /^([-*.]|(?:[0-9]+|[A-Za-z]+)[.)])([ \t]+)/
+// The part of a line's lead that belongs to containers (quotes, a footnote
+// label, a description colon), which indenting never touches.
+const CONTAINER_LEAD = /^(?:[ \t]*> ?)*(?:[ \t]*\[\^[^\]]*\]: +|[ \t]*: +)?/
+const QUOTE_LEVEL = /^[ \t]*> ?/
+
+/**
+ * Tab and Shift+Tab on a list line. Indent nests the item under its previous
+ * sibling, at that sibling's content column; outdent moves it to its parent's
+ * level. The item's own lines and children move with it. Returns null when
+ * there is nothing to nest under or out of, so the host keeps its own Tab.
+ */
+export function listIndentEdits(source: string, line: number, direction: ListIndentDirection): ContinuationEdit[] | null {
+  const lines = sourceLines(source)
+  const text = lines[line]
+  if (text === undefined) return null
+  let completed = lines
+  let tree = listTree(source)
+  let item = tree?.get(line)
+  // A content-less marker is paragraph text; read it as the item it becomes.
+  if (!item || BARE_MARKER.test(text.slice(item.character))) {
+    completed = lines.map((entry, index) => (index === line ? `${entry}x` : entry))
+    tree = listTree(completed.join('\n'))
+    item = tree?.get(line)
+    if (!tree || !item || !BARE_MARKER.test(text.slice(item.character))) return null
+  }
+  const own = ITEM_MARKER.exec(text.slice(item.character))
+  if (!own) return null
+  const lead = text.slice(0, item.character)
+  const fixed = CONTAINER_LEAD.exec(lead)![0].length
+  const indent = lead.slice(fixed)
+  if (/[^ \t]/.test(indent)) return null
+  const shape: Shape = { line, fixed, indent, marker: own[1]!, separator: own[2]!, quotes: (lead.slice(0, fixed).match(/>/g) ?? []).length }
+
+  if (direction === 'indent') {
+    const index = item.list.items.indexOf(item)
+    const previous = item.list.items[index - 1]
+    if (!previous) return null
+    const width = ITEM_MARKER.exec(completed[previous.line]!.slice(previous.character))?.[0].length
+    if (!width) return null
+    const marker = indentedMarker(completed, item, previous, shape.marker)
+    for (const delta of unique([width, previous.character + width - item.character]).filter((value) => value > 0)) {
+      const result = shiftItem(completed, item, shape, delta, marker)
+      const after = listTree(result.text)
+      if (after?.get(line)?.parent?.key === previous.key && keepsDescendants(tree!, after, item)) return result.edits
+    }
+    return null
+  }
+
+  const parent = item.parent
+  if (!parent) return null
+  const parentMarker = ITEM_MARKER.exec(completed[parent.line]!.slice(parent.character))
+  if (!parentMarker) return null
+  const marker = ordinalOf(shape.marker) && parent.list.ordered && ordinalOf(shape.marker)!.delim === parent.list.delim
+    ? nextOrdinal(completed, parent, parent.list) ?? shape.marker
+    : shape.marker
+  const widths = [item.character - parent.character, parentMarker[0].length]
+  for (let width = indent.length; width > 0; width--) widths.push(width)
+  for (const removed of unique(widths).filter((value) => value > 0 && value <= indent.length)) {
+    const result = shiftItem(completed, item, shape, -removed, marker)
+    const after = listTree(result.text)
+    const moved = after?.get(line)
+    if (moved && moved.parent?.key === parent.parent?.key && moved.container === parent.container && keepsDescendants(tree!, after!, item)) return result.edits
+  }
+  return null
+}
+
+/** Every item nested in `item` before the move is still nested in it, as deep as before. */
+function keepsDescendants(before: Map<number, TreeItem>, after: Map<number, TreeItem>, item: TreeItem): boolean {
+  const moved = after.get(item.line)
+  if (!moved) return false
+  for (let line = item.line + 1; line <= item.endLine; line++) {
+    const old = before.get(line)
+    if (!old) continue
+    const depth = levelsBelow(old, item.key)
+    if (depth === null) continue
+    const now = after.get(line)
+    if (!now || levelsBelow(now, moved.key) !== depth) return false
+  }
+  return true
+}
+
+function levelsBelow(item: TreeItem, ancestor: string): number | null {
+  let levels = 0
+  for (let current = item.parent; current; current = current.parent) {
+    levels++
+    if (current.key === ancestor) return levels
+  }
+  return null
+}
+
+interface Shape { line: number; fixed: number; indent: string; marker: string; separator: string; quotes: number }
+
+function unique(values: number[]): number[] {
+  return [...new Set(values)]
+}
+
+function ordinalOf(marker: string): { ordinal: string; delim: string } | null {
+  const match = /^([0-9]+|[A-Za-z]+)([.)])$/.exec(marker)
+  return match ? { ordinal: match[1]!, delim: match[2]! } : null
+}
+
+/** The marker of the item after `last` in `list`, or null when it has no successor. */
+function nextOrdinal(lines: string[], last: TreeItem, list: { olType?: string }): string | null {
+  const current = ordinalOf(ITEM_MARKER.exec(lines[last.line]!.slice(last.character))?.[1] ?? '')
+  if (!current) return null
+  const next = increment(current.ordinal, list.olType)
+  return next === null ? null : next + current.delim
+}
+
+/**
+ * A bullet keeps its character. An ordered item joining the child list its new
+ * parent already ends with takes that list's next ordinal; one that starts a
+ * child list restarts at the style's first ordinal.
+ */
+function indentedMarker(lines: string[], item: TreeItem, parent: TreeItem, marker: string): string {
+  const own = ordinalOf(marker)
+  if (!own) return marker
+  const tail = parent.lists.at(-1)
+  const last = tail?.items.at(-1)
+  if (tail && last && last.endLine === parent.endLine && tail.ordered && tail.delim === own.delim) {
+    const next = nextOrdinal(lines, last, tail)
+    if (next) return next
+  }
+  return (item.list.olType ?? '1') + own.delim
+}
+
+/**
+ * Moves the item line's marker by `delta` columns (negative removes indent)
+ * and writes `marker`; every later line of the item moves with its content
+ * column, so it stays in the item when the marker changes width.
+ */
+function shiftItem(lines: string[], item: TreeItem, shape: Shape, delta: number, marker: string): { edits: ContinuationEdit[]; text: string } {
+  const edits: ContinuationEdit[] = []
+  const next = [...lines]
+  const indent = delta > 0 ? shape.indent + ' '.repeat(delta) : shape.indent.slice(0, shape.indent.length + delta)
+  const replacement = indent + marker + shape.separator
+  const end = shape.fixed + shape.indent.length + shape.marker.length + shape.separator.length
+  edits.push({ range: { start: { line: shape.line, character: shape.fixed }, end: { line: shape.line, character: end } }, newText: replacement })
+  next[shape.line] = next[shape.line]!.slice(0, shape.fixed) + replacement + next[shape.line]!.slice(end)
+  const shift = delta + marker.length - shape.marker.length
+  for (let line = item.line + 1; line <= item.endLine; line++) {
+    const text = lines[line]!
+    let at = 0
+    let level = 0
+    while (level < shape.quotes) {
+      const quote = QUOTE_LEVEL.exec(text.slice(at))
+      if (!quote) break
+      at += quote[0].length
+      level++
+    }
+    // A lazy line (fewer quote markers) or a blank one is left as written.
+    if (level < shape.quotes || text.slice(at).trim() === '' || shift === 0) continue
+    if (shift > 0) {
+      edits.push({ range: { start: { line, character: at }, end: { line, character: at } }, newText: ' '.repeat(shift) })
+      next[line] = text.slice(0, at) + ' '.repeat(shift) + text.slice(at)
+    } else {
+      const removable = Math.min(-shift, /^[ \t]*/.exec(text.slice(at))![0].length)
+      if (removable === 0) continue
+      edits.push({ range: { start: { line, character: at }, end: { line, character: at + removable } }, newText: '' })
+      next[line] = text.slice(0, at) + text.slice(at + removable)
+    }
+  }
+  return { edits, text: next.join('\n') }
 }
 
 function nextMarker(line: string, item: ItemSite): string | null {

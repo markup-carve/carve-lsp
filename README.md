@@ -34,7 +34,7 @@ The server communicates over **stdio** (`--stdio` flag).
 | Formatting | Conservative document/range formatting, on-type continuation (see below), or explicit migration formatting |
 | Semantic tokens | Full, ranged, and delta token updates, including table structure and alignment metadata |
 | Inlay hints | Generated heading ids, colon-fence closers, and a `list item` / `task` hint after a bare list marker on the line being edited (configurable) |
-| Commands | Preview/AST output plus workspace graph, backlinks, generated navigation, and transitive rebuild impact |
+| Commands | Preview/AST output, list indent/outdent (`carve.listIndent`), workspace graph, backlinks, generated navigation, and transitive rebuild impact |
 | File inclusion | Resolves `{{ path }}` directives, watches dependencies, and reports failures as diagnostics - **off by default**, see below |
 
 Workspace navigation is backed by a versioned `.crv` index. The initial scan
@@ -70,6 +70,33 @@ prefix and the marker arrive as one edit. Ending a quoted list leaves a blank
 starting with `+` (the continuation marker), `(1)`, and list lines inside code
 or raw blocks are not continued. A lone `-` without a separator is left alone,
 since it may be prose.
+
+## List indent and outdent
+
+Hosts indent a line by a fixed amount, but Carve nests a list item only when
+its marker reaches the content column of the item above (`1. a` needs three
+spaces before `- b`, `10. a` needs four). The `carve.listIndent` command does
+it the Carve way, for a host to bind to Tab and Shift+Tab:
+
+```json
+{ "command": "carve.listIndent", "arguments": [{ "uri": "file:///notes.crv", "line": 4, "direction": "indent" }] }
+```
+
+- `indent` nests the item under its previous sibling, at that sibling's
+  content column. `outdent` moves it to its parent's level.
+- The item's continuation lines and children move with it.
+- A bullet keeps its character. An ordered item that starts a child list
+  restarts at the style's first ordinal (`1.`, `a.`, `i.`); joining an existing
+  child list, or outdenting into an ordered parent list, takes the next ordinal.
+- It works on a content-less marker (`- ` right after Enter) and inside quotes,
+  divs, footnote bodies and descriptions. Each edit is checked against the
+  parser: the item must reparse at the intended depth.
+
+The result is the `TextEdit[]` for that document, which the host applies
+(as one undo step when several lines move), or `null` when there is nothing to
+do: the first item of a list has nothing to nest under, a top-level item cannot
+be outdented, or the line is not a list item. On `null` the host should run its
+own Tab.
 
 ## Language settings
 
