@@ -6,6 +6,8 @@ export interface CarveSettings {
   platforms: LintPlatform[]
   extensions: string[]
   inlayHints: boolean
+  /** `inlayHints.bareListMarkers`: ghost text after a bare marker on the line being edited. */
+  bareListMarkerHints: boolean
   exportActions: boolean
   formatter: 'conservative' | 'migration'
   severities: Record<string, 'error' | 'warning' | 'information' | 'hint' | 'off'>
@@ -15,6 +17,7 @@ export const DEFAULT_CARVE_SETTINGS: CarveSettings = {
   platforms: [],
   extensions: [],
   inlayHints: true,
+  bareListMarkerHints: true,
   exportActions: true,
   formatter: 'conservative',
   severities: {},
@@ -33,10 +36,17 @@ export function readCarveSettings(raw: unknown): CarveSettings {
     platforms,
     extensions,
     inlayHints: carve['inlayHints'] !== false,
+    bareListMarkerHints: carve['inlayHints'] !== false && subSetting(carve['inlayHints'], 'bareListMarkers'),
     exportActions: carve['exportActions'] !== false,
     formatter: carve['formatter'] === 'migration' ? 'migration' : 'conservative',
     severities: severitySettings(carve['severities']),
   }
+}
+
+// `inlayHints` is a boolean, or an object of per-hint switches that default to on.
+function subSetting(value: unknown, key: string): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return true
+  return (value as Record<string, unknown>)[key] !== false
 }
 
 function severitySettings(value: unknown): CarveSettings['severities'] {

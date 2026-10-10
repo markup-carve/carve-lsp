@@ -73,6 +73,7 @@ import {
 import { documentLinks } from './document-links.js'
 import { documentHighlights } from './document-highlights.js'
 import { inlayHints } from './inlay-hints.js'
+import { bareListMarkerHints, editedLine } from './list-marker-hints.js'
 import { selectionRanges } from './selection.js'
 import { WorkspaceIndex } from './workspace-index.js'
 import { backlinks, generatedNavigation, rebuildImpact, workspaceGraph } from './workspace-graph.js'
@@ -84,7 +85,18 @@ import { DEFAULT_CARVE_SETTINGS, readCarveSettings, readProjectSettings, type Ca
 import { colonFenceInlayHints, linkedColonFenceRanges } from './colon-fences.js'
 
 const connection = createConnection(ProposedFeatures.all)
-const documents = new TextDocuments(TextDocument)
+// The last line each document was edited on, from didChange ranges. The
+// bare-marker hint is scoped to it, since inlay requests carry no cursor.
+const editedLines = new Map<string, number>()
+const documents = new TextDocuments({
+  create: TextDocument.create,
+  update: (document, changes, version) => {
+    const line = editedLine(changes)
+    if (line === undefined) editedLines.delete(document.uri)
+    else editedLines.set(document.uri, line)
+    return TextDocument.update(document, changes, version)
+  },
+})
 
 let includeSettings: IncludeSettings = DEFAULT_INCLUDE_SETTINGS
 let carveSettings: CarveSettings = DEFAULT_CARVE_SETTINGS
@@ -220,6 +232,7 @@ documents.onDidChangeContent((event) => {
   diagnostics.schedule(event.document.uri, event.document.version)
 })
 documents.onDidClose((event) => {
+  editedLines.delete(event.document.uri)
   diagnostics.cancel(event.document.uri)
   // Closing an editor buffer must not make an on-disk workspace document
   // disappear from cross-file navigation.
@@ -314,7 +327,13 @@ connection.onRequest(SelectionRangeRequest.type, (params) => {
 connection.onRequest(InlayHintRequest.type, (params) => {
   if (!carveSettings.inlayHints) return []
   const document = documents.get(params.textDocument.uri)
-  return document ? [...inlayHints(document.getText(), params.range), ...colonFenceInlayHints(document.getText(), params.range)] : []
+  if (!document) return []
+  const source = document.getText()
+  return [
+    ...inlayHints(source, params.range),
+    ...colonFenceInlayHints(source, params.range),
+    ...(carveSettings.bareListMarkerHints ? bareListMarkerHints(source, editedLines.get(document.uri), params.range) : []),
+  ]
 })
 
 connection.onRequest(LinkedEditingRangeRequest.type, (params) => {
