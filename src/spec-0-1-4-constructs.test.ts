@@ -44,9 +44,10 @@ test('the {empty} description sentinel is accepted, not diagnosed (PART 11 §7d,
   assert.match(source, /^: \{empty\}$/m, 'corpus 438 no longer spells the sentinel')
   serverIsQuietAndPreserving(source, '{empty} sentinel')
   assert.match(carveToHtml(source), /<dd><\/dd>/, 'the sentinel should reach an empty description body')
-  // The sentinel is content, so the marker did open a description: Enter lands
-  // at the body column, where typing replaces the empty body with a real one
-  // (`: {empty}` then `  x` renders <dd>x</dd>).
+  // The sentinel is content, so the marker did open a description: Enter
+  // starts the next definition, as after any other one. The prefix fallback
+  // still lands at the body column (`: {empty}` then `  x` renders <dd>x</dd>).
+  assert.deepEqual(listContinuationEdits(':: t\n: {empty}\n', { line: 2, character: 0 })?.map((edit) => edit.newText), [': '])
   assert.equal(continuationPrefix(':: t\n: {empty}\n', 2), '  ')
 })
 
@@ -60,6 +61,10 @@ test('a colon followed by only whitespace opens no description (PART 2, carve#18
   assert.equal(continuationPrefix(':: t\n:\n', 2), '')
   assert.equal(continuationPrefix(':: t\n:   \n', 2), '')
   assert.equal(continuationPrefix(':: t\n:\tbody\n', 2), '')
+  // On Enter a whitespace-only marker is removed, ending the list, as an empty
+  // list marker is; a tab separator is not a marker, so nothing happens.
+  assert.deepEqual(listContinuationEdits(':: t\n: \n', { line: 2, character: 0 })?.map((edit) => edit.newText), [''])
+  assert.equal(listContinuationEdits(':: t\n:\tbody\n', { line: 2, character: 0 }), null)
   // And the near miss it must not swallow: a real marker still continues, at the
   // content column its separator run sets (corpus 424).
   assert.equal(continuationPrefix(':: t\n: body\n', 2), '  ')
@@ -74,6 +79,7 @@ test('a colon followed by only whitespace opens no description (PART 2, carve#18
   // landed rather than picking a side; this line exists so that when carve#1836
   // does land, someone has to come back to it.
   assert.equal(continuationPrefix(':: t\n: \tbody\n', 2), '  ')
+  assert.equal(listContinuationEdits(':: t\n: \tbody\n', { line: 2, character: 0 }), null)
 })
 
 test('the continuation marker reaches column 0 and nothing else (PART 9 §17 L3, carve#1817)', () => {

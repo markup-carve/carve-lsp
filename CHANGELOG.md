@@ -6,6 +6,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixes
+
+- Enter on a `:::` opener that already has its closer no longer inserts a
+  second one; an unclosed opener nested in a closed container still gets its
+  own.
+- Typing `{{ ` no longer offers attribute completions inside the include
+  directive.
+
+### Improvements
+
+- On-type continuation: Enter after a code fence opener inserts the matching
+  closer; an attributed list item (`-{.c} a`) continues with a plain marker;
+  `:: term` and `: def` continue with `: `; and Enter on a content-less `: ` or
+  `> ` line removes it, ending the list or one quote level. The new
+  `BARE_CONTINUATION_MARKER` export lets a browser host recognize the bare
+  `: ` marker.
+- Completion offers the placement markers, the extension containers and the
+  `>`, `|`, `\` forms after `::: `, code languages and raw formats after a
+  fence opener, and matching heading titles as `[Heading][]` after `[` and a
+  character.
+
 ## [0.1.10] - 2026-10-08
 
 ### Fixes

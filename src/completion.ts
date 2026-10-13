@@ -19,6 +19,26 @@ const ADMONITIONS = ['note', 'tip', 'warning', 'danger', 'info', 'success', 'exa
  */
 const FIGURE_GROUP = 'figure'
 
+/** The six kinds that place generated content (PART 12, the engine's GENERATED_CONTENT_KINDS). */
+const PLACEMENT_MARKERS = ['toc', 'footnotes', 'references', 'bibliography', 'glossary', 'index']
+
+/** Container extensions: Tier-2 (corpus-pinned) and code-group (Tier-3). `tab` is a panel inside `tabs`. */
+const EXTENSION_CONTAINERS = ['details', 'spoiler', 'tabs', 'tab', 'list-table', 'code-group']
+
+/** The non-word container openers: fenced block quote, line block, hard-break block. */
+const SYMBOL_CONTAINERS = [
+  { value: '>', detail: 'Fenced block quote' },
+  { value: '|', detail: 'Line block' },
+  { value: '\\', detail: 'Hard-break block' },
+]
+
+/** Fence languages worth offering; any word is valid. */
+const CODE_LANGUAGES = ['bash', 'c', 'carve', 'cpp', 'csharp', 'css', 'diff', 'go', 'html', 'java', 'javascript', 'json',
+  'kotlin', 'markdown', 'php', 'python', 'ruby', 'rust', 'shell', 'sql', 'swift', 'text', 'toml', 'typescript', 'xml', 'yaml']
+/** Languages an extension renders instead of printing as code. */
+const RENDERED_LANGUAGES = ['math', 'mermaid', 'svg']
+const RAW_FORMATS = ['=html', '=latex']
+
 /**
  * Context-aware completions driven by the text immediately before the cursor:
  *   - `::: ` opens a container   -> canonical admonition kinds, and `figure`
@@ -41,6 +61,20 @@ export function completionAt(source: string, position: Position, context: Comple
         completion(kind, CompletionItemKind.Keyword, match![1], position, 'Admonition kind'),
       ),
       completion(FIGURE_GROUP, CompletionItemKind.Struct, match![1], position, 'Composite figure'),
+      ...PLACEMENT_MARKERS.map((kind) => completion(kind, CompletionItemKind.Constant, match![1], position, 'Placement marker')),
+      ...EXTENSION_CONTAINERS.map((kind) => completion(kind, CompletionItemKind.Struct, match![1], position, 'Extension container')),
+      ...(match[1] === '' && /\s$/.test(prefix)
+        ? SYMBOL_CONTAINERS.map(({ value, detail }) => completion(value, CompletionItemKind.Operator, '', position, detail))
+        : []),
+    ]
+  }
+  if ((match = /^(?:[ \t]*>)*[ \t]*(?:`{3,}|~{3,})[ \t]?(=?[\w+#.-]*)$/.exec(prefix)) && !insideCodeBlock(source, position.line)) {
+    const partial = match[1]!
+    if (partial.startsWith('=')) return RAW_FORMATS.map((format) => completion(format, CompletionItemKind.Value, partial, position, 'Raw format'))
+    return [
+      ...CODE_LANGUAGES.map((language) => completion(language, CompletionItemKind.Value, partial, position, 'Code language')),
+      ...RENDERED_LANGUAGES.map((language) => completion(language, CompletionItemKind.Value, partial, position, 'Code language, rendered by an extension')),
+      ...RAW_FORMATS.map((format) => completion(format, CompletionItemKind.Value, partial, position, 'Raw format')),
     ]
   }
   if ((match = /<\/#([\w-]*)$/.exec(prefix))) {
@@ -77,6 +111,21 @@ export function completionAt(source: string, position: Position, context: Comple
       .map((token) => token.key)
     return [...new Set([...local, ...workspace])].map((label) =>
       completion(label, CompletionItemKind.Reference, match![1], position, 'Citation key'))
+  }
+  // Inside `{{ ... }}` the include completions own the slot; nothing below applies.
+  if (prefix.lastIndexOf('{{') > prefix.lastIndexOf('}}')) return []
+  // `[My` with a heading `# My Head`: complete the collapsed reference `[My Head][]`.
+  if ((match = /(?:^|[^![\\\]])\[([^\s\]\[^@][^\][]*)$/.exec(prefix))) {
+    const partial = match[1]!
+    const closing = line[position.character] === ']' ? 1 : 0
+    return headingTitles(source)
+      .filter((title) => title.toLowerCase().startsWith(partial.toLowerCase()))
+      .map((title) => {
+        const item = completion(title, CompletionItemKind.Reference, partial, position, 'Heading link')
+        item.textEdit = { range: { start: { line: position.line, character: position.character - partial.length }, end: { line: position.line, character: position.character + closing } }, newText: `${title}][]` }
+        item.filterText = title
+        return item
+      })
   }
   // The partial is the token after the block's last space, so `{.cl` replaces `.cl`.
   if ((match = /\{(?:[^}\n]*\s)?([#.]?[\w-]*)$/.exec(prefix))) {
@@ -122,6 +171,42 @@ function completion(
       newText: value,
     },
   }
+}
+
+/** Zero-based `line` lies inside a code or raw block that opened on an earlier line. */
+function insideCodeBlock(source: string, line: number): boolean {
+  let found = false
+  const walk = (value: unknown): void => {
+    if (found) return
+    if (Array.isArray(value)) { value.forEach(walk); return }
+    if (!value || typeof value !== 'object') return
+    const node = value as { type?: string; pos?: { startLine?: number; endLine?: number } }
+    const { startLine, endLine } = node.pos ?? {}
+    if ((node.type === 'code_block' || node.type === 'raw_block') && startLine !== undefined && endLine !== undefined && startLine < line + 1 && line + 1 <= endLine) found = true
+    for (const [name, child] of Object.entries(value)) if (name !== 'pos' && name !== 'attrs') walk(child)
+  }
+  try {
+    walk(parse(source, { positions: true }).children)
+  } catch {
+    return false
+  }
+  return found
+}
+
+/** Heading texts as a collapsed reference `[Text][]` must spell them. */
+function headingTitles(source: string): string[] {
+  const titles: string[] = []
+  const text = (nodes: unknown): string => Array.isArray(nodes)
+    ? nodes.map((node: { value?: unknown; children?: unknown; type?: string }) => node.type === 'soft_break' ? ' ' : typeof node.value === 'string' ? node.value : text(node.children)).join('')
+    : ''
+  try {
+    walkBlocks(parse(source).children, (node) => {
+      if (node.type === 'heading') titles.push(text(node.children).trim())
+    })
+  } catch {
+    return []
+  }
+  return [...new Set(titles.filter((title) => title !== ''))]
 }
 
 function headingIds(source: string): string[] {
