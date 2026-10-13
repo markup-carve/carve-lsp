@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
-import { listContinuationEdits } from './format.js'
+import { carveToHtml } from '@markup-carve/carve'
+import { BARE_CONTINUATION_MARKER, listContinuationEdits } from './format.js'
 import { listDelim } from './list-items.js'
 import { LspStdioClient } from './lsp-stdio-client.js'
 
@@ -223,4 +224,96 @@ test('an ordered list without a delim on its node reads as `.`', () => {
   assert.equal(listDelim({ ordered: true }), '.')
   assert.equal(listDelim({ ordered: true, delim: ')' }), ')')
   assert.equal(listDelim({ ordered: false }), undefined)
+})
+
+function applied(before: string): string {
+  const source = `${before}\n`
+  const edits = enter(before) ?? []
+  const lines = source.split('\n')
+  for (const edit of [...edits].reverse()) {
+    const { start, end } = edit.range
+    const head = lines[start.line]!.slice(0, start.character)
+    const tail = lines[end.line]!.slice(end.character)
+    lines.splice(start.line, end.line - start.line + 1, ...(head + edit.newText + tail).split('\n'))
+  }
+  return lines.join('\n')
+}
+
+test('an item with attributes continues with a plain marker', () => {
+  for (const [before, next] of [
+    ['-{.c} a', '- '],
+    ['*{#x .c} a', '* '],
+    ['1.{.c} a', '2. '],
+    ['a){.c} a', 'b) '],
+    ['-{.c} [x] a', '- [ ] '],
+    ['> -{.c} a', '> - '],
+    ['- a\n-{.c} b', '- '],
+  ] as const) assert.equal(inserted(before), next, before)
+  // The plain marker joins the attributed item's list.
+  assert.equal(carveToHtml(`${applied('1.{.c} a')}b\n`), '<ol>\n  <li class="c">a</li>\n  <li>b</li>\n</ol>')
+})
+
+test('a description term or definition continues with a definition marker', () => {
+  for (const [before, next] of [
+    [':: term', ': '],
+    [':: t\n: def', ': '],
+    [':: t\n:   def', ':   '],
+    [':: t\n: a\n: b', ': '],
+    [':: t\n:: u', ': '],
+    ['> :: t', '> : '],
+    ['> :: t\n> : d', '> : '],
+    ['- a\n\n  :: t\n  : d', '  : '],
+  ] as const) assert.equal(inserted(before), next, before)
+  for (const before of [':: term', ':: t\n: def', '> :: t\n> : d']) {
+    const html = carveToHtml(`${applied(before)}more\n`)
+    assert.match(html, /<dd>more<\/dd>/, before)
+  }
+})
+
+test('Enter on a content-less definition marker removes it and ends the list', () => {
+  assert.deepEqual(enter(':: t\n: d\n: '), [{ range: { start: { line: 2, character: 0 }, end: { line: 2, character: 2 } }, newText: '' }])
+  assert.deepEqual(enter(':: t\n:   '), [{ range: { start: { line: 1, character: 0 }, end: { line: 1, character: 4 } }, newText: '' }])
+  assert.deepEqual(enter('> :: t\n> : d\n> : '), [
+    { range: { start: { line: 2, character: 0 }, end: { line: 2, character: 4 } }, newText: '>' },
+    { range: { start: { line: 3, character: 0 }, end: { line: 3, character: 0 } }, newText: '> ' },
+  ])
+})
+
+test('colon lines that are not description markers are not continued', () => {
+  for (const before of [
+    ': def',
+    'foo\n: bar',
+    ':: t\n:',
+    ':: t\n:\tdef',
+    ':: t\n: \tdef',
+    ':: t\n:  \tdef',
+    'para\n\n: ',
+    '```\n:: t\n: d',
+    ':::: note',
+  ]) assert.equal(enter(before), null, JSON.stringify(before))
+})
+
+test('Enter on a content-less quote line drops one quote level', () => {
+  // `> ` ends the quote; `> > ` ends the inner quote and stays in the outer one,
+  // as a content-less list marker in a quote does.
+  assert.deepEqual(enter('> q\n> '), [{ range: { start: { line: 1, character: 0 }, end: { line: 1, character: 2 } }, newText: '' }])
+  assert.deepEqual(enter('> > q\n> > '), [
+    { range: { start: { line: 1, character: 0 }, end: { line: 1, character: 4 } }, newText: '>' },
+    { range: { start: { line: 2, character: 0 }, end: { line: 2, character: 0 } }, newText: '> ' },
+  ])
+  assert.deepEqual(enter('> >  '), [
+    { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } }, newText: '>' },
+    { range: { start: { line: 1, character: 0 }, end: { line: 1, character: 0 } }, newText: '> ' },
+  ])
+  assert.equal(carveToHtml(`${applied('> > q\n> > ')}x\n`), '<blockquote>\n  <blockquote><p>q</p></blockquote>\n  <p>x</p>\n</blockquote>')
+})
+
+test('quote lines with content, or a bare `>`, are not ended', () => {
+  // A quote line with content is continued by `continuationPrefix`.
+  for (const before of ['> q', '> > q', '> q\n>', '```\n> ']) assert.equal(enter(before), null, JSON.stringify(before))
+})
+
+test('the bare continuation marker covers list and definition markers', () => {
+  for (const bare of ['- ', '* ', '- [ ] ', '2. ', 'b) ', '. ', ': ', ':   ']) assert.ok(BARE_CONTINUATION_MARKER.test(bare), JSON.stringify(bare))
+  for (const text of ['-', ':', ':\t', ': x', '- x', '-\t', '::: ']) assert.ok(!BARE_CONTINUATION_MARKER.test(text), JSON.stringify(text))
 })

@@ -25,7 +25,7 @@ The server communicates over **stdio** (`--stdio` flag).
 | Diagnostics | Push, document-pull, and workspace-pull diagnostics for syntax, migration hazards, silent failures, include failures, table metadata, dead references, and duplicate declarations |
 | Symbols | Nested document outline plus queryable workspace symbols, including included files |
 | Hover | Markup, cross-reference, include, citation, and table-marker explanations |
-| Completion | Admonitions, attributes, semantic spans, citations, references, workspace anchors, and contained include paths, sections and options |
+| Completion | Container kinds (admonitions, placement markers, extension containers), code fence languages, attributes, semantic spans, citations, references, heading titles as `[Heading][]` links, workspace anchors, and contained include paths, sections and options |
 | Navigation | Document links, go-to-definition, highlights, and references for anchors, captions, footnotes, citations, and link labels |
 | Rename | Workspace-wide, namespace-aware rename; generated heading ids become explicit when renamed |
 | Code actions | Migration and lint quick-fixes, table marker repair, creation of missing definitions, and export to Markdown or HTML |
@@ -56,10 +56,15 @@ it only with `editor.formatOnType` on.
 | `- item`, `* item` | next line starts with the same bullet |
 | `1. item`, `a) item`, `ii. item`, `. item` | next marker in the same style: `2. `, `b) `, `iii. `, `. ` |
 | `- [x] item` | `- [ ] ` |
+| `-{.c} item`, `1.{.c} item` | a plain next marker: `- `, `2. ` (attributes are not copied) |
 | `- `, `2. `, `- [ ] ` (marker only) | the marker is removed and the list ends |
 | `> - item`, `[^a]: - item`, `: - item` | the next marker after the container prefix: `> - `, `  - `, `  - ` |
 | `> - ` (marker only, in a quote) | the line becomes `>` and the next line starts with `> ` |
-| `::: note`, `> quote`, `\| cell`, `: description` | the matching closer or prefix |
+| `:: term`, `: definition` | the next definition: `: `, keeping the separator width (`:   def` continues as `:   `) |
+| `: ` (marker only, in a description list) | the marker is removed and the list ends |
+| `> quote`, `\| cell` | the matching prefix |
+| `> ` (quote prefix only) | one quote level is dropped: `> ` becomes an empty line, `> > ` becomes `>` with `> ` on the next line |
+| `::: note`, ```` ```js ````, `~~~` | the matching closer below the cursor, unless the block is already closed |
 
 The new marker keeps the indent and, where the marker's width allows, the
 content column of the previous item (`9.  item` continues as `10. `). Lists
@@ -70,6 +75,27 @@ prefix and the marker arrive as one edit. Ending a quoted list leaves a blank
 starting with `+` (the continuation marker), `(1)`, and list lines inside code
 or raw blocks are not continued. A lone `-` without a separator is left alone,
 since it may be prose.
+
+Closers are inserted only for an opener that has none yet, so Enter on the
+opener of a closed container or code block adds nothing. A fence line that
+closes a block, or one inside a code block, gets no closer; a code fence
+inside a quote or list item continues with its container prefix instead. A
+browser host that removes a content-less marker on Backspace, or hides it from
+a preview, can test the text after the quote prefix and indent with the
+exported `BARE_CONTINUATION_MARKER`.
+
+## Completion
+
+| Typed | Offered |
+|---|---|
+| `::: ` | admonition kinds, `figure`, the placement markers (`toc`, `footnotes`, `references`, `bibliography`, `glossary`, `index`), the extension containers (`details`, `spoiler`, `tabs`, `tab`, `list-table`, `code-group`), and the symbol forms `>`, `\|`, `\` before a word is started |
+| ```` ``` ````, `~~~` | common code languages, `math`, `mermaid`, `svg`, and the raw formats `=html`, `=latex` (not inside a code block) |
+| `[` and at least one character | headings whose text starts with it, inserted as a collapsed reference `[Heading][]` |
+| `{{ ` | include paths, sections and options (with file inclusion on); never attributes |
+
+The heading list stays empty until the text after `[` matches a heading, so
+ordinary link text and bracketed prose get no popup. `![`, `[[`, `\[`, `[^`
+and `[@` are left to their own completions.
 
 ## List indent and outdent
 
@@ -328,8 +354,9 @@ stays off unless you pass `includes` with a `resolver` of your own; give it a
 `paths` implementation too if your children are not plain file paths. The
 exported set covers diagnostics, outline symbols, completion, hover, folding,
 selection ranges, links, highlights, references, definitions, rename, inlay
-hints, on-type list continuation and list indent, quick fixes, table checks
-and code lenses.
+hints, on-type continuation (`listContinuationEdits`, `continuationPrefix`,
+`BARE_CONTINUATION_MARKER`) and list indent, quick fixes, table checks and
+code lenses.
 
 ## Development
 
