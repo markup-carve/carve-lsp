@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
 import { listContinuationEdits } from './format.js'
+import { listDelim } from './list-items.js'
 import { LspStdioClient } from './lsp-stdio-client.js'
 
 // The document as the host holds it right after Enter: the cursor sits on the
@@ -216,4 +217,10 @@ test('on-type formatting serves list continuation through the server', async (co
     contentChanges: [{ text: '> - one\n\n' }],
   })
   assert.deepEqual(await typed(1), [{ range: { start: { line: 1, character: 0 }, end: { line: 1, character: 0 } }, newText: '> - ' }])
+})
+
+test('an ordered list without a delim on its node reads as `.`', () => {
+  assert.equal(listDelim({ ordered: true }), '.')
+  assert.equal(listDelim({ ordered: true, delim: ')' }), ')')
+  assert.equal(listDelim({ ordered: false }), undefined)
 })
