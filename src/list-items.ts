@@ -29,7 +29,12 @@ function markerCharacter(line: string, column: number): number {
   return start + /^[ \t]*/.exec(line.slice(start))![0].length
 }
 
-interface Node { type?: unknown; pos?: Position; olType?: string; delim?: string }
+interface Node { type?: unknown; pos?: Position; ordered?: boolean; olType?: string; delim?: string }
+
+/** A list's ordered delimiter. The engine may omit the default `.` (carve-js `List.delim`). */
+export function listDelim(list: { ordered?: boolean; delim?: string }): string | undefined {
+  return list.delim ?? (list.ordered ? '.' : undefined)
+}
 
 /**
  * The list items of a document and the paragraph lines they hold. Walks the
@@ -73,7 +78,7 @@ export function listItems(source: string): ListItems | null {
         starts.set(line, {
           character: markerCharacter(lines[line] ?? '', pos.startColumn),
           olType: list.olType,
-          delim: list.delim,
+          delim: listDelim(list),
           list: `${list.pos.startLine}:${list.pos.startColumn}`,
           continues,
         })
@@ -153,10 +158,10 @@ export function listTree(source: string): Map<number, TreeItem> | null {
       return
     }
     if (value === null || typeof value !== 'object') return
-    const node = value as Node & { ordered?: boolean; bulletChar?: string }
+    const node = value as Node & { bulletChar?: string }
     const pos = node.pos
     if (node.type === 'list' && pos) {
-      const next: TreeList = { key: key(pos), ordered: node.ordered === true, olType: node.olType, delim: node.delim, bulletChar: node.bulletChar, items: [] }
+      const next: TreeList = { key: key(pos), ordered: node.ordered === true, olType: node.olType, delim: listDelim(node), bulletChar: node.bulletChar, items: [] }
       // A list counts as an item's child only when nothing sits between them.
       if (direct && item) item.lists.push(next)
       for (const k of Object.keys(node)) if (k !== 'pos') visit((node as Record<string, unknown>)[k], container, direct ? item : undefined, next, false)
