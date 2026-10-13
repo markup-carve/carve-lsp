@@ -1,4 +1,4 @@
-import { type DocumentLink } from 'vscode-languageserver/node.js'
+import { type DocumentLink } from 'vscode-languageserver-types'
 
 /** Clickable destinations whose target is explicit in source. */
 export function documentLinks(uri: string, source: string): DocumentLink[] {

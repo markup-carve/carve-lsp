@@ -1,4 +1,4 @@
-import { CodeActionKind, type CodeAction, type Diagnostic, type TextEdit } from 'vscode-languageserver/node.js'
+import { CodeActionKind, type CodeAction, type Diagnostic, type TextEdit } from 'vscode-languageserver-types'
 
 /** Safe, local rewrites for diagnostics emitted by lintCarve. */
 export function lintCodeActions(uri: string, source: string, diagnostics: Diagnostic[]): CodeAction[] {

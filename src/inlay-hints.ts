@@ -1,4 +1,4 @@
-import { InlayHintKind, type InlayHint, type Range } from 'vscode-languageserver/node.js'
+import { InlayHintKind, type InlayHint, type Range } from 'vscode-languageserver-types'
 import { parse, resolve, type BlockNode } from '@markup-carve/carve'
 
 /** Quiet, author-value hints. Clients can disable the provider globally. */

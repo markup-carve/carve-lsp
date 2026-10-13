@@ -14,7 +14,7 @@ import {
   CompletionItemKind,
   type CompletionItem,
   type Position,
-} from 'vscode-languageserver/node.js'
+} from 'vscode-languageserver-types'
 import type { IncludeOptions } from './includes.js'
 import { lineCount, sections } from './include-selection.js'
 

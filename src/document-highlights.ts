@@ -1,4 +1,4 @@
-import { DocumentHighlightKind, type DocumentHighlight, type Position } from 'vscode-languageserver/node.js'
+import { DocumentHighlightKind, type DocumentHighlight, type Position } from 'vscode-languageserver-types'
 import { scanDocument } from './workspace-index.js'
 import { colonFenceHighlights } from './colon-fences.js'
 

@@ -8,7 +8,7 @@ import {
   type SymbolInformation,
   type TextEdit,
   type WorkspaceEdit,
-} from 'vscode-languageserver/node.js'
+} from 'vscode-languageserver-types'
 import { parse, resolve, type BlockNode, type InlineNode } from '@markup-carve/carve'
 
 export type IndexedKind = 'heading' | 'caption' | 'footnote' | 'linkref' | 'citation'

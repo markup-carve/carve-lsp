@@ -1,4 +1,4 @@
-import { type Position, type Range, type SelectionRange } from 'vscode-languageserver/node.js'
+import { type Position, type Range, type SelectionRange } from 'vscode-languageserver-types'
 import { scanDocument } from './workspace-index.js'
 
 export function selectionRanges(uri: string, source: string, positions: Position[]): SelectionRange[] {

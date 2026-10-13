@@ -13,7 +13,7 @@
  * worse than a missing one.
  */
 import { parse, resolve, type BlockNode } from '@markup-carve/carve'
-import type { Range } from 'vscode-languageserver/node.js'
+import type { Range } from 'vscode-languageserver-types'
 
 export interface Section {
   id: string

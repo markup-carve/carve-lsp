@@ -1,11 +1,11 @@
-import { type Location, type Position } from 'vscode-languageserver/node.js'
+import { type Location, type Position } from 'vscode-languageserver-types'
 import { parse, resolve, type BlockNode, type Document, type InlineNode } from '@markup-carve/carve'
 import { astColumnToCharacter, sourceLines } from './position.js'
 import { smartPunctuationText } from './inline-text.js'
 import { captionTargetById } from './captions.js'
 import { includeDefinitionAt } from './include-definition.js'
 import { resolveIncludes, type IncludeOptions } from './includes.js'
-import { pathToFileURL } from 'node:url'
+import { portableIncludePaths } from './include-paths.js'
 
 /**
  * Go-to-definition for Carve constructs:
@@ -168,7 +168,7 @@ function resolveCrossrefAcrossSeam(
 
   const childLine = pos.startLine - 1
   return {
-    uri: pathToFileURL(child.watch).toString(),
+    uri: (includes.paths ?? portableIncludePaths).toUri(child.watch),
     range: {
       start: { line: childLine, character: 0 },
       end: {
