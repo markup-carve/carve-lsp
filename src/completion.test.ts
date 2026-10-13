@@ -103,4 +103,8 @@ test('heading titles are not offered on a bare bracket or other bracket forms', 
   for (const text of ['see [', 'see [ M', 'see ![My', 'see [[My', 'see \\[My', 'see [zzz', 'see [My Head](#x', 'see [^My', 'see [@My']) {
     assert.deepEqual(labels(source + text, 2, text.length).filter((label) => label === 'My Head'), [], text)
   }
+  // Brackets that already carry a destination, reference or attributes are left alone.
+  for (const text of ['see [My](url)', 'see [My][]', 'see [My][ref]', 'see [My]{.c}', 'see [My x](url)']) {
+    assert.deepEqual(labels(source + text, 2, 7), [], text)
+  }
 })

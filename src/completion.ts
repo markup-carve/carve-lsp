@@ -117,7 +117,11 @@ export function completionAt(source: string, position: Position, context: Comple
   // `[My` with a heading `# My Head`: complete the collapsed reference `[My Head][]`.
   if ((match = /(?:^|[^![\\\]])\[([^\s\]\[^@][^\][]*)$/.exec(prefix))) {
     const partial = match[1]!
-    const closing = line[position.character] === ']' ? 1 : 0
+    const after = line.slice(position.character)
+    // `[My](url)`, `[My][ref]` and `[My]{.c}` already say what the brackets are.
+    const close = /^[^\][]*\]/.exec(after)
+    if (close && /^[([{]/.test(after.slice(close[0].length))) return []
+    const closing = after.startsWith(']') ? 1 : 0
     return headingTitles(source)
       .filter((title) => title.toLowerCase().startsWith(partial.toLowerCase()))
       .map((title) => {
