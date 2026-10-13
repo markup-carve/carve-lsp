@@ -200,7 +200,7 @@ function endContainerLine(previous: string, lead: string, position: { line: numb
 const QUOTE_LEAD = /^(?:[ \t]*>[ \t]?)*[ \t]*/
 // A term or definition with content; the separator rules are the ones in
 // `continuationPrefix`. A tab after the separator (carve#1836) is left to it too.
-const DESCRIPTION = /^(::?)( +)(?![ \t]*$)(?!\t)/
+const DESCRIPTION = /^(::?)( +)(?=[^ \t])/
 const BARE_DESCRIPTION = /^: +$/
 
 /** Zero-based line -> the description list it is a term or definition line of. */

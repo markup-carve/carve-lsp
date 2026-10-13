@@ -285,6 +285,8 @@ test('colon lines that are not description markers are not continued', () => {
     'foo\n: bar',
     ':: t\n:',
     ':: t\n:\tdef',
+    ':: t\n: \tdef',
+    ':: t\n:  \tdef',
     'para\n\n: ',
     '```\n:: t\n: d',
     ':::: note',
