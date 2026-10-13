@@ -78,7 +78,8 @@ export function completionAt(source: string, position: Position, context: Comple
     return [...new Set([...local, ...workspace])].map((label) =>
       completion(label, CompletionItemKind.Reference, match![1], position, 'Citation key'))
   }
-  if ((match = /\{[^}\n]*\b([\w-]*)$/.exec(prefix))) {
+  // The partial is the token after the block's last space, so `{.cl` replaces `.cl`.
+  if ((match = /\{(?:[^}\n]*\s)?([#.]?[\w-]*)$/.exec(prefix))) {
     const attributes = ['#id', '.class', 'align=', 'valign=', 'width=', 'aligns=', 'valigns=', 'widths=',
       'header-rows=', 'header-cols=', 'footer-rows=', 'start=', 'type=', 'title=', 'label=']
     return attributes.map((attribute) =>
