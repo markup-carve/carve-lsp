@@ -1,4 +1,4 @@
-import { MarkupKind, type Hover, type Position } from 'vscode-languageserver/node.js'
+import { MarkupKind, type Hover, type Position } from 'vscode-languageserver-types'
 import {
   parse,
   resolve,

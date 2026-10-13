@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url'
 import { fileSystemResolver } from './include-path.js'
 import type { IncludeSourceCache } from './include-cache.js'
 import type { IncludeOptions } from './includes.js'
+import { nodeIncludePaths } from './node-include-paths.js'
 
 export interface IncludeSettings {
   /**
@@ -220,7 +221,7 @@ export function includeOptionsFor(input: IncludeGateInput): IncludeOptions | und
     return undefined
   }
 
-  const options: IncludeOptions = { resolver, sourcePath: documentPath, includeRoot: root }
+  const options: IncludeOptions = { resolver, sourcePath: documentPath, includeRoot: root, paths: nodeIncludePaths }
   if (input.settings.maxDepth !== undefined) options.maxDepth = input.settings.maxDepth
   if (input.settings.maxBytes !== undefined) options.maxBytes = input.settings.maxBytes
   if (input.settings.maxResolverCalls !== undefined) {

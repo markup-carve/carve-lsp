@@ -310,6 +310,27 @@ Any editor with LSP support can start the server as an external process:
 - **File extension:** `.crv` (language ID: `carve`)
 - **Root pattern:** `.git` or the project root
 
+## Browser use
+
+`@markup-carve/carve-lsp/browser` exports the analysis functions without the
+language-server transport or any Node.js built-in, for an editor that runs
+them in the page (a CodeMirror or Monaco playground):
+
+```js
+import { analyzeCarve, completionAt, hoverAt, listContinuationEdits } from '@markup-carve/carve-lsp/browser'
+
+const { diagnostics, symbols } = analyzeCarve(source)
+const items = completionAt(source, { line: 3, character: 4 })
+```
+
+Positions are LSP positions (0-based line, UTF-16 character). File inclusion
+stays off unless you pass `includes` with a `resolver` of your own; give it a
+`paths` implementation too if your children are not plain file paths. The
+exported set covers diagnostics, outline symbols, completion, hover, folding,
+selection ranges, links, highlights, references, definitions, rename, inlay
+hints, on-type list continuation and list indent, quick fixes, table checks
+and code lenses.
+
 ## Development
 
 Contributor setup, testing, and maintenance notes are in the [development guide](docs/development.md).

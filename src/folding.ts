@@ -1,4 +1,4 @@
-import { type FoldingRange } from 'vscode-languageserver/node.js'
+import { type FoldingRange } from 'vscode-languageserver-types'
 import { parse, resolve, type BlockNode, type Document } from '@markup-carve/carve'
 
 /** Block kinds worth offering as a collapsible region when multi-line. */

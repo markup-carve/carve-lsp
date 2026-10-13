@@ -1,4 +1,4 @@
-import { type Position, type Range, type WorkspaceEdit } from 'vscode-languageserver/node.js'
+import { type Position, type Range, type WorkspaceEdit } from 'vscode-languageserver-types'
 
 type LabelKind = 'footnote' | 'linkref'
 

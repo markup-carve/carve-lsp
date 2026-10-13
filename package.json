@@ -24,6 +24,10 @@
       "import": "./dist/analyze.js",
       "types": "./dist/analyze.d.ts"
     },
+    "./browser": {
+      "import": "./dist/browser.js",
+      "types": "./dist/browser.d.ts"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -41,7 +45,8 @@
   "dependencies": {
     "@markup-carve/carve": "^0.1.9",
     "vscode-languageserver": "^9.0.1",
-    "vscode-languageserver-textdocument": "^1.0.12"
+    "vscode-languageserver-textdocument": "^1.0.12",
+    "vscode-languageserver-types": "^3.17.5"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
