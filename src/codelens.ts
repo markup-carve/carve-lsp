@@ -1,4 +1,4 @@
-import { type CodeLens } from 'vscode-languageserver/node.js'
+import { type CodeLens } from 'vscode-languageserver-types'
 import { scanDocument } from './workspace-index.js'
 
 /**

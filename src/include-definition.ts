@@ -1,5 +1,5 @@
-import { pathToFileURL } from 'node:url'
-import { type Location, type Position, type Range } from 'vscode-languageserver/node.js'
+import { portableIncludePaths } from './include-paths.js'
+import { type Location, type Position, type Range } from 'vscode-languageserver-types'
 import { findDirectives, type Directive } from './include-directive.js'
 import { lineCount, sectionRange } from './include-selection.js'
 import type { IncludeOptions } from './includes.js'
@@ -29,7 +29,7 @@ export function includeDefinitionAt(
   })
   if (!resolved.ok) return null
   return {
-    uri: pathToFileURL(resolved.id).toString(),
+    uri: (options.paths ?? portableIncludePaths).toUri(resolved.id),
     range: selectionRange(directive, resolved.source),
   }
 }

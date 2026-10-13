@@ -1,4 +1,4 @@
-import { DiagnosticSeverity, type Diagnostic } from 'vscode-languageserver/node.js'
+import { DiagnosticSeverity, type Diagnostic } from 'vscode-languageserver-types'
 
 /** Draft #1344 diagnostics kept local until the pinned engine ships their lint producers. */
 export function tableDiagnostics(source: string): Diagnostic[] {

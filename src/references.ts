@@ -1,4 +1,4 @@
-import { type Location, type Position, type ReferenceContext } from 'vscode-languageserver/node.js'
+import { type Location, type Position, type ReferenceContext } from 'vscode-languageserver-types'
 import { parse, resolve, type BlockNode, type Document } from '@markup-carve/carve'
 import { smartPunctuationText } from './inline-text.js'
 import { captionTargetById, captionTargets } from './captions.js'

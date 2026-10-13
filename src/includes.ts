@@ -26,6 +26,7 @@
  * The resolver is still this server's, so what may be read at all is still
  * decided here.
  */
+import type { IncludePaths } from './include-paths.js'
 import {
   expandIncludes,
   findDirectiveSites,
@@ -110,6 +111,8 @@ export interface IncludeDependency {
 }
 
 export interface IncludeOptions {
+  /** How children are named for the client; the server passes the Node implementation. */
+  paths?: IncludePaths
   /** Resolve an include path to source text. Absent means the pass is inert. */
   resolver?: IncludeResolver
   /** Identity of the root document, for warning attribution. */

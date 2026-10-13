@@ -1,4 +1,4 @@
-import type { InlayHint, Range } from 'vscode-languageserver/node.js'
+import type { InlayHint, Range } from 'vscode-languageserver-types'
 import type { TextDocumentContentChangeEvent } from 'vscode-languageserver-textdocument'
 import { bareMarkerItem } from './list-items.js'
 

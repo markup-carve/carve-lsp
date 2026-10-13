@@ -5,7 +5,7 @@ import {
   SymbolKind,
   type Diagnostic,
   type Range,
-} from 'vscode-languageserver/node.js'
+} from 'vscode-languageserver-types'
 import {
   djotMigrationWarnings,
   lintCarve,
@@ -17,8 +17,7 @@ import {
   type InlineNode,
   type LintPlatform,
 } from '@markup-carve/carve'
-import path from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { portableIncludePaths, type IncludePaths } from './include-paths.js'
 import { smartPunctuationText } from './inline-text.js'
 import { panelLetter } from './captions.js'
 import { includeDenialCode } from './include-denial.js'
@@ -152,8 +151,9 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
   // in an untrusted or unconfigured workspace keeps its `{{ … }}` literal and
   // nothing on disk is touched.
   const includes = resolveIncludes(norm, options.includes ?? {})
+  const paths = options.includes?.paths ?? portableIncludePaths
   for (const warning of includes.warnings) {
-    const child = childLocation(warning, includes.documents)
+    const child = childLocation(warning, includes.documents, paths)
     diagnostics.push({
       severity: DiagnosticSeverity.Warning,
       range: {
@@ -169,7 +169,7 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
       // resolver's own error out of author-visible text, and it routinely
       // carries absolute host paths. The attributed child is named relative to
       // the include root for the same reason - never as an absolute path.
-      message: attributeToChild(warning.message, warning.file, options.includes),
+      message: attributeToChild(warning.message, warning.file, options.includes, paths),
       // The child is NAMED in the message for a client that renders none of
       // this, and LOCATED here for one that does. Both, because dropping the
       // prose regresses every client without related information, and dropping
@@ -182,7 +182,7 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
     diagnostics: configuredDiagnostics(diagnostics, options.lint?.severities),
     symbols: doc ? documentSymbols(doc) : tolerantHeadingSymbols(source),
     dependencies: includes.dependencies,
-    includedSymbols: includedSymbols(includes.documents, options.includedParseCache),
+    includedSymbols: includedSymbols(includes.documents, options.includedParseCache, paths),
   }
 }
 
@@ -250,6 +250,7 @@ function firstDuplicateDeclaration(source: string, rule: string, message: string
 function includedSymbols(
   documents: Array<{ id: string; source: string; version?: string }>,
   cache: IncludeParseCache | undefined,
+  paths: IncludePaths,
 ): SymbolInformation[] {
   const symbols: SymbolInformation[] = []
   for (const child of documents) {
@@ -262,7 +263,7 @@ function includedSymbols(
       }
       if (child.version !== undefined) cache?.set(child.id, child.version, document)
     }
-    const uri = pathToFileURL(child.id).toString()
+    const uri = paths.toUri(child.id)
     for (const entry of walkOutline(document.children)) {
       // An INCLUDED file contributes its headings, flat. A composite figure is
       // a landmark inside its own file rather than a navigable entry in
@@ -273,7 +274,7 @@ function includedSymbols(
         name: symbol.name,
         kind: symbol.kind,
         location: { uri, range: symbol.range },
-        containerName: path.basename(child.id),
+        containerName: paths.basename(child.id),
       })
     }
   }
@@ -295,13 +296,14 @@ function includedSymbols(
 function childLocation(
   warning: IncludeWarning,
   documents: IncludeResolution['documents'],
+  paths: IncludePaths,
 ): { uri: string; range: Range } | undefined {
   const { file, within } = warning
   if (file === undefined || within === undefined) return undefined
   const child = documents.find((document) => document.id === file)
   if (child?.watch === undefined) return undefined
   return {
-    uri: pathToFileURL(child.watch).toString(),
+    uri: paths.toUri(child.watch),
     range: {
       start: positionAt(child.source, astOffsetToIndex(child.source, within.start)),
       end: positionAt(child.source, astOffsetToIndex(child.source, within.end)),
@@ -318,23 +320,11 @@ function attributeToChild(
   message: string,
   file: string | undefined,
   includes: IncludeOptions | undefined,
+  paths: IncludePaths,
 ): string {
   if (file === undefined || file === includes?.sourcePath) return message
-  return `${message} (in ${relativeToRoot(file, includes?.includeRoot)})`
-}
-
-/**
- * A child's identity as the author wrote it: relative to the include root,
- * segment-wise, so a sibling directory named `..foo` is not mistaken for an
- * escape. A file that is not under the root at all is named as it came, since
- * inventing a relative form for it would be a lie.
- */
-function relativeToRoot(file: string, root: string | undefined): string {
-  if (root === undefined) return file
-  const relative = path.relative(root, file)
-  if (!relative || path.isAbsolute(relative)) return file
-  if (relative.split(path.sep)[0] === '..') return file
-  return relative
+  const root = includes?.includeRoot
+  return `${message} (in ${root === undefined ? file : paths.relativeToRoot(file, root)})`
 }
 
 function documentSymbols(doc: Document): DocumentSymbol[] {

@@ -7,7 +7,7 @@ import {
   TextEdit,
   type CodeAction,
   type WorkspaceEdit,
-} from 'vscode-languageserver/node.js'
+} from 'vscode-languageserver-types'
 
 export type ExportFormat = 'markdown' | 'html'
 

@@ -2,7 +2,7 @@ import {
   CompletionItemKind,
   type CompletionItem,
   type Position,
-} from 'vscode-languageserver/node.js'
+} from 'vscode-languageserver-types'
 import { parse, resolve, type BlockNode, type Document } from '@markup-carve/carve'
 import { captionTargets, type CaptionTarget } from './captions.js'
 import type { IndexedToken } from './workspace-index.js'

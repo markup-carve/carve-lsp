@@ -1,4 +1,4 @@
-import { DiagnosticSeverity, DocumentHighlightKind, InlayHintKind, type Diagnostic, type DocumentHighlight, type Hover, type InlayHint, type Position, type Range } from 'vscode-languageserver/node.js'
+import { DiagnosticSeverity, DocumentHighlightKind, InlayHintKind, type Diagnostic, type DocumentHighlight, type Hover, type InlayHint, type Position, type Range } from 'vscode-languageserver-types'
 import { parse } from '@markup-carve/carve'
 
 interface UnclosedContainer { kind: string; line: number; column: number; startOffset: number; endOffset: number; fenceWidth: number }

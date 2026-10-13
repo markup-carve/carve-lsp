@@ -4,7 +4,7 @@ import {
   Range,
   TextEdit,
   type Diagnostic,
-} from 'vscode-languageserver/node.js'
+} from 'vscode-languageserver-types'
 import { applyMigrationFixes, djotMigrationWarnings } from '@markup-carve/carve'
 
 export interface MigrationFix {
