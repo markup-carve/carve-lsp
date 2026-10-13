@@ -118,9 +118,10 @@ export function completionAt(source: string, position: Position, context: Comple
   if ((match = /(?:^|[^![\\\]])\[([^\s\]\[^@][^\][]*)$/.exec(prefix))) {
     const partial = match[1]!
     const after = line.slice(position.character)
-    // `[My](url)`, `[My][ref]` and `[My]{.c}` already say what the brackets are.
+    // `[My](url)`, `[My][ref]` and `[My]{.c}` already say what the brackets are,
+    // and in `[My| more]` the edit would strand the rest of the text.
     const close = /^[^\][]*\]/.exec(after)
-    if (close && /^[([{]/.test(after.slice(close[0].length))) return []
+    if (close && (close[0] !== ']' || /^[([{]/.test(after.slice(1)))) return []
     const closing = after.startsWith(']') ? 1 : 0
     return headingTitles(source)
       .filter((title) => title.toLowerCase().startsWith(partial.toLowerCase()))
