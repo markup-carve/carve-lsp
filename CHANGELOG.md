@@ -4,7 +4,7 @@ All notable changes to carve-lsp are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.1.12] - 2026-10-15
 
 ### Fixes
 
@@ -13,10 +13,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   instead of at the cursor, where VS Code and LSP4IJ moved the cursor past it;
   a container lead such as `> ` is still inserted at the cursor. On the last
   line of a document there is no next line, so the answer stays one insert at
-  the cursor and the client decides where the cursor goes.
+  the cursor and the client decides where the cursor goes (#555).
 - The server no longer exits when a client refuses a capability registration
   (`client/registerCapability`). It logs a warning and keeps serving without
-  the configuration notifications or file watchers it asked for.
+  the configuration notifications or file watchers it asked for (#556).
+- A bare link reference definition with an empty destination (`[label]:`)
+  is colored as a definition and its label is offered in reference
+  completion. Bare `[^label]:` and `[@label]:` lines stay excluded (#558).
 
 ## [0.1.11] - 2026-10-14
 
