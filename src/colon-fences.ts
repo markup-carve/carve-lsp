@@ -53,7 +53,7 @@ export function colonFenceStructure(source: string): { openers: FenceSite[]; pai
   // The whole document, not just `children`: footnote bodies hang off
   // `footnoteDefs`, and a colon fence inside one is a container like any other.
   walk(document, null)
-  return { openers: [...openers.values()].sort((a, b) => a.range.start.line - b.range.start.line), pairs: pairFences(lines, openers, opaque), diagnostics }
+  return { openers: [...openers.values()].sort((a, b) => a.range.start.line - b.range.start.line), pairs: pairFences(lines, openers, opaque, unclosedKeys), diagnostics }
 }
 
 /** Every colon-fence opener the server recognizes, closed or not. */
@@ -101,8 +101,11 @@ export function linkedColonFenceRanges(source: string, position: Position): { ra
  * A bare run closes the innermost open container only when the widths match
  * EXACTLY (carve#455); at any other width it opens a nested container, and the
  * parser has already told us so by giving that line a node of its own.
+ *
+ * An opener the parser reports unclosed never joins the stack: inside a block
+ * quote it can end with the quote, and a later bare run belongs to an outer one.
  */
-function pairFences(lines: string[], openers: Map<number, FenceSite>, opaque: Array<readonly [number, number]>): FencePair[] {
+function pairFences(lines: string[], openers: Map<number, FenceSite>, opaque: Array<readonly [number, number]>, unclosed: Set<string>): FencePair[] {
   const pairs: FencePair[] = []
   const stack: FenceSite[] = []
   // Flattened once. Testing every span per line is quadratic in a document made
@@ -114,18 +117,27 @@ function pairFences(lines: string[], openers: Map<number, FenceSite>, opaque: Ar
   for (let line = 0; line < lines.length; line++) {
     if (verbatim[line]) continue
     const opener = openers.get(line)
-    if (opener) { stack.push(opener); continue }
+    if (opener) {
+      if (!unclosed.has(`${line + 1}:${opener.range.start.character + 1}:${opener.width}`)) stack.push(opener)
+      continue
+    }
     const top = stack[stack.length - 1]
     if (!top) continue
     const column = top.range.start.character
     const text = lines[line] ?? ''
-    if (!/^[ \t]*$/.test(text.slice(0, column))) continue
+    // The closer repeats the opener's quote markers; a list marker before the opener is indent here.
+    const prefix = text.slice(0, column)
+    if (!/^(?:[ \t]*> )*[ \t]*$/.test(prefix) || quoteDepth(prefix) !== quoteDepth(lines[top.range.start.line] ?? '')) continue
     const run = lineRun(text, column)
     if (!run?.bare || run.width !== top.width) continue
     pairs.push({ opener: top, closer: fenceSite(line, column, run.width, top.kind) })
     stack.pop()
   }
   return pairs
+}
+
+function quoteDepth(line: string): number {
+  return /^(?:[ \t]*> )*/.exec(line)![0].split('>').length - 1
 }
 
 function fenceSite(line: number, character: number, width: number, kind: string): FenceSite {

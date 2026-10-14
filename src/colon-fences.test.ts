@@ -22,3 +22,26 @@ test('exposes exact pairs for linked editing, hover, and nesting hints', () => {
   assert.match(String((colonFenceHover(source, { line: 2, character: 2 })?.contents as { value: string }).value), /warning admonition/)
   assert.equal(colonFenceInlayHints(source, { start: { line: 0, character: 0 }, end: { line: 3, character: 0 } }).length, 1)
 })
+
+const pairLines = (source: string) => colonFenceStructure(source).pairs
+  .map(({ opener, closer }) => [opener.range.start.line, closer.range.start.line, closer.range.start.character])
+  .sort((a, b) => a[0]! - b[0]!)
+
+test('a container inside a block quote pairs with its quoted closer', () => {
+  assert.deepEqual(pairLines('> ::: note\n> x\n> :::\n'), [[0, 2, 2]])
+  assert.deepEqual(pairLines('> > ::: note\n> > x\n> > :::\n'), [[0, 2, 4]])
+  assert.deepEqual(pairLines('> - ::: note\n>   x\n>   :::\n'), [[0, 2, 4]])
+  assert.deepEqual(pairLines('> ::: note\n> ::: tip\n> x\n> :::\n> :::\n'), [[0, 4, 2], [1, 3, 2]])
+  assert.deepEqual(pairLines('> ::: note\n>\n> x\n> :::\n'), [[0, 3, 2]])
+  const source = '> ::: warning\n> body\n> :::\n'
+  assert.match(String((colonFenceHover(source, { line: 2, character: 3 })?.contents as { value: string }).value), /warning admonition/)
+  assert.equal(linkedColonFenceRanges(source, { line: 2, character: 3 })?.ranges.length, 2)
+})
+
+test('a quoted container does not pair across the end of its quote', () => {
+  for (const source of [
+    '> ::: note\n> x\n:::\n', '> ::: note\n> x\n\n> :::\n', '> > ::: note\n> > x\n> :::\n', '> ::: note\n> x\n>:::\n',
+  ]) assert.deepEqual(pairLines(source).filter(([opener]) => opener === 0), [], source)
+  // The quote ends the inner container, so the bare run closes the outer one.
+  assert.deepEqual(pairLines('::: note\n> ::: tip\n> x\n\n:::\n'), [[0, 4, 0]])
+})

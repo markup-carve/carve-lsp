@@ -13,6 +13,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   own.
 - Typing `{{ ` no longer offers attribute completions inside the include
   directive.
+- A `:::` container inside a block quote (`> ::: note` ... `> :::`) now pairs
+  with its closer, so highlight, closer hover, the closing inlay hint and
+  linked fence editing work there. A container its quote ended no longer
+  claims a later closer.
 
 ### Improvements
 
