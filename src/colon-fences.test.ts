@@ -46,12 +46,11 @@ test('a quoted container does not pair across the end of its quote', () => {
   assert.deepEqual(pairLines('::: note\n> ::: tip\n> x\n\n:::\n'), [[0, 4, 0]])
 })
 
-test('a paragraph that starts with a literal colon run is not a container', () => {
-  // An unquoted title makes the whole fence plain text, closer included.
+test('a container with invalid metadata still pairs with its closer', () => {
+  // An unquoted title is dropped, but the container keeps its subtree (corpus 537).
   const source = '::: note Custom Title\nbody\n:::\n'
-  assert.deepEqual(colonFenceStructure(source).pairs, [])
-  assert.deepEqual(colonFenceInlayHints(source, { start: { line: 0, character: 0 }, end: { line: 3, character: 0 } }), [])
-  assert.equal(linkedColonFenceRanges(source, { line: 0, character: 1 }), null)
+  assert.deepEqual(pairLines(source), [[0, 2, 0]])
+  assert.equal(linkedColonFenceRanges(source, { line: 0, character: 1 })?.ranges.length, 2)
 })
 
 test('a fence opened on a footnote label pairs with the closer at the body indent', () => {

@@ -33,8 +33,8 @@ function corpusDocument(name: string): string {
 }
 
 /** Neither a diagnostic the engine did not raise, nor a byte the formatter moved. */
-function serverIsQuietAndPreserving(source: string, label: string): void {
-  assert.deepEqual(analyzeCarve(source, {}).diagnostics.map((d) => [d.code, d.range.start.line + 1]), [], label)
+function serverIsQuietAndPreserving(source: string, label: string, engineRaises: Array<[string, number]> = []): void {
+  assert.deepEqual(analyzeCarve(source, {}).diagnostics.map((d) => [d.code, d.range.start.line + 1]), engineRaises, label)
   assert.equal(formatDocument(source), source, `${label}: the formatter rewrote a document that already ends in a newline`)
   assert.equal(carveToHtml(formatDocument(source)), carveToHtml(source), `${label}: formatting changed the rendered document`)
 }
@@ -97,7 +97,8 @@ test('the continuation marker reaches column 0 and nothing else (PART 9 §17 L3,
 
 test('a block image keeps its caption slot (PART 11 §1c, carve#1823)', () => {
   const source = corpusDocument('434-an-unresolved-image-gives-its-whole-caption-slot-back-at-any-depth')
-  serverIsQuietAndPreserving(source, 'block image carve-out')
+  // `[r]` has no definition, which carve-js 0.1.10 and later lint.
+  serverIsQuietAndPreserving(source, 'block image carve-out', [['unresolved-reference-link', 1]])
   // The promotion the clause is about is visible to the server only as a
   // `figure` in the tree, which is what the caption and crossref features read.
   assert.match(carveToHtml('![alt](a.png)\n^ Caption\n'), /<figure>[\s\S]*<figcaption>Caption<\/figcaption>/)

@@ -6,87 +6,102 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-10-14
+
 ### Fixes
 
+- Footnote navigation, rename, code lenses and highlights work against carve
+  0.1.11, which names a reference's label `label` instead of `id`. Requires
+  `@markup-carve/carve` 0.1.11 or later (#552).
 - `broken-crossref` and other lint diagnostics keep their range after an emoji
-  or other astral character on the line.
+  or other astral character on the line (#549).
 - Headings, folds, inlay hints and semantic tokens now reach blocks inside list
-  items, definitions and footnote bodies; footnote bodies fold.
+  items, definitions and footnote bodies; footnote bodies fold (#547, #549).
 - A heading's section fold and outline range end with the container the
-  heading sits in, and before the next heading's attribute line.
+  heading sits in, and before the next heading's attribute line (#549).
 - Outline symbols span their whole section, so a subheading sits inside its
-  parent's range; the selection range is the heading line at its real length.
+  parent's range; the selection range is the heading line at its real length (#549).
 - Semantic tokens color list and quote markers on every line, the bare `.`
-  marker, and the opener and closer of `::: >` and other `:::` containers.
-- A paragraph that starts with a literal `:::` line (an unquoted fence title)
-  is no longer paired as a container by hints, highlights and linked editing.
+  marker, and the opener and closer of `::: >` and other `:::` containers (#549).
+- A `:::` container whose title is unquoted pairs with its closer, since the
+  engine keeps the container and drops only the invalid metadata (#548, #552).
 - Enter inside a code, raw or comment block no longer inserts a `> `, `| ` or
-  description prefix copied from the block's text.
+  description prefix copied from the block's text (#548).
 - Enter after a colon fence opened on a list item, footnote label or quote line
   now inserts the closer at the container column instead of continuing the
   list or quote; `continuationPrefix` returns the cursor-line lead before the
-  first newline (`> \n> :::`).
+  first newline (`> \n> :::`) (#548).
 - A colon fence opened on a footnote label pairs with its closer at the body
-  indent, and fence columns after an astral character are UTF-16.
-- Tab and Shift+Tab work on items whose marker carries attributes (`-{.c} b`).
+  indent, and fence columns after an astral character are UTF-16 (#548).
+- Tab and Shift+Tab work on items whose marker carries attributes (`-{.c} b`) (#548).
 - The alignment-run padding quick fix edits the reported cell, and the run is
   reported once; table diagnostics read tables from the AST, so fenced, quoted
-  and code-span pipes no longer miscount.
+  and code-span pipes no longer miscount (#548).
 - The missing footnote and link definition quick fixes add a blank line so the
-  definition does not join a trailing paragraph.
+  definition does not join a trailing paragraph (#548).
 - Formatting no longer adds a final newline that would change the render, such
-  as at the end of an unclosed code block.
-
+  as at the end of an unclosed code block (#548).
 - Enter on a `:::` opener that already has its closer no longer inserts a
   second one; an unclosed opener nested in a closed container still gets its
-  own.
+  own (#538).
 - Typing `{{ ` no longer offers attribute completions inside the include
-  directive.
+  directive (#538).
 - A `:::` container inside a block quote (`> ::: note` ... `> :::`) now pairs
   with its closer, so highlight, closer hover, the closing inlay hint and
   linked fence editing work there. A container its quote ended no longer
-  claims a later closer.
+  claims a later closer (#546).
 - Workspace navigation reads the parsed document: references, definitions,
   rename, code lens counts and highlights ignore code, raw blocks, comments and
   code spans, and find headings and captioned figures inside list items,
-  definitions and footnotes.
+  definitions and footnotes (#550).
 - Footnote and link-reference labels are scoped to their own document, so
   renaming one no longer edits other files and another file's definition no
   longer resolves it. Generated heading ids in two files are no longer reported
-  as duplicates.
+  as duplicates (#550).
 - Renaming a generated heading id inside a block quote, list item or footnote
-  writes the `{#id}` line inside that container.
-- Rename refuses an id that `{#id}` cannot hold.
-- Cross-references with non-ASCII ids (`</#Über-uns>`) navigate and complete.
-- Go-to-definition on a collapsed `[Heading][]` jumps to the heading.
+  writes the `{#id}` line inside that container (#550).
+- Rename refuses an id that `{#id}` cannot hold (#550).
+- Cross-references with non-ASCII ids (`</#Über-uns>`) navigate and complete (#550).
+- Go-to-definition on a collapsed `[Heading][]` jumps to the heading (#550).
 - Hover no longer guesses emphasis from slashes or asterisks the parser reads as
-  text, and describes references in footnote bodies and line blocks.
+  text, and describes references in footnote bodies and line blocks (#550).
 - Document links come from the parsed links: parentheses in a destination,
   `ftp:` autolinks and reference definitions in a block quote work, and links
-  inside code are no longer linked.
+  inside code are no longer linked (#550).
 - Semantic span completion offers the `[Tab]{kbd}` form inside a span's
-  attribute block instead of `:kbd[x]` after any colon.
+  attribute block instead of `:kbd[x]` after any colon (#550).
 - Include go-to-definition and path completion skip directives in code,
-  comments and code inside block quotes.
+  comments and code inside block quotes (#550).
+- The bare-marker check no longer treats a tab separator or a mixed-case roman
+  numeral as a list marker, so Enter leaves that paragraph text alone (#462).
+- An ordered list whose delimiter the engine omits reads as the default `.`, so
+  Enter after `1. a` continues it and outdenting keeps the parent's numbering (#512).
 
 ### Improvements
 
+- Enter continues a list: bullets repeat, ordered markers advance in their
+  list's style, a task box restarts unchecked, and Enter on a bare marker ends
+  the list. This works inside quotes, footnote bodies, descriptions and divs (#459, #465).
+- Tab and Shift+Tab indent and outdent list items to the column where Carve
+  nests them (#466).
+- An inlay hint marks a bare list marker on the line being edited (#461).
+- A browser entry exposes the analysis functions without Node imports, for
+  editors that run in the page (#523).
 - Enter after an ordinary line no longer parses the whole document to decide
-  that nothing continues.
-
+  that nothing continues (#553).
 - Semantic tokens stay linear on very long lines, and inlay hints no longer
   re-split the document per heading. Folding, inlay hints, semantic tokens and
-  diagnostics share one parse of an unchanged document.
+  diagnostics share one parse of an unchanged document (#549).
 - On-type continuation: Enter after a code fence opener inserts the matching
   closer; an attributed list item (`-{.c} a`) continues with a plain marker;
   `:: term` and `: def` continue with `: `; and Enter on a content-less `: ` or
   `> ` line removes it, ending the list or one quote level. The new
   `BARE_CONTINUATION_MARKER` export lets a browser host recognize the bare
-  `: ` marker.
+  `: ` marker (#538).
 - Completion offers the placement markers, the extension containers and the
   `>`, `|`, `\` forms after `::: `, code languages and raw formats after a
   fence opener, and matching heading titles as `[Heading][]` after `[` and a
-  character.
+  character (#538).
 
 ## [0.1.10] - 2026-10-08
 
