@@ -1,4 +1,4 @@
-import { carveToCarve, carveToHtml, parse } from '@markup-carve/carve'
+import { carveToHtml, parse } from '@markup-carve/carve'
 import { CodeAction, CodeActionKind, Range, TextEdit } from 'vscode-languageserver-types'
 import { walkNodes } from './ast-walk.js'
 import { tableDisplayWidth } from './table-display-width.js'
@@ -83,7 +83,7 @@ function findTableAlignmentEdits(source: string, firstLine: number, lastLine: nu
     const prefixes = original.map(line => line.text.slice(0, prefixLength))
     if (original.length === 0 || original.some(line => line.text.length < prefixLength)) return false
     const bare = original.map(line => line.text.slice(prefixLength)).join('\n') + '\n'
-    const formatted = alignCanonicalTable(carveToCarve(bare))
+    const formatted = alignCanonicalTable(bare)
     const renderedLines = formatted.replace(/\n$/, '').split('\n')
     const replaced = renderedLines.map((line, index) => prefixes[index] + line +
       (index < renderedLines.length - 1 ? (original[index]?.eol ?? original[0]!.eol) || '\n' : '')).join('')

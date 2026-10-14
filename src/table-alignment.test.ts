@@ -65,6 +65,17 @@ test('keeps a pipe inside inline code in the same cell', () => {
   assert.equal(alignTablesInDocument(aligned), aligned)
 })
 
+test('keeps authored header markers and cell tabs while aligning', () => {
+  const headers = '|= a |= b |\n|:--|--:|\n| c | dd |\n'
+  const alignedHeaders = alignTablesInDocument(headers)
+  assert.match(alignedHeaders, /^\|= a /)
+  assert.equal(carveToHtml(alignedHeaders), carveToHtml(headers))
+  const tab = '|\ta | b |\n| x | longer |\n'
+  const alignedTab = alignTablesInDocument(tab)
+  assert.match(alignedTab, /^\|\ta /)
+  assert.equal(carveToHtml(alignedTab), carveToHtml(tab))
+})
+
 test('aligns a table that begins on a list marker line', () => {
   const source = '- | a | b |\n  | ccc | d |\n'
   const aligned = alignTablesInDocument(source)
