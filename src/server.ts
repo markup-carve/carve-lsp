@@ -185,13 +185,19 @@ connection.onInitialize((params) => {
   }
 })
 
+// A client may refuse a registration; the server keeps serving without it.
+function warnUnregistered(what: string): (error: unknown) => void {
+  return (error) => connection.console.warn(`Could not register ${what}: ${String(error)}`)
+}
+
 connection.onInitialized(() => {
-  void connection.client.register(DidChangeConfigurationNotification.type, undefined)
+  connection.client.register(DidChangeConfigurationNotification.type, undefined)
+    .catch(warnUnregistered('configuration change notifications'))
   const loaded = indexWorkspace(workspaceIndex, workspaceRoots)
   if (loaded.truncated) connection.console.warn(`Carve workspace index stopped at ${loaded.files} files / ${loaded.bytes} bytes.`)
-  void connection.client.register(DidChangeWatchedFilesNotification.type, {
+  connection.client.register(DidChangeWatchedFilesNotification.type, {
     watchers: [{ globPattern: '**/*.crv' }, { globPattern: '**/.carverc.json' }],
-  })
+  }).catch(warnUnregistered('file watchers'))
 })
 
 connection.onDidChangeConfiguration((change) => {

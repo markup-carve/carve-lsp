@@ -14,6 +14,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   a container lead such as `> ` is still inserted at the cursor. On the last
   line of a document there is no next line, so the answer stays one insert at
   the cursor and the client decides where the cursor goes.
+- The server no longer exits when a client refuses a capability registration
+  (`client/registerCapability`). It logs a warning and keeps serving without
+  the configuration notifications or file watchers it asked for.
 
 ## [0.1.11] - 2026-10-14
 
