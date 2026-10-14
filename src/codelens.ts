@@ -2,50 +2,25 @@ import { type CodeLens } from 'vscode-languageserver-types'
 import { scanDocument } from './workspace-index.js'
 
 /**
- * A non-interactive code lens above each footnote definition showing how many
- * times it is referenced in the document. A definition with zero references is
- * dropped by the renderer, so the count doubles as a dead-footnote hint.
+ * A non-interactive code lens above each declaration showing how many times it
+ * is referenced in the document. A footnote with zero references is dropped by
+ * the renderer, so its count doubles as a dead-footnote hint.
  */
 export function codeLenses(source: string): CodeLens[] {
-  const lines = source.split(/\r?\n/)
-
-  // Count references: `[^label]` occurrences that are not a definition (`[^label]:`).
-  const refCounts = new Map<string, number>()
-  lines.forEach((line) => {
-    for (const m of line.matchAll(/\[\^([^\]\s]+)\](?!:)/g)) {
-      refCounts.set(m[1]!, (refCounts.get(m[1]!) ?? 0) + 1)
-    }
-  })
-
-  const lenses: CodeLens[] = []
-  lines.forEach((line, lineNo) => {
-    const def = /^( {0,3})\[\^([^\]\s]+)\]:/.exec(line)
-    if (!def) return
-    const label = def[2]!
-    const count = refCounts.get(label) ?? 0
-    const start = def[1]!.length
-    lenses.push({
-      range: {
-        start: { line: lineNo, character: start },
-        end: { line: lineNo, character: start + label.length + 3 },
-      },
-      command: {
-        title: count === 1 ? '1 reference' : `${count} references`,
-        command: '',
-      },
-    })
-  })
-
   const tokens = scanDocument('file:///document.crv', source)
+  const lenses: CodeLens[] = []
   for (const declaration of tokens) {
-    if (!declaration.declaration || declaration.kind === 'footnote') continue
+    if (!declaration.declaration) continue
     const count = tokens.filter((token) =>
       !token.declaration && token.kind === declaration.kind && token.key === declaration.key).length
-    lenses.push({
-      range: declaration.range,
-      command: { title: count === 1 ? '1 reference' : `${count} references`, command: '' },
-    })
+    // A footnote lens spans the whole `[^label]` marker.
+    const range = declaration.kind === 'footnote'
+      ? {
+          start: { line: declaration.range.start.line, character: declaration.range.start.character - 2 },
+          end: { line: declaration.range.end.line, character: declaration.range.end.character + 1 },
+        }
+      : declaration.range
+    lenses.push({ range, command: { title: count === 1 ? '1 reference' : `${count} references`, command: '' } })
   }
-
   return lenses
 }

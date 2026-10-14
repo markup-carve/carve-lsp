@@ -5,6 +5,7 @@ import {
   type Position as SourcePosition,
 } from '@markup-carve/carve'
 import { smartPunctuationText } from './inline-text.js'
+import { walkNodes } from './ast-walk.js'
 
 /**
  * The captioned hosts a `</#id>` can name, and the text each one resolves to.
@@ -47,7 +48,22 @@ export interface CaptionTarget {
 /** Every captioned host in the document that carries an id, in source order. */
 export function captionTargets(doc: Document): CaptionTarget[] {
   const targets: CaptionTarget[] = []
-  collect(doc.children, targets)
+  const panels = new Set<unknown>()
+  // Every container is walked, list items and footnote bodies included: a
+  // captioned figure there is a crossref target like any other.
+  walkNodes(doc, (node) => {
+    const block = node as unknown as BlockNode
+    if (panels.has(node)) return
+    if (block.type === 'figure_group') {
+      const groupText = captionRefText(block.caption)
+      pushTarget(targets, block, 'composite figure', groupText)
+      collectPanels(block, groupText, targets, panels)
+    } else if (block.type === 'figure') {
+      pushTarget(targets, block, 'figure', captionRefText(block.caption))
+    } else if (block.type === 'table') {
+      pushTarget(targets, block, 'table', captionRefText(block.caption))
+    }
+  })
   return targets
 }
 
@@ -72,32 +88,6 @@ export function panelLetter(index: number): string {
   return out
 }
 
-function collect(nodes: readonly BlockNode[], targets: CaptionTarget[]): void {
-  for (const node of nodes) {
-    if (node.type === 'figure_group') {
-      const groupText = captionRefText(node.caption)
-      pushTarget(targets, node, 'composite figure', groupText)
-      collectPanels(node, groupText, targets)
-      continue
-    }
-    if (node.type === 'figure') {
-      pushTarget(targets, node, 'figure', captionRefText(node.caption))
-    } else if (node.type === 'table') {
-      pushTarget(targets, node, 'table', captionRefText(node.caption))
-    }
-    // The walk continues into every container, because a captioned figure in a
-    // block quote or a list item is a crossref target like any other. A group's
-    // children are walked by collectPanels above instead, which needs the panel
-    // ORDER that this loop does not carry.
-    if ('children' in node && Array.isArray(node.children)) {
-      collect(node.children.filter(isBlockNode), targets)
-    }
-    if (node.type === 'figure' && isBlockNode(node.target)) {
-      collect([node.target], targets)
-    }
-  }
-}
-
 /**
  * A group's panels are its DIRECT `figure` and `table` children, in source
  * order (§4c). Everything else in the body is plain group content: it can still
@@ -108,25 +98,19 @@ function collectPanels(
   group: Extract<BlockNode, { type: 'figure_group' }>,
   groupText: string | null,
   targets: CaptionTarget[],
+  panels: Set<unknown>,
 ): void {
   let panelIndex = 0
   for (const child of group.children) {
-    const isPanel = child.type === 'figure' || child.type === 'table'
-    if (isPanel) {
-      pushTarget(
-        targets,
-        child,
-        'panel',
-        groupText === null ? null : `${groupText}${panelLetter(panelIndex)}`,
-      )
-      panelIndex++
-      if (child.type === 'figure' && isBlockNode(child.target)) collect([child.target], targets)
-      if ('children' in child && Array.isArray(child.children)) {
-        collect(child.children.filter(isBlockNode), targets)
-      }
-      continue
-    }
-    collect([child], targets)
+    if (child.type !== 'figure' && child.type !== 'table') continue
+    panels.add(child)
+    pushTarget(
+      targets,
+      child,
+      'panel',
+      groupText === null ? null : `${groupText}${panelLetter(panelIndex)}`,
+    )
+    panelIndex++
   }
 }
 
@@ -172,8 +156,4 @@ function plainText(nodes: readonly InlineNode[]): string {
     else out += smartPunctuationText(node)
   }
   return out
-}
-
-function isBlockNode(node: unknown): node is BlockNode {
-  return Boolean(node && typeof node === 'object' && 'type' in node)
 }

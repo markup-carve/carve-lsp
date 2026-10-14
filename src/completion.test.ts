@@ -44,7 +44,7 @@ test('completion replaces the typed partial', () => {
 
 test('suggests citation keys, semantic spans, and structural attributes', () => {
   assert.deepEqual(labels('[@doc]: Entry\n\n[@do', 2, 4), ['doc'])
-  assert.ok(labels(':k', 0, 2).includes('kbd'))
+  assert.ok(labels('[Tab]{k', 0, 7).includes('kbd'))
   const attrs = labels('{vali', 0, 5)
   assert.ok(attrs.includes('valign='))
   assert.ok(attrs.includes('valigns='))

@@ -1,65 +1,14 @@
 import { type Position, type Range, type WorkspaceEdit } from 'vscode-languageserver-types'
+import { referenceModel, siteAt, type ReferenceModel, type ReferenceSite } from './reference-sites.js'
 
-type LabelKind = 'footnote' | 'linkref'
-
-interface LabelToken {
-  kind: LabelKind
-  label: string
-  line: number
-  startChar: number
-  endChar: number
+/** Footnote and link-reference labels the parser read, with the range of the label text. */
+function labelSites(model: ReferenceModel): ReferenceSite[] {
+  return model.sites.filter((site) => (site.kind === 'footnote' || site.kind === 'linkref') && site.keyRange !== null)
 }
 
-/**
- * Collect renameable label tokens (footnote labels and link-reference labels)
- * with the source range of the label text itself (excluding brackets).
- */
-function collectTokens(source: string): LabelToken[] {
-  const tokens: LabelToken[] = []
-  const lines = source.split(/\r?\n/)
-
-  lines.forEach((line, lineNo) => {
-    // Footnote references and definitions share the `[^label]` form.
-    for (const m of line.matchAll(/\[\^([^\]\s]+)\]/g)) {
-      const start = m.index! + 2
-      tokens.push({ kind: 'footnote', label: m[1]!, line: lineNo, startChar: start, endChar: start + m[1]!.length })
-    }
-    // Link reference definition at line start: `[label]: url` (not a footnote).
-    const def = /^( {0,3})\[([^\]]+)\]:/.exec(line)
-    if (def && !def[2]!.startsWith('^')) {
-      const start = def[1]!.length + 1
-      tokens.push({ kind: 'linkref', label: def[2]!, line: lineNo, startChar: start, endChar: start + def[2]!.length })
-    }
-    // Link reference use: `][label]` (collapsed or full reference link).
-    // Labels may contain spaces (`[text][my label]`); `^`-prefixed is a footnote.
-    for (const m of line.matchAll(/\]\[([^\]]+)\]/g)) {
-      if (m[1]!.startsWith('^')) continue
-      const start = m.index! + 2
-      tokens.push({ kind: 'linkref', label: m[1]!, line: lineNo, startChar: start, endChar: start + m[1]!.length })
-    }
-  })
-
-  return tokens
-}
-
-function tokenAt(source: string, position: Position): LabelToken | null {
-  for (const token of collectTokens(source)) {
-    if (
-      token.line === position.line &&
-      position.character >= token.startChar &&
-      position.character <= token.endChar
-    ) {
-      return token
-    }
-  }
-  return null
-}
-
-function tokenRange(token: LabelToken): Range {
-  return {
-    start: { line: token.line, character: token.startChar },
-    end: { line: token.line, character: token.endChar },
-  }
+function labelAt(model: ReferenceModel, position: Position): ReferenceSite | null {
+  const site = siteAt(model, position, (candidate) => (candidate.kind === 'footnote' || candidate.kind === 'linkref') && candidate.keyRange !== null)
+  return site && contains(site.keyRange!, position) ? site : null
 }
 
 /** Validate the cursor sits on a renameable label; return its range + text. */
@@ -67,8 +16,12 @@ export function prepareRename(
   source: string,
   position: Position,
 ): { range: Range; placeholder: string } | null {
-  const token = tokenAt(source, position)
-  return token ? { range: tokenRange(token), placeholder: token.label } : null
+  const model = referenceModel(source)
+  const site = labelAt(model, position)
+  if (!site) return null
+  const range = site.keyRange!
+  const line = model.lines[range.start.line] ?? ''
+  return { range, placeholder: line.slice(range.start.character, range.end.character) }
 }
 
 /** Rename every occurrence of the label under the cursor (within its kind). */
@@ -78,15 +31,21 @@ export function renameEdits(
   position: Position,
   newName: string,
 ): WorkspaceEdit | null {
-  const target = tokenAt(source, position)
+  const model = referenceModel(source)
+  const target = labelAt(model, position)
   if (!target) return null
   const trimmed = newName.trim()
-  // Labels cannot contain brackets or whitespace.
+  // Labels cannot contain brackets or whitespace, and a link label cannot open like a footnote or citation.
   if (trimmed === '' || /[[\]\s]/.test(trimmed)) return null
+  if (target.kind === 'linkref' && /^[@^]/.test(trimmed)) return null
 
-  const edits = collectTokens(source)
-    .filter((token) => token.kind === target.kind && token.label === target.label)
-    .map((token) => ({ range: tokenRange(token), newText: trimmed }))
+  const edits = labelSites(model)
+    .filter((site) => site.kind === target.kind && site.key === target.key)
+    .map((site) => ({ range: site.keyRange!, newText: trimmed }))
 
   return { changes: { [uri]: edits } }
+}
+
+function contains(range: Range, position: Position): boolean {
+  return position.line === range.start.line && position.character >= range.start.character && position.character <= range.end.character
 }

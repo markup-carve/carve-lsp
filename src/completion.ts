@@ -3,8 +3,9 @@ import {
   type CompletionItem,
   type Position,
 } from 'vscode-languageserver-types'
-import { parse, resolve, type BlockNode, type Document } from '@markup-carve/carve'
+import { parse, resolve, type Document } from '@markup-carve/carve'
 import { captionTargets, type CaptionTarget } from './captions.js'
+import { walkNodes } from './ast-walk.js'
 import type { IndexedToken } from './workspace-index.js'
 
 /** The eight canonical admonition kinds (grammar PART 9 §12, Tier 1). */
@@ -38,6 +39,14 @@ const CODE_LANGUAGES = ['bash', 'c', 'carve', 'cpp', 'csharp', 'css', 'diff', 'g
 /** Languages an extension renders instead of printing as code. */
 const RENDERED_LANGUAGES = ['math', 'mermaid', 'svg']
 const RAW_FORMATS = ['=html', '=latex']
+
+/** Semantic span names: core `kbd`, `abbr`, `time`; the rest need the SemanticSpan extension. */
+const SEMANTIC_SPANS = [
+  { name: 'kbd', detail: 'Semantic span' },
+  { name: 'abbr=', detail: 'Semantic span' },
+  { name: 'time=', detail: 'Semantic span' },
+  ...['samp', 'var', 'cite', 'dfn'].map((name) => ({ name, detail: 'Semantic span (SemanticSpan extension)' })),
+]
 
 /**
  * Context-aware completions driven by the text immediately before the cursor:
@@ -77,7 +86,7 @@ export function completionAt(source: string, position: Position, context: Comple
       ...RAW_FORMATS.map((format) => completion(format, CompletionItemKind.Value, partial, position, 'Raw format')),
     ]
   }
-  if ((match = /<\/#([\w-]*)$/.exec(prefix))) {
+  if ((match = /<\/#([^\s>]*)$/u.exec(prefix))) {
     // A crossref reaches a captioned host as well as a heading (PART 9R R4).
     // Offering only heading ids said the others were not targets, which is the
     // reading that made a `</#fig>` naming a figure look like a typo.
@@ -136,12 +145,14 @@ export function completionAt(source: string, position: Position, context: Comple
   if ((match = /\{(?:[^}\n]*\s)?([#.]?[\w-]*)$/.exec(prefix))) {
     const attributes = ['#id', '.class', 'align=', 'valign=', 'width=', 'aligns=', 'valigns=', 'widths=',
       'header-rows=', 'header-cols=', 'footer-rows=', 'start=', 'type=', 'title=', 'label=']
-    return attributes.map((attribute) =>
-      completion(attribute, CompletionItemKind.Property, match![1], position, 'Carve attribute'))
-  }
-  if ((match = /:(\w*)$/.exec(prefix))) {
-    return ['abbr', 'time', 'kbd', 'samp', 'var', 'cite', 'dfn'].map((name) =>
-      completion(name, CompletionItemKind.TypeParameter, match![1], position, 'Semantic span'))
+    // A semantic span is a span's attribute block, `[Tab]{kbd}`.
+    const span = prefix[prefix.lastIndexOf('{') - 1] === ']' && !/^[#.]/.test(match[1]!)
+    return [
+      ...(span ? SEMANTIC_SPANS.map(({ name, detail }) =>
+        completion(name, CompletionItemKind.TypeParameter, match![1], position, detail)) : []),
+      ...attributes.map((attribute) =>
+        completion(attribute, CompletionItemKind.Property, match![1], position, 'Carve attribute')),
+    ]
   }
   return []
 }
@@ -205,7 +216,9 @@ function headingTitles(source: string): string[] {
     ? nodes.map((node: { value?: unknown; children?: unknown; type?: string }) => node.type === 'soft_break' ? ' ' : typeof node.value === 'string' ? node.value : text(node.children)).join('')
     : ''
   try {
-    walkBlocks(parse(source).children, (node) => {
+    // The implicit `[Heading][]` index declines headings under a block quote (PART 9R R1).
+    walkNodes(parse(source), (node) => {
+      if (node.type === 'block_quote') return false
       if (node.type === 'heading') titles.push(text(node.children).trim())
     })
   } catch {
@@ -217,9 +230,9 @@ function headingTitles(source: string): string[] {
 function headingIds(source: string): string[] {
   const ids: string[] = []
   try {
-    const doc = resolve(parse(source))
-    walkBlocks(doc.children, (node) => {
-      if (node.type === 'heading' && node.attrs?.id) ids.push(node.attrs.id)
+    walkNodes(resolve(parse(source)), (node) => {
+      const id = (node.attrs as { id?: string } | undefined)?.id
+      if (node.type === 'heading' && id) ids.push(id)
     })
   } catch {
     // Parsing may fail mid-edit; offer no ids rather than throwing.
@@ -281,17 +294,4 @@ function citationLabels(source: string): string[] {
     if (match) labels.add(match[1]!)
   }
   return [...labels]
-}
-
-function walkBlocks(nodes: BlockNode[], visit: (node: BlockNode) => void): void {
-  for (const node of nodes) {
-    visit(node)
-    if ('children' in node && Array.isArray(node.children)) {
-      walkBlocks(node.children.filter(isBlockNode), visit)
-    }
-  }
-}
-
-function isBlockNode(node: unknown): node is BlockNode {
-  return Boolean(node && typeof node === 'object' && 'type' in node)
 }

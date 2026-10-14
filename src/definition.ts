@@ -1,11 +1,13 @@
 import { type Location, type Position } from 'vscode-languageserver-types'
-import { parse, resolve, type BlockNode, type Document, type InlineNode } from '@markup-carve/carve'
+import { resolve, type Document, type InlineNode } from '@markup-carve/carve'
 import { astColumnToCharacter, sourceLines } from './position.js'
 import { smartPunctuationText } from './inline-text.js'
 import { captionTargetById } from './captions.js'
 import { includeDefinitionAt } from './include-definition.js'
 import { resolveIncludes, type IncludeOptions } from './includes.js'
 import { portableIncludePaths } from './include-paths.js'
+import { walkNodes } from './ast-walk.js'
+import { implicitKey, inVerbatim, referenceModel, siteAt, type ReferenceModel } from './reference-sites.js'
 
 /**
  * Go-to-definition for Carve constructs:
@@ -15,6 +17,7 @@ import { portableIncludePaths } from './include-paths.js'
  * - Fragment link    `[text](#id)`     -> same (href starts with `#`)
  * - Footnote ref     `[^name]`         -> the `[^name]:` definition line
  * - Link reference   `[text][ref]`     -> the `[ref]:` definition line
+ * - Collapsed ref    `[Heading][]`     -> the heading, when no `[Heading]:` is defined
  * - Citation         `[@key]`          -> the `[@key]:` definition line
  * - Wikilink         `[[Page]]`        -> heading whose text matches Page (best-effort)
  */
@@ -26,31 +29,41 @@ export function definitionAt(
 ): Location | null {
   const included = includeDefinitionAt(source, position, includes)
   if (included) return included
-  const lines = source.replace(/\r\n?/g, '\n').split('\n')
+  const model = referenceModel(source)
+  const lines = model.lines
   const line = lines[position.line] ?? ''
+  if (inVerbatim(model, model.offsetAt(position))) return null
 
   // 1. Citation [@key] - check before link-ref so `[@foo]` doesn't match as link-ref
-  const citationTarget = resolveCitationAt(lines, line, position)
+  const citationTarget = resolveCitationAt(model, line, position)
   if (citationTarget !== null) return locationAtLine(uri, citationTarget)
 
-  // 2. Cross-reference </#id> or fragment link [text](#id)
-  const crossrefTarget = resolveCrossrefAt(uri, source, line, position)
-  if (crossrefTarget !== null) return crossrefTarget
-
-  // 2b. The same reference, satisfied by a heading an include contributed.
-  const acrossSeam = resolveCrossrefAcrossSeam(source, line, position, includes)
-  if (acrossSeam !== null) return acrossSeam
+  // 2. Cross-reference </#id>, fragment link [text](#id), or a collapsed
+  //    [Heading][] with no matching definition
+  const crossref = siteAt(model, position, (site) => site.kind === 'heading' && !site.declaration)
+  if (crossref) {
+    const local = crossref.implicit ? headingLocation(uri, source, model, crossref.key, crossref.label) : findHeadingById(uri, source, model, crossref.key)
+    if (local) return local
+    // 2b. The same reference, satisfied by a heading an include contributed.
+    return resolveCrossrefAcrossSeam(source, crossref.key, includes)
+  }
 
   // 3. Footnote reference [^name]
-  const footnoteTarget = resolveFootnoteAt(lines, line, position)
-  if (footnoteTarget !== null) return locationAtLine(uri, footnoteTarget)
+  const footnote = siteAt(model, position, (site) => site.kind === 'footnote')
+  if (footnote) {
+    const target = model.sites.find((site) => site.kind === 'footnote' && site.declaration && site.key === footnote.key)
+    return target ? locationAtLine(uri, target.range.start.line) : null
+  }
 
   // 4. Link reference [text][ref] or collapsed [ref][]
-  const linkrefTarget = resolveLinkrefAt(lines, line, position)
-  if (linkrefTarget !== null) return locationAtLine(uri, linkrefTarget)
+  const linkref = siteAt(model, position, (site) => site.kind === 'linkref' && !site.declaration)
+  if (linkref) {
+    const target = model.sites.find((site) => site.kind === 'linkref' && site.declaration && site.key === linkref.key)
+    return target ? locationAtLine(uri, target.range.start.line) : null
+  }
 
-  // 5. Wikilink [[Page]]
-  const wikilinkTarget = resolveWikilinkAt(uri, source, line, position)
+  // 5. Wikilink [[Page]] (the Wikilinks extension)
+  const wikilinkTarget = resolveWikilinkAt(uri, source, model, line, position)
   if (wikilinkTarget !== null) return wikilinkTarget
 
   return null
@@ -60,7 +73,8 @@ export function definitionAt(
 // Citation: [@key] or [text; @key] -- navigate to the [@key]: definition line
 // ---------------------------------------------------------------------------
 
-function resolveCitationAt(lines: string[], line: string, position: Position): number | null {
+function resolveCitationAt(model: ReferenceModel, line: string, position: Position): number | null {
+  const lines = model.lines
   // Find all citation groups on the line: [...@key...]
   // A citation key appears after @ inside [...]
   const citationGroupRe = /\[([^\]]*@[^\]]*)\]/g
@@ -71,7 +85,7 @@ function resolveCitationAt(lines: string[], line: string, position: Position): n
     // Extract the key that the cursor is on
     const inner = m[1]!
     // Keys: @key tokens separated by ; optionally prefixed with +/-
-    const keyRe = /-?@([A-Za-z0-9_.:-]+)/g
+    const keyRe = /-?@([\p{L}\p{N}_.:+-]+)/gu
     for (const km of inner.matchAll(keyRe)) {
       // offset of key label relative to full match
       const keyAbsStart = start + 1 + km.index! + 1 // skip '[' then '-?' then '@'
@@ -79,16 +93,19 @@ function resolveCitationAt(lines: string[], line: string, position: Position): n
       if (position.character < start + 1 + km.index! || position.character > keyAbsEnd) continue
       const key = km[1]!
       // Find [@key]: definition line
-      return findCitationDef(lines, key)
+      return findCitationDef(model, lines, key)
     }
   }
   return null
 }
 
-function findCitationDef(lines: string[], key: string): number | null {
-  const defRe = new RegExp(`^\\[@${escapeRegExp(key)}\\]:`)
+function findCitationDef(model: ReferenceModel, lines: string[], key: string): number | null {
+  const defRe = new RegExp(`^ {0,3}\\[@${escapeRegExp(key)}\\]:`)
+  let offset = 0
   for (let i = 0; i < lines.length; i++) {
-    if (defRe.test(lines[i]!)) return i
+    const line = lines[i]!
+    if (defRe.test(line) && !inVerbatim(model, offset + line.indexOf('['))) return i
+    offset += line.length + 1
   }
   return null
 }
@@ -96,28 +113,6 @@ function findCitationDef(lines: string[], key: string): number | null {
 // ---------------------------------------------------------------------------
 // Cross-reference: </#id> or [text](#id) -> heading
 // ---------------------------------------------------------------------------
-
-function resolveCrossrefAt(uri: string, source: string, line: string, position: Position): Location | null {
-  // Pattern 1: </#id>
-  const crossrefRe = /<\/#([A-Za-z0-9_.:-]+)>/g
-  for (const m of line.matchAll(crossrefRe)) {
-    const start = m.index!
-    const end = start + m[0].length
-    if (position.character < start || position.character >= end) continue
-    return findHeadingById(uri, source, m[1]!)
-  }
-
-  // Pattern 2: [text](#id) - inline link to a fragment
-  const fragLinkRe = /\[[^\]]*\]\(#([A-Za-z0-9_.:-]+)[^)]*\)/g
-  for (const m of line.matchAll(fragLinkRe)) {
-    const start = m.index!
-    const end = start + m[0].length
-    if (position.character < start || position.character >= end) continue
-    return findHeadingById(uri, source, m[1]!)
-  }
-
-  return null
-}
 
 /**
  * A crossref whose target an INCLUDE contributes.
@@ -135,13 +130,10 @@ function resolveCrossrefAt(uri: string, source: string, line: string, position: 
  */
 function resolveCrossrefAcrossSeam(
   source: string,
-  line: string,
-  position: Position,
+  targetId: string,
   includes: IncludeOptions | undefined,
 ): Location | null {
   if (!includes?.resolver) return null
-  const targetId = crossrefIdAt(line, position)
-  if (targetId === null) return null
 
   const resolution = resolveIncludes(source, includes)
   if (!resolution.expanded) return null
@@ -159,7 +151,7 @@ function resolveCrossrefAcrossSeam(
   // open document already. An include seam that resolved only headings would
   // make the target model depend on which file the host sits in.
   const pos =
-    findHeadingWithId(merged.children, targetId)?.pos ??
+    findHeadingWithId(merged, targetId)?.pos ??
     captionTargetById(merged, targetId)?.pos
   if (!pos || pos.file === undefined) return null
 
@@ -182,35 +174,25 @@ function resolveCrossrefAcrossSeam(
   }
 }
 
-/** The crossref id the cursor sits on, in either spelling. */
-function crossrefIdAt(line: string, position: Position): string | null {
-  for (const re of [/<\/#([A-Za-z0-9_.:-]+)>/g, /\[[^\]]*\]\(#([A-Za-z0-9_.:-]+)[^)]*\)/g]) {
-    for (const m of line.matchAll(re)) {
-      const start = m.index!
-      if (position.character < start || position.character >= start + m[0].length) continue
-      return m[1]!
-    }
-  }
-  return null
-}
-
-function findHeadingById(uri: string, source: string, targetId: string): Location | null {
-  let doc: Document
-  try {
-    doc = resolve(parse(source, { positions: true }))
-  } catch {
-    return null
-  }
-
-  const heading = findHeadingWithId(doc.children, targetId)
-  if (!heading || !heading.pos) {
+function findHeadingById(uri: string, source: string, model: ReferenceModel, targetId: string): Location | null {
+  const doc = model.doc
+  if (!doc) return null
+  const heading = headingLocation(uri, source, model, targetId)
+  if (!heading) {
     // A crossref reaches a CAPTIONED HOST as well - a figure, a table, a
     // composite figure or one of its panels (PART 9R R4). Only headings were
     // searched here, so `</#fig>` jumped nowhere on a construct that predates
     // composite figures entirely.
     return findCaptionById(uri, doc, targetId)
   }
+  return heading
+}
 
+/** `text`, when given, is a collapsed reference's label, which must spell the heading's text exactly. */
+function headingLocation(uri: string, source: string, model: ReferenceModel, targetId: string, text?: string): Location | null {
+  const heading = model.doc ? findHeadingWithId(model.doc, targetId) : null
+  if (!heading?.pos) return null
+  if (text !== undefined && implicitKey(headingPlainText(heading.children)) !== implicitKey(text)) return null
   const line = heading.pos.startLine - 1
   return {
     uri,
@@ -242,123 +224,41 @@ function findCaptionById(uri: string, doc: Document, targetId: string): Location
   return locationAtLine(uri, target.pos.startLine - 1)
 }
 
-function findHeadingWithId(
-  nodes: BlockNode[],
-  targetId: string,
-): import('@markup-carve/carve').Heading | null {
-  for (const node of nodes) {
-    if (node.type === 'heading') {
-      const headingId = node.attrs?.id
-      if (headingId === targetId) return node
-    }
-    if ('children' in node && Array.isArray(node.children)) {
-      const found = findHeadingWithId(
-        (node.children as BlockNode[]).filter(isBlockNode),
-        targetId,
-      )
-      if (found) return found
-    }
-  }
-  return null
+type Heading = import('@markup-carve/carve').Heading
+
+/** The first heading anywhere in the document - list items and footnote bodies included - that matches. */
+function findHeading(doc: Document, matches: (heading: Heading) => boolean): Heading | null {
+  let found: Heading | null = null
+  walkNodes(doc, (node) => {
+    if (found) return false
+    if (node.type === 'heading' && matches(node as unknown as Heading)) found = node as unknown as Heading
+  })
+  return found
 }
 
-function isBlockNode(node: unknown): node is BlockNode {
-  return Boolean(node && typeof node === 'object' && 'type' in node)
-}
-
-// ---------------------------------------------------------------------------
-// Footnote reference [^name] -> definition line [^name]: ...
-// ---------------------------------------------------------------------------
-
-function resolveFootnoteAt(lines: string[], line: string, position: Position): number | null {
-  const fnRefRe = /\[\^([^\]\s]+)\]/g
-  for (const m of line.matchAll(fnRefRe)) {
-    const start = m.index!
-    const end = start + m[0].length
-    if (position.character < start || position.character >= end) continue
-    const label = m[1]!
-    // Find the definition (starts at line beginning: [^label]: ...)
-    return findFootnoteDef(lines, label)
-  }
-  return null
-}
-
-function findFootnoteDef(lines: string[], label: string): number | null {
-  const defRe = new RegExp(`^\\[\\^${escapeRegExp(label)}\\]:`)
-  for (let i = 0; i < lines.length; i++) {
-    if (defRe.test(lines[i]!)) return i
-  }
-  return null
-}
-
-// ---------------------------------------------------------------------------
-// Link reference [text][ref] or [ref][] -> definition line [ref]: url
-// ---------------------------------------------------------------------------
-
-function resolveLinkrefAt(lines: string[], line: string, position: Position): number | null {
-  // Match ][label] (full reference) or ][](collapsed) — exclude footnotes
-  const fullRefRe = /\]\[([^\]^][^\]]*)\]/g
-  for (const m of line.matchAll(fullRefRe)) {
-    // cursor is on the label portion (after `][`)
-    const labelStart = m.index! + 2
-    const labelEnd = labelStart + m[1]!.length
-    if (position.character < labelStart || position.character > labelEnd) continue
-    const label = m[1]!
-    return findLinkrefDef(lines, label)
-  }
-
-  // Collapsed reference: [ref][] — cursor on first bracket group
-  const collapsedRe = /\[([^\]^][^\]]*)\]\[\]/g
-  for (const m of line.matchAll(collapsedRe)) {
-    const labelStart = m.index! + 1
-    const labelEnd = labelStart + m[1]!.length
-    if (position.character < labelStart || position.character > labelEnd) continue
-    const label = m[1]!
-    return findLinkrefDef(lines, label)
-  }
-
-  return null
-}
-
-function findLinkrefDef(lines: string[], label: string): number | null {
-  const normalized = label.replace(/\s+/g, ' ').trim()
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!
-    // Definition: [label]: url at line start (up to 3 leading spaces)
-    const defMatch = /^( {0,3})\[([^\]]+)\]:/.exec(line)
-    if (defMatch && !defMatch[2]!.startsWith('^')) {
-      const defLabel = defMatch[2]!.replace(/\s+/g, ' ').trim()
-      if (defLabel === normalized) return i
-    }
-  }
-  return null
+function findHeadingWithId(doc: Document, targetId: string): Heading | null {
+  return findHeading(doc, (heading) => heading.attrs?.id === targetId)
 }
 
 // ---------------------------------------------------------------------------
 // Wikilink [[Page]] -> heading whose text matches Page
 // ---------------------------------------------------------------------------
 
-function resolveWikilinkAt(uri: string, source: string, line: string, position: Position): Location | null {
+function resolveWikilinkAt(uri: string, source: string, model: ReferenceModel, line: string, position: Position): Location | null {
   const wikilinkRe = /\[\[([^\]|#]+?)(?:[|#][^\]]*)?]]/g
   for (const m of line.matchAll(wikilinkRe)) {
     const start = m.index!
     const end = start + m[0].length
     if (position.character < start || position.character >= end) continue
     const page = m[1]!.trim()
-    return findHeadingByText(uri, source, page)
+    return findHeadingByText(uri, source, model, page)
   }
   return null
 }
 
-function findHeadingByText(uri: string, source: string, text: string): Location | null {
-  let doc: Document
-  try {
-    doc = resolve(parse(source))
-  } catch {
-    return null
-  }
-
-  const heading = findHeadingWithText(doc.children, text)
+function findHeadingByText(uri: string, source: string, model: ReferenceModel, text: string): Location | null {
+  if (!model.doc) return null
+  const heading = findHeading(model.doc, (candidate) => headingPlainText(candidate.children) === text)
   if (!heading || !heading.pos) return null
 
   const line = heading.pos.startLine - 1
@@ -393,26 +293,6 @@ function headingPlainText(nodes: InlineNode[]): string {
     else out += smartPunctuationText(node)
   }
   return out.trim()
-}
-
-function findHeadingWithText(
-  nodes: BlockNode[],
-  targetText: string,
-): import('@markup-carve/carve').Heading | null {
-  for (const node of nodes) {
-    if (node.type === 'heading') {
-      const text = headingPlainText(node.children)
-      if (text === targetText) return node
-    }
-    if ('children' in node && Array.isArray(node.children)) {
-      const found = findHeadingWithText(
-        (node.children as BlockNode[]).filter(isBlockNode),
-        targetText,
-      )
-      if (found) return found
-    }
-  }
-  return null
 }
 
 // ---------------------------------------------------------------------------

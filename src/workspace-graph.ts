@@ -32,7 +32,7 @@ export function workspaceGraph(index: WorkspaceIndex): WorkspaceGraphSnapshot {
 
   for (const document of documents) {
     for (const token of document.tokens.filter((item) => !item.declaration)) {
-      const definition = index.definitions(token.kind, token.key)[0]
+      const definition = index.definitions(token.kind, token.key, document.uri)[0]
       edges.push({
         kind: token.kind === 'citation' ? 'citation' : 'reference',
         from: document.uri,

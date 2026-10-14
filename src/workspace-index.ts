@@ -9,7 +9,7 @@ import {
   type TextEdit,
   type WorkspaceEdit,
 } from 'vscode-languageserver-types'
-import { parse, resolve, type BlockNode, type InlineNode } from '@markup-carve/carve'
+import { inVerbatim, referenceModel } from './reference-sites.js'
 
 export type IndexedKind = 'heading' | 'caption' | 'footnote' | 'linkref' | 'citation'
 
@@ -21,6 +21,8 @@ export interface IndexedToken {
   declaration: boolean
   /** A parser-derived heading id which has no authored identifier to replace. */
   generated?: boolean
+  /** Text before a generated heading's `#`, i.e. its container prefix. */
+  prefix?: string
   label?: string
 }
 
@@ -80,13 +82,14 @@ export class WorkspaceIndex {
     return candidates[0] ?? null
   }
 
-  definitions(kind: IndexedKind, key: string): IndexedToken[] {
-    return this.tokens().filter((token) => token.declaration && sameIdentity(token, kind, key))
+  /** `from` scopes the file-local namespaces (footnotes, link references) to one document. */
+  definitions(kind: IndexedKind, key: string, from?: string): IndexedToken[] {
+    return this.tokens().filter((token) => token.declaration && sameIdentity(token, kind, key, from))
   }
 
-  references(kind: IndexedKind, key: string, includeDeclaration = false): Location[] {
+  references(kind: IndexedKind, key: string, includeDeclaration = false, from?: string): Location[] {
     return this.tokens()
-      .filter((token) => (includeDeclaration || !token.declaration) && sameIdentity(token, kind, key))
+      .filter((token) => (includeDeclaration || !token.declaration) && sameIdentity(token, kind, key, from))
       .map(({ uri, range }) => ({ uri, range }))
   }
 
@@ -106,7 +109,7 @@ export class WorkspaceIndex {
     const diagnostics: Diagnostic[] = []
     const tokens = this.tokens(uri)
     for (const token of tokens) {
-      if (!token.declaration && this.definitions(token.kind, token.key).length === 0) {
+      if (!token.declaration && this.definitions(token.kind, token.key, uri).length === 0) {
         diagnostics.push({
           range: token.range,
           severity: DiagnosticSeverity.Warning,
@@ -115,8 +118,9 @@ export class WorkspaceIndex {
           message: `No ${token.kind} declaration named ${JSON.stringify(token.key)} exists in the workspace.`,
         })
       }
-      if (token.declaration) {
-        const declarations = this.definitions(token.kind, token.key)
+      // A generated id is disambiguated by the parser and never reported as a collision.
+      if (token.declaration && !token.generated) {
+        const declarations = this.definitions(token.kind, token.key, uri).filter((declaration) => !declaration.generated)
         const first = declarations[0]
         if (declarations.length > 1 && first && (first.uri !== token.uri || first.range.start.line !== token.range.start.line)) {
           diagnostics.push({
@@ -138,12 +142,12 @@ export class WorkspaceIndex {
     if (!target || !isValidName(target.kind, newName)) return null
     const edits = new Map<string, TextEdit[]>()
     for (const token of this.tokens()) {
-      if (!sameIdentity(token, target.kind, target.key)) continue
+      if (!sameIdentity(token, target.kind, target.key, uri)) continue
       const entries = edits.get(token.uri) ?? []
       entries.push(token.generated && token.declaration
         ? {
-            range: { start: { line: token.range.start.line, character: 0 }, end: { line: token.range.start.line, character: 0 } },
-            newText: `{#${newName}}\n`,
+            range: { start: { line: token.range.start.line, character: (token.prefix ?? '').length }, end: { line: token.range.start.line, character: (token.prefix ?? '').length } },
+            newText: `{#${newName}}\n${continuation(token.prefix ?? '')}`,
           }
         : { range: token.range, newText: newName })
       edits.set(token.uri, entries)
@@ -153,94 +157,39 @@ export class WorkspaceIndex {
 }
 
 export function scanDocument(uri: string, source: string): IndexedToken[] {
+  const model = referenceModel(source)
   const tokens: IndexedToken[] = []
-  const lines = source.replace(/\r\n?/g, '\n').split('\n')
+  for (const site of model.sites) {
+    if (site.implicit) continue
+    const range = site.keyRange ?? (site.generated ? site.range : null)
+    if (!range) continue
+    const token: IndexedToken = { kind: site.kind, key: site.key, uri, declaration: site.declaration, range }
+    if (site.generated) token.generated = true
+    if (site.prefix) token.prefix = site.prefix
+    if (site.kind === 'heading' && site.declaration && site.label) token.label = site.label
+    tokens.push(token)
+  }
+  // Citations are an extension the core parser does not build, so they are
+  // read from the text outside verbatim content.
+  const { lines } = model
+  let offset = 0
   for (let line = 0; line < lines.length; line += 1) {
-    const text = lines[line]!
-
-    const heading = /^(#{1,6}) (.*)$/.exec(text)
-    if (heading) {
-      const explicit = /\{#([^\s}]+)(?:\s[^}]*)?\}\s*$/.exec(heading[2]!)
-      if (explicit) push(tokens, uri, 'heading', explicit[1]!, line, text.indexOf(explicit[1]!), true)
-    }
-
-    const attributed = /^\{[^}]*#([^\s}]+)[^}]*\}\s*$/.exec(text)
-    if (attributed) {
-      const next = lines[line + 1] ?? ''
-      const kind: IndexedKind = /^#{1,6} /.test(next) ? 'heading' : 'caption'
-      push(tokens, uri, kind, attributed[1]!, line, text.indexOf(attributed[1]!), true)
-    }
-
-    const footnoteDef = /^(?: {0,3})\[\^([^\]]+)\]:/.exec(text)
-    if (footnoteDef) push(tokens, uri, 'footnote', footnoteDef[1]!, line, text.indexOf(footnoteDef[1]!), true)
-    const citationDef = /^(?: {0,3})\[@([^\]]+)\]:/.exec(text)
-    if (citationDef) push(tokens, uri, 'citation', citationDef[1]!, line, text.indexOf(citationDef[1]!), true)
-    const linkDef = /^(?: {0,3})\[([^\]^@][^\]]*)\]:/.exec(text)
-    if (linkDef) push(tokens, uri, 'linkref', linkDef[1]!, line, text.indexOf(linkDef[1]!), true)
-
-    for (const match of text.matchAll(/<\/#([^>\s]+)>|\]\(#([^\s)]+)\)/g)) {
-      const key = match[1] ?? match[2]!
-      const start = match.index! + match[0].indexOf(key)
-      push(tokens, uri, 'heading', key, line, start, false)
-    }
-    for (const match of text.matchAll(/\[\^([^\]]+)\](?!:)/g)) {
-      push(tokens, uri, 'footnote', match[1]!, line, match.index! + 2, false)
-    }
-    for (const match of text.matchAll(/\]\[([^\]]+)\]/g)) {
-      if (match[1] === '' || match[1]!.startsWith('^') || match[1]!.startsWith('@')) continue
-      push(tokens, uri, 'linkref', match[1]!, line, match.index! + 2, false)
-    }
-    for (const group of text.matchAll(/\[([^\]]*@[^^\]]+)\]/g)) {
-      if (citationDef && group.index === text.indexOf(`[@${citationDef[1]}]`)) continue
+    const lineText = lines[line]!
+    const lineStart = offset
+    offset += lineText.length + 1
+    const skip = (character: number): boolean => inVerbatim(model, lineStart + character)
+    const citationDef = /^(?: {0,3})\[@([^\]]+)\]:/.exec(lineText)
+    if (citationDef && !skip(lineText.indexOf('[@'))) push(tokens, uri, 'citation', citationDef[1]!, line, lineText.indexOf(citationDef[1]!), true)
+    for (const group of lineText.matchAll(/\[([^[\]]*@[^^[\]]+)\]/g)) {
+      if (citationDef && group.index === lineText.indexOf(`[@${citationDef[1]}]`)) continue
       for (const cite of group[1]!.matchAll(/@([\p{L}\p{N}_:.+-]+)/gu)) {
-        push(tokens, uri, 'citation', cite[1]!, line, group.index! + 1 + cite.index! + 1, false)
+        const character = group.index! + 1 + cite.index! + 1
+        if (!skip(character)) push(tokens, uri, 'citation', cite[1]!, line, character, false)
       }
     }
   }
-  // Generated heading ids come from the resolver, which is authoritative for
-  // Unicode, inline markup, and duplicate suffixes. The lexical inventory
-  // above remains available when a document is temporarily malformed.
-  try {
-    const document = resolve(parse(source, { positions: true }))
-    walkBlocks(document.children, (node) => {
-      if (node.type !== 'heading' || !node.pos || !node.attrs?.id) return
-      const line = node.pos.startLine - 1
-      const alreadyAuthored = tokens.some((token) =>
-        token.declaration && anchorKind(token.kind) && token.key === node.attrs?.id &&
-        (token.range.start.line === line || token.range.start.line === line - 1))
-      if (alreadyAuthored) return
-      const lineText = lines[line] ?? ''
-      const start = Math.min(lineText.length, /^#{1,6}\s+/.exec(lineText)?.[0].length ?? 0)
-      tokens.push({
-        kind: 'heading', key: node.attrs.id, uri, declaration: true, generated: true,
-        label: inlineText(node.children) || node.attrs.id,
-        range: { start: { line, character: start }, end: { line, character: lineText.length } },
-      })
-    })
-  } catch {
-    // Keep tolerant lexical results while the edit is broken.
-  }
+  tokens.sort((a, b) => a.range.start.line - b.range.start.line || a.range.start.character - b.range.start.character)
   return dedupe(tokens)
-}
-
-function walkBlocks(nodes: BlockNode[], visit: (node: BlockNode) => void): void {
-  for (const node of nodes) {
-    visit(node)
-    if ('children' in node && Array.isArray(node.children)) {
-      walkBlocks(node.children.filter((child): child is BlockNode =>
-        Boolean(child && typeof child === 'object' && 'type' in child && !inlineKinds.has((child as { type: string }).type))), visit)
-    }
-  }
-}
-
-const inlineKinds = new Set(['text', 'softbreak', 'linebreak', 'emph', 'strong', 'underline', 'strikethrough', 'highlight', 'superscript', 'subscript', 'code', 'verbatim', 'math', 'link', 'image', 'crossref', 'footnote', 'citation', 'symbol', 'smart', 'span'])
-
-function inlineText(nodes: InlineNode[]): string {
-  return nodes.map((node) => {
-    if ('value' in node && typeof node.value === 'string') return node.value
-    if ('children' in node && Array.isArray(node.children)) return inlineText(node.children as InlineNode[])
-    return ''
-  }).join('').trim()
 }
 
 function push(
@@ -269,9 +218,20 @@ function dedupe(tokens: IndexedToken[]): IndexedToken[] {
   })
 }
 
-function sameIdentity(token: IndexedToken, kind: IndexedKind, key: string): boolean {
+function sameIdentity(token: IndexedToken, kind: IndexedKind, key: string, from?: string): boolean {
   const sameKind = token.kind === kind || (anchorKind(token.kind) && anchorKind(kind))
-  return sameKind && token.key === key
+  if (!sameKind || token.key !== key) return false
+  return from === undefined || !fileLocal(kind) || token.uri === from
+}
+
+/** Footnote labels and link-reference labels resolve inside the document that writes them. */
+function fileLocal(kind: IndexedKind): boolean {
+  return kind === 'footnote' || kind === 'linkref'
+}
+
+/** A container prefix as a continuation line spells it: quote markers kept, list and footnote markers blanked. */
+function continuation(prefix: string): string {
+  return prefix.replace(/[^>\s]/g, ' ')
 }
 
 function anchorKind(kind: IndexedKind): boolean {
@@ -295,6 +255,9 @@ function symbolKind(kind: IndexedKind): SymbolKind {
 
 function isValidName(kind: IndexedKind, value: string): boolean {
   if (value.length === 0 || /[\[\]\r\n]/.test(value)) return false
-  if (kind === 'heading' || kind === 'caption' || kind === 'citation') return !/\s/.test(value)
+  // An id is written as `{#id}`, which admits only the lexical explicit_identifier.
+  if (kind === 'heading' || kind === 'caption') return /^[A-Za-z0-9_][A-Za-z0-9_-]*$/.test(value)
+  if (kind === 'citation') return !/\s/.test(value)
+  if (kind === 'linkref') return !/^[@^]/.test(value)
   return true
 }

@@ -46,6 +46,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   with its closer, so highlight, closer hover, the closing inlay hint and
   linked fence editing work there. A container its quote ended no longer
   claims a later closer.
+- Workspace navigation reads the parsed document: references, definitions,
+  rename, code lens counts and highlights ignore code, raw blocks, comments and
+  code spans, and find headings and captioned figures inside list items,
+  definitions and footnotes.
+- Footnote and link-reference labels are scoped to their own document, so
+  renaming one no longer edits other files and another file's definition no
+  longer resolves it. Generated heading ids in two files are no longer reported
+  as duplicates.
+- Renaming a generated heading id inside a block quote, list item or footnote
+  writes the `{#id}` line inside that container.
+- Rename refuses an id that `{#id}` cannot hold.
+- Cross-references with non-ASCII ids (`</#Über-uns>`) navigate and complete.
+- Go-to-definition on a collapsed `[Heading][]` jumps to the heading.
+- Hover no longer guesses emphasis from slashes or asterisks the parser reads as
+  text, and describes references in footnote bodies and line blocks.
+- Document links come from the parsed links: parentheses in a destination,
+  `ftp:` autolinks and reference definitions in a block quote work, and links
+  inside code are no longer linked.
+- Semantic span completion offers the `[Tab]{kbd}` form inside a span's
+  attribute block instead of `:kbd[x]` after any colon.
+- Include go-to-definition and path completion skip directives in code,
+  comments and code inside block quotes.
 
 ### Improvements
 
