@@ -8,6 +8,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixes
 
+- `broken-crossref` and other lint diagnostics keep their range after an emoji
+  or other astral character on the line.
+- Headings, folds, inlay hints and semantic tokens now reach blocks inside list
+  items, definitions and footnote bodies; footnote bodies fold.
+- A heading's section fold and outline range end with the container the
+  heading sits in, and before the next heading's attribute line.
+- Outline symbols span their whole section, so a subheading sits inside its
+  parent's range; the selection range is the heading line at its real length.
+- Semantic tokens color list and quote markers on every line, the bare `.`
+  marker, and the opener and closer of `::: >` and other `:::` containers.
 - Enter on a `:::` opener that already has its closer no longer inserts a
   second one; an unclosed opener nested in a closed container still gets its
   own.
@@ -20,6 +30,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Improvements
 
+- Semantic tokens stay linear on very long lines, and inlay hints no longer
+  re-split the document per heading. Folding, inlay hints, semantic tokens and
+  diagnostics share one parse of an unchanged document.
 - On-type continuation: Enter after a code fence opener inserts the matching
   closer; an attributed list item (`-{.c} a`) continues with a plain marker;
   `:: term` and `: def` continue with `: `; and Enter on a content-less `: ` or

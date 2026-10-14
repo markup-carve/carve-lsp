@@ -1,19 +1,25 @@
 import { InlayHintKind, type InlayHint, type Range } from 'vscode-languageserver-types'
-import { parse, resolve, type BlockNode } from '@markup-carve/carve'
+import type { Heading } from '@markup-carve/carve'
+import { walkNodes } from './ast-walk.js'
+import { resolvedDocument } from './parse-cache.js'
+import { sourceLines } from './position.js'
 
 /** Quiet, author-value hints. Clients can disable the provider globally. */
 export function inlayHints(source: string, requested?: Range): InlayHint[] {
   const hints: InlayHint[] = []
   try {
-    const doc = resolve(parse(source, { positions: true }))
-    walk(doc.children, (node) => {
-      if (node.type !== 'heading' || !node.pos || !node.attrs?.id) return
+    const doc = resolvedDocument(source)
+    const lines = sourceLines(source)
+    walkNodes([doc.children, doc.footnoteDefs], (found) => {
+      if (found.type === 'paragraph') return false
+      if (found.type !== 'heading') return
+      const node = found as unknown as Heading
+      if (!node.pos || !node.attrs?.id) return false
       const line = node.pos.startLine - 1
-      if (requested && (line < requested.start.line || line > requested.end.line)) return
-      const lines = source.replace(/\r\n?/g, '\n').split('\n')
+      if (requested && (line < requested.start.line || line > requested.end.line)) return false
       const text = lines[line] ?? ''
       // An authored id is already visible; the useful hint is the generated one.
-      if (text.includes(`{#${node.attrs.id}`) || (lines[line - 1] ?? '').includes(`#${node.attrs.id}`)) return
+      if (text.includes(`{#${node.attrs.id}`) || (lines[line - 1] ?? '').includes(`#${node.attrs.id}`)) return false
       hints.push({
         position: { line, character: text.length },
         label: `  #${node.attrs.id}`,
@@ -21,20 +27,10 @@ export function inlayHints(source: string, requested?: Range): InlayHint[] {
         paddingLeft: true,
         tooltip: 'Generated heading id',
       })
+      return false
     })
   } catch {
     return []
   }
-  return hints
-}
-
-function walk(nodes: BlockNode[], visit: (node: BlockNode) => void): void {
-  for (const node of nodes) {
-    visit(node)
-    if ('children' in node && Array.isArray(node.children)) walk(node.children.filter(isBlock), visit)
-  }
-}
-
-function isBlock(value: unknown): value is BlockNode {
-  return Boolean(value && typeof value === 'object' && 'type' in value)
+  return hints.sort((a, b) => a.position.line - b.position.line)
 }

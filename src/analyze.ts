@@ -31,7 +31,10 @@ import {
 import type { IncludeParseCache } from './include-cache.js'
 import { tableDiagnostics } from './table-diagnostics.js'
 import { colonFenceStructure } from './colon-fences.js'
-import { astOffsetToIndex } from './position.js'
+import { astOffsetToIndex, sourceLines } from './position.js'
+import { walkNodes } from './ast-walk.js'
+import { headingSections } from './folding.js'
+import { resolvedDocument } from './parse-cache.js'
 
 export interface AnalyzeOptions {
   /** URI used for diagnostic related-information locations. */
@@ -69,7 +72,7 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
   let doc: Document | null = null
 
   try {
-    doc = resolve(parse(source))
+    doc = resolvedDocument(source)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     diagnostics.push({
@@ -116,12 +119,12 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
     platforms: options.lint?.platforms,
     extensions: lintExtensions,
   })) {
-    const len = Math.max(1, warning.end - warning.start)
+    // `start`/`end` are UTF-16 offsets into the source as given; `column` counts codepoints.
     const diagnostic: Diagnostic = {
       severity: DiagnosticSeverity.Warning,
       range: {
-        start: { line: warning.line - 1, character: warning.column - 1 },
-        end: { line: warning.line - 1, character: warning.column - 1 + len },
+        start: positionAt(source, warning.start),
+        end: positionAt(source, Math.max(warning.start + 1, warning.end)),
       },
       source: 'carve',
       code: warning.rule,
@@ -180,7 +183,7 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
 
   return {
     diagnostics: configuredDiagnostics(diagnostics, options.lint?.severities),
-    symbols: doc ? documentSymbols(doc) : tolerantHeadingSymbols(source),
+    symbols: doc ? documentSymbols(doc, source) : tolerantHeadingSymbols(source),
     dependencies: includes.dependencies,
     includedSymbols: includedSymbols(includes.documents, options.includedParseCache, paths),
   }
@@ -264,12 +267,13 @@ function includedSymbols(
       if (child.version !== undefined) cache?.set(child.id, child.version, document)
     }
     const uri = paths.toUri(child.id)
-    for (const entry of walkOutline(document.children)) {
+    const lines = sourceLines(child.source)
+    for (const entry of walkOutline(document)) {
       // An INCLUDED file contributes its headings, flat. A composite figure is
       // a landmark inside its own file rather than a navigable entry in
       // another one, so it stays out of this list.
       if (entry.type !== 'heading') continue
-      const symbol = headingSymbol(entry)
+      const symbol = headingSymbol(entry, lines)
       symbols.push({
         name: symbol.name,
         kind: symbol.kind,
@@ -327,11 +331,14 @@ function attributeToChild(
   return `${message} (in ${root === undefined ? file : paths.relativeToRoot(file, root)})`
 }
 
-function documentSymbols(doc: Document): DocumentSymbol[] {
+function documentSymbols(doc: Document, source: string): DocumentSymbol[] {
+  const lines = sourceLines(source)
   const stack: Array<{ level: number; symbol: DocumentSymbol }> = []
   const roots: DocumentSymbol[] = []
 
   const place = (symbol: DocumentSymbol): void => {
+    // A section that ended (its container closed) cannot hold what follows.
+    while (stack.length && stack[stack.length - 1]!.symbol.range.end.line < symbol.range.start.line) stack.pop()
     const parent = stack[stack.length - 1]
     if (parent) {
       parent.symbol.children ??= []
@@ -341,19 +348,20 @@ function documentSymbols(doc: Document): DocumentSymbol[] {
     }
   }
 
-  for (const entry of walkOutline(doc.children)) {
+  const sections = new Map(headingSections(doc, lines).map((section) => [section.heading, section.endLine]))
+  for (const entry of walkOutline(doc)) {
     if (entry.type === 'figure_group') {
       // A composite figure is a structural landmark: one figure holding
       // ordered panels (PART 9 §4c). It takes NO level, so it never pops the
       // heading stack - it hangs under the section it appears in, the way a
       // heading's own children do.
-      place(figureGroupSymbol(entry))
+      place(figureGroupSymbol(entry, lines))
       continue
     }
     while (stack.length && stack[stack.length - 1]!.level >= entry.level) {
       stack.pop()
     }
-    const symbol = headingSymbol(entry)
+    const symbol = headingSymbol(entry, lines, sections.get(entry))
     place(symbol)
     stack.push({ level: entry.level, symbol })
   }
@@ -364,34 +372,21 @@ function documentSymbols(doc: Document): DocumentSymbol[] {
 type OutlineEntry = Heading | Extract<BlockNode, { type: 'figure_group' }>
 
 /**
- * The outline's entries in source order: headings, and composite figures.
+ * The outline's entries in source order: headings, and composite figures, at
+ * any depth (list items, definitions and footnote bodies included).
  *
  * A group is worth an entry where a plain figure is not, because it is a
  * CONTAINER an author folds, navigates and loses their place inside - the same
  * reason it folds. Its panels come with it, so the outline says how many there
  * are without scrolling the fence.
  */
-function* walkOutline(nodes: BlockNode[]): Iterable<OutlineEntry> {
-  for (const node of nodes) {
-    if (node.type === 'heading') yield node
-    if (node.type === 'figure_group') {
-      yield node
-      // Its panels ride on the group's own symbol - a `figure` or `table`
-      // yields no entry of its own here - but the walk still DESCENDS through
-      // them. A panel can wrap a quote holding headings, and skipping the panel
-      // node dropped those headings out of the outline entirely.
-      yield* walkOutline(node.children)
-      continue
-    }
-    if ('children' in node && Array.isArray(node.children)) {
-      yield* walkOutline(node.children.filter(isBlockNode))
-    }
-    if (node.type === 'figure') {
-      if ('children' in node.target && Array.isArray(node.target.children)) {
-        yield* walkOutline(node.target.children.filter(isBlockNode))
-      }
-    }
-  }
+function walkOutline(doc: Document): OutlineEntry[] {
+  const entries: OutlineEntry[] = []
+  walkNodes([doc.children, doc.footnoteDefs], (node) => {
+    if (node.type === 'heading' || node.type === 'figure_group') entries.push(node as unknown as OutlineEntry)
+    return node.type !== 'heading' && node.type !== 'paragraph'
+  })
+  return entries.sort((a, b) => (a.pos?.startLine ?? 0) - (b.pos?.startLine ?? 0))
 }
 
 /** A group's panels are its direct `figure` and `table` children (§4c). */
@@ -399,8 +394,8 @@ function isPanel(node: BlockNode): boolean {
   return node.type === 'figure' || node.type === 'table'
 }
 
-function figureGroupSymbol(group: Extract<BlockNode, { type: 'figure_group' }>): DocumentSymbol {
-  const range = blockRange(group)
+function figureGroupSymbol(group: Extract<BlockNode, { type: 'figure_group' }>, lines: readonly string[]): DocumentSymbol {
+  const range = blockRange(group, lines)
   const panels = group.children.filter(isPanel)
   return {
     name: (group.caption ? plainText(group.caption) : '') || 'Composite figure',
@@ -408,7 +403,7 @@ function figureGroupSymbol(group: Extract<BlockNode, { type: 'figure_group' }>):
     kind: SymbolKind.Struct,
     range,
     selectionRange: range,
-    children: panels.map((panel, index) => panelSymbol(panel, index)),
+    children: panels.map((panel, index) => panelSymbol(panel, index, lines)),
   }
 }
 
@@ -417,9 +412,9 @@ function figureGroupSymbol(group: Extract<BlockNode, { type: 'figure_group' }>):
  * would use for it (§4c) - not to a number, which would read as a figure number
  * the panel does not have.
  */
-function panelSymbol(panel: BlockNode, index: number): DocumentSymbol {
+function panelSymbol(panel: BlockNode, index: number, lines: readonly string[]): DocumentSymbol {
   const caption = (panel as { caption?: InlineNode[] }).caption
-  const range = blockRange(panel)
+  const range = blockRange(panel, lines)
   return {
     name: (caption ? plainText(caption) : '') || `Panel ${panelLetter(index)}`,
     kind: panel.type === 'table' ? SymbolKind.Array : SymbolKind.Object,
@@ -429,35 +424,34 @@ function panelSymbol(panel: BlockNode, index: number): DocumentSymbol {
   }
 }
 
-function blockRange(node: BlockNode): Range {
+function blockRange(node: BlockNode, lines: readonly string[]): Range {
   if (!node.pos) {
     return { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }
   }
+  return lineSpan(lines, node.pos.startLine - 1, node.pos.endLine - 1)
+}
+
+/** Whole lines `start` through `end`, 0-based and inclusive. */
+function lineSpan(lines: readonly string[], start: number, end: number): Range {
   return {
-    start: { line: node.pos.startLine - 1, character: 0 },
-    end: { line: node.pos.endLine - 1, character: 200 },
+    start: { line: start, character: 0 },
+    end: { line: end, character: lines[end]?.length ?? 0 },
   }
 }
 
-function isBlockNode(node: unknown): node is BlockNode {
-  return Boolean(node && typeof node === 'object' && 'type' in node)
-}
-
-function headingSymbol(heading: Heading): DocumentSymbol {
-  const range = heading.pos
-    ? {
-        start: { line: heading.pos.startLine - 1, character: 0 },
-        end: { line: heading.pos.endLine - 1, character: 200 },
-      }
-    : {
-        start: { line: 0, character: 0 },
-        end: { line: 0, character: 0 },
-      }
+/** `range` spans the section when `sectionEnd` is known; `selectionRange` is the heading's own lines. */
+function headingSymbol(heading: Heading, lines: readonly string[], sectionEnd?: number): DocumentSymbol {
+  const selectionRange = heading.pos
+    ? lineSpan(lines, heading.pos.startLine - 1, heading.pos.endLine - 1)
+    : { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }
+  const range = heading.pos && sectionEnd !== undefined && sectionEnd >= selectionRange.end.line
+    ? lineSpan(lines, selectionRange.start.line, sectionEnd)
+    : selectionRange
   return {
     name: plainText(heading.children) || `Heading ${heading.level}`,
     kind: SymbolKind.String,
     range,
-    selectionRange: range,
+    selectionRange,
     children: [],
   }
 }
@@ -484,14 +478,24 @@ function plainText(nodes: InlineNode[]): string {
   return out.trim()
 }
 
+let locatedSource: string | undefined
+let lineStarts: number[] = []
+
+/** An offset to an LSP position; any line ending counts as one break. */
 function positionAt(source: string, offset: number) {
-  const before = source.slice(0, offset)
-  const line = before.split('\n').length - 1
-  const lastNewline = before.lastIndexOf('\n')
-  return {
-    line,
-    character: offset - lastNewline - 1,
+  if (source !== locatedSource) {
+    locatedSource = source
+    lineStarts = [0]
+    for (const match of source.matchAll(/\r\n?|\n/g)) lineStarts.push(match.index + match[0].length)
   }
+  let low = 0
+  let high = lineStarts.length - 1
+  while (low < high) {
+    const middle = (low + high + 1) >> 1
+    if (lineStarts[middle]! <= offset) low = middle
+    else high = middle - 1
+  }
+  return { line: low, character: offset - lineStarts[low]! }
 }
 
 function rangeAt(source: string, index: number, length: number): Range {
