@@ -83,7 +83,9 @@ export function continuationPrefix(source: string, line: number): string {
  */
 function colonFenceContinuation(source: string, lines: string[], line: number, opener: FenceSite): string {
   const lead = containerLead((lines[line - 1] ?? '').slice(0, opener.range.start.character))
-  const closed = colonFenceStructure(source).pairs.some((pair) => pair.opener.range.start.line === line - 1)
+  // Judge closedness with the lead on the cursor line: a bare blank line would end a quote.
+  const withLead = [...lines.slice(0, line), `${lead}${lines[line] ?? ''}`, ...lines.slice(line + 1)].join('\n')
+  const closed = colonFenceStructure(withLead).pairs.some((pair) => pair.opener.range.start.line === line - 1)
   const after = closed ? '' : `\n${lead}${':'.repeat(opener.width)}`
   const completed = [...lines.slice(0, line), `${lead}x${after}${lines[line] ?? ''}`, ...lines.slice(line + 1)].join('\n')
   return bodyInsideFence(completed, line, closed ? null : line + 1) ? lead + after : ''

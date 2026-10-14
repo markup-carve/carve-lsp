@@ -157,3 +157,13 @@ test('an inline comment does not stop a table or quote continuation', () => {
   assert.equal(prefixAfter('| a | %% note'), '| ')
   assert.equal(prefixAfter('> a %% note'), '> ')
 })
+
+test('closedness is judged with the cursor line holding the container lead', () => {
+  for (const [before, after, expected] of [
+    ['> ::: note', '> x\n> :::', '> '],
+    ['> > ::: note', '> > x\n> > :::', '> > '],
+    ['- ::: note', '  x\n  :::', '  '],
+    ['[^1]: ::: note', '  x\n  :::', '  '],
+    ['::: note', 'x\n:::', ''],
+  ] as const) assert.equal(prefixAfter(before, after), expected, before)
+})
