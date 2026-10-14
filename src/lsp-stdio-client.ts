@@ -27,6 +27,8 @@ export class LspStdioClient {
   readonly notifications: Notification[] = []
   #next = 1
   #buffer = Buffer.alloc(0)
+  /** Server-initiated request methods this client answers with an error, as a client that refuses them does. */
+  readonly refuse = new Set<string>()
 
   constructor(child: ChildProcessWithoutNullStreams) {
     this.#child = child
@@ -63,6 +65,11 @@ export class LspStdioClient {
       .map((item) => String((item.params as { message?: unknown } | undefined)?.message ?? ''))
   }
 
+  /** The server process's exit code, or null while it runs. */
+  get exitCode(): number | null {
+    return this.#child.exitCode
+  }
+
   async stop(): Promise<void> {
     await this.request('shutdown', null)
     this.notify('exit', null)
@@ -94,7 +101,11 @@ export class LspStdioClient {
         this.notifications.push({ method: message.method, params: message.params })
         // A server-initiated request left unanswered stalls the server's own
         // await, not just this client.
-        if (message.id !== undefined) this.#send({ jsonrpc: '2.0', id: message.id, result: null })
+        if (message.id !== undefined) {
+          this.#send(this.refuse.has(message.method)
+            ? { jsonrpc: '2.0', id: message.id, error: { code: -32601, message: `${message.method} refused` } }
+            : { jsonrpc: '2.0', id: message.id, result: null })
+        }
         continue
       }
       if (message.id === undefined) continue
