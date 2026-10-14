@@ -69,3 +69,33 @@ test('an empty line converts without moving', () => {
 test('lines are split on every line ending form', () => {
   assert.deepEqual(sourceLines('a\r\nb\rc\nd'), ['a', 'b', 'c', 'd'])
 })
+
+test('the indexed conversions match a codepoint walk on mixed lines', () => {
+  const walkColumn = (line: string, column: number): number => {
+    if (column <= 1) return 0
+    let codepoint = 1
+    let index = 0
+    while (index < line.length && codepoint < column) {
+      index += (line.codePointAt(index) ?? 0) > 0xffff ? 2 : 1
+      codepoint++
+    }
+    return index + Math.max(0, column - codepoint)
+  }
+  const walkCharacter = (line: string, character: number): number => {
+    let codepoint = 1
+    let index = 0
+    while (index < line.length && index < character) {
+      index += (line.codePointAt(index) ?? 0) > 0xffff ? 2 : 1
+      codepoint++
+    }
+    return codepoint + Math.max(0, character - index)
+  }
+  for (const line of ['', 'abc', '😀', 'a😀b😀😀c', '\uD83D', 'x\uDE00y', '😀\uD83D']) {
+    for (let column = 0; column <= line.length + 3; column++) {
+      assert.equal(codepointColumnToUtf16(line, column), walkColumn(line, column), `${JSON.stringify(line)} column ${column}`)
+    }
+    for (let character = -1; character <= line.length + 3; character++) {
+      assert.equal(utf16CharToCodepointColumn(line, character), walkCharacter(line, character), `${JSON.stringify(line)} character ${character}`)
+    }
+  }
+})

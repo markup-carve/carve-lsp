@@ -1,13 +1,12 @@
 import { SemanticTokensBuilder, type SemanticTokens } from 'vscode-languageserver/node.js'
 import {
-  parse,
-  resolve,
   type BlockNode,
   type Document,
   type InlineNode,
   type Position,
 } from '@markup-carve/carve'
 import { astColumnToCharacter } from './position.js'
+import { resolvedDocument } from './parse-cache.js'
 
 export const semanticTokenTypes = [
   'keyword',
@@ -67,7 +66,7 @@ function fillBuilder(builder: SemanticTokensBuilder, tokens: Token[]): void {
 
 export function semanticTokens(source: string): Token[] {
   try {
-    return astSemanticTokens(resolve(parse(source)), source)
+    return astSemanticTokens(resolvedDocument(source), source)
   } catch {
     return lexicalSemanticTokens(source)
   }
@@ -77,6 +76,9 @@ function astSemanticTokens(doc: Document, source: string): Token[] {
   const tokens: Token[] = []
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   for (const node of doc.children) collectBlock(tokens, lines, node)
+  for (const body of Object.values(doc.footnoteDefs ?? {})) {
+    for (const node of body) collectBlock(tokens, lines, node)
+  }
   const codeBlock = codeBlockLines(doc)
 
   // Emit frontmatter tokens. The AST stores the parsed YAML in doc.frontmatter
@@ -110,11 +112,13 @@ function astSemanticTokens(doc: Document, source: string): Token[] {
 
 function collectBlock(tokens: Token[], lines: string[], node: BlockNode): void {
   switch (node.type) {
-    case 'heading':
+    case 'heading': {
+      const first = tokens.length
       pushLinePrefix(tokens, lines, node.pos, /^#{1,6}/, 'operator')
       collectInline(tokens, lines, node.children)
-      pushHeadingTitle(tokens, lines, node.pos)
+      pushHeadingTitle(tokens, lines, node.pos, first)
       break
+    }
     case 'paragraph':
       collectInline(tokens, lines, node.children)
       break
@@ -126,22 +130,30 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode): void {
       pushPosition(tokens, lines, node.pos, 'comment')
       break
     case 'block_quote':
-      pushLinePrefix(tokens, lines, node.pos, /^\s*>+/, 'operator')
+      if ((node as { fenced?: boolean }).fenced) {
+        pushLinePrefix(tokens, lines, node.pos, /^\s*:{3,}/, 'operator')
+        pushLinePrefix(tokens, lines, node.pos, /(?<=^\s*:{3,}\s*)>/, 'operator')
+        pushFenceCloser(tokens, lines, node.pos)
+      } else {
+        pushQuoteMarkers(tokens, lines, node.pos)
+      }
       for (const child of node.children) collectBlock(tokens, lines, child)
       break
     case 'list':
-      pushLinePrefix(tokens, lines, node.pos, LIST_MARKER_ONLY, 'operator')
       for (const item of node.items) {
+        pushMarker(tokens, lines, item.pos, LIST_MARKER_ONLY, 'operator')
         for (const child of item.children) collectBlock(tokens, lines, child)
       }
       break
     case 'admonition':
       pushLinePrefix(tokens, lines, node.pos, /^\s*:{3,}\s*[A-Za-z][\w-]*/, 'type')
+      pushFenceCloser(tokens, lines, node.pos)
       for (const child of node.children) collectBlock(tokens, lines, child)
       if (node.title) collectInline(tokens, lines, node.title)
       break
     case 'div':
       pushLinePrefix(tokens, lines, node.pos, /^\s*:{3,}/, 'operator')
+      pushFenceCloser(tokens, lines, node.pos)
       for (const child of node.children) collectBlock(tokens, lines, child)
       break
     case 'definition_list':
@@ -378,7 +390,35 @@ function pushLinePrefix(
   push(tokens, pos.startLine - 1, match.index, match[0].length, type)
 }
 
-function pushHeadingTitle(tokens: Token[], lines: string[], pos: Position | undefined): void {
+// `first` is where this heading's own tokens begin in `tokens`.
+// The `>` run opening each line of a marker quote; the first line's run starts at the node's column.
+function pushQuoteMarkers(tokens: Token[], lines: string[], pos: Position | undefined): void {
+  if (pos?.startLine === undefined || pos.endLine === undefined) return
+  for (let line = pos.startLine; line <= pos.endLine; line++) {
+    const text = lines[line - 1] ?? ''
+    const from = line === pos.startLine && pos.startColumn !== undefined ? astColumnToCharacter(text, pos.startColumn) : 0
+    const prefix = /^(?:[ \t]*>)+/.exec(text.slice(from))
+    if (!prefix) continue
+    for (const marker of prefix[0].matchAll(/>+/g)) push(tokens, line - 1, from + marker.index!, marker[0].length, 'operator')
+  }
+}
+
+// A marker at the node's own start column, which need not be the start of the line.
+function pushMarker(tokens: Token[], lines: string[], pos: Position | undefined, pattern: RegExp, type: TokenType): void {
+  if (pos?.startLine === undefined || pos.startColumn === undefined) return
+  const text = lines[pos.startLine - 1] ?? ''
+  const from = astColumnToCharacter(text, pos.startColumn)
+  const match = pattern.exec(text.slice(from))
+  if (match) push(tokens, pos.startLine - 1, from + match.index, match[0].length, type)
+}
+
+function pushFenceCloser(tokens: Token[], lines: string[], pos: Position | undefined): void {
+  if (pos?.startLine === undefined || pos.endLine === undefined || pos.endLine === pos.startLine) return
+  const closer = /^([ \t>]*)(:{3,})[ \t]*$/.exec(lines[pos.endLine - 1] ?? '')
+  if (closer) push(tokens, pos.endLine - 1, closer[1]!.length, closer[2]!.length, 'operator')
+}
+
+function pushHeadingTitle(tokens: Token[], lines: string[], pos: Position | undefined, first: number): void {
   if (!pos?.startLine) return
   const lineNumber = pos.startLine - 1
   const line = lines[lineNumber] ?? ''
@@ -387,7 +427,7 @@ function pushHeadingTitle(tokens: Token[], lines: string[], pos: Position | unde
   const comment = findTrailingComment(line)
   const end = comment === -1 ? line.length : comment
   let cursor = match[0].length
-  const occupied = tokens.filter((token) => token.line === lineNumber)
+  const occupied = tokens.slice(first).filter((token) => token.line === lineNumber)
     .sort((a, b) => a.character - b.character)
   for (const token of occupied) {
     if (token.character >= end) break
@@ -457,7 +497,7 @@ export const QUOTE_PREFIX = /^([ \t]*>+)(?: |$)/
 // separator run is spaces, and what follows has to be content.
 // The marker alone, for the AST path, which already knows the line opens a
 // list and only needs the marker's width. Same bullet class: `+` is not one.
-export const LIST_MARKER_ONLY = /^[ \t]*(?:[-*]|\(?[0-9A-Za-z]+[.)])/
+export const LIST_MARKER_ONLY = /^[ \t]*(?:[-*]|\.(?= |$)|\(?[0-9A-Za-z]+[.)])/
 
 export const LIST_PREFIX = /^([ \t]*)([-*]|\(?[0-9]+[.)]|\(?[A-Za-z][.)]) +(\[[ xX\-_>?]\] +(?=\S))?/
 
@@ -557,10 +597,10 @@ function lexicalSemanticTokens(source: string): Token[] {
       continue
     }
 
-    const div = /^(\s*)(:{3,})(?:\s+([A-Za-z][\w-]*))?/.exec(scanText)
+    const div = /^(\s*)(:{3,})(?:\s+([A-Za-z][\w-]*|>(?=\s*$)))?/.exec(scanText)
     if (div) {
       push(tokens, line, div[1]!.length, div[2]!.length, 'operator')
-      if (div[3]) push(tokens, line, div[0].lastIndexOf(div[3]), div[3].length, 'type')
+      if (div[3]) push(tokens, line, div[0].lastIndexOf(div[3]), div[3].length, div[3] === '>' ? 'operator' : 'type')
     }
 
     const list = LIST_PREFIX.exec(scanText)
