@@ -182,3 +182,9 @@ test('continuationEdits keeps a closer off the cursor position', () => {
   assert.deepEqual(continuationEdits('> q\n', { line: 1, character: 0 }), [{ range: at(1, 0), newText: '> ' }])
   assert.deepEqual(continuationEdits('plain\n', { line: 1, character: 0 }), [])
 })
+
+test('continuationEdits writes the closer with the document line ending', () => {
+  const at = (line: number, character: number) => ({ start: { line, character }, end: { line, character } })
+  assert.deepEqual(continuationEdits('::: note\r\n\r\nrest', { line: 1, character: 0 }), [{ range: at(2, 0), newText: ':::\r\n' }])
+  assert.deepEqual(continuationEdits('> ::: note\r\n', { line: 1, character: 0 }), [{ range: at(1, 0), newText: '> \r\n> :::' }])
+})
