@@ -45,13 +45,15 @@ export function continuationPrefix(source: string, line: number): string {
     const closer = codeFenceCloser(source, lines, line)
     if (closer) return closer
   }
-  if (cursorBlank) {
+  if (cursorBlank && previous.includes(':::')) {
     // A bare run may be meant as a closer, so only an opener with a type or title gets one.
     const opener = colonFenceStructure(source).openers.find((site) => site.range.start.line === line - 1 &&
       /\S/.test(previous.slice(site.range.end.character)))
     if (opener) return colonFenceContinuation(source, lines, line, opener)
   }
   if (/^\s*:{3,} [^\s]/.test(previous)) return ''
+  // Only a quote, table or description line continues; skip the parse for anything else.
+  if (!/^[ \t]*(?:> |\||: +)/.test(previous)) return ''
   // In a code, raw or comment block only the container prefix before the block continues.
   const verbatim = verbatimColumn(source, lines, line - 1)
   const quote = /^(\s*(?:> )+)/.exec(verbatim === null ? previous : previous.slice(0, verbatim))
