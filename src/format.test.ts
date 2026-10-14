@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { carveToHtml } from '@markup-carve/carve'
-import { continuationPrefix, formatDocument, formatRange } from './format.js'
+import { continuationPrefix, formatDocument, formatRange, listContinuationEdits } from './format.js'
 
 test('adds a missing final line ending', () => {
   assert.equal(formatDocument('# Title'), '# Title\n')
@@ -40,7 +40,8 @@ test('continues structural prefixes', () => {
 
 test('inserts an exact closer after a typed colon-fence opener', () => {
   assert.equal(continuationPrefix(':::: warning\n', 1), '\n::::')
-  assert.equal(continuationPrefix('  ::: note\n', 1), '\n  :::')
+  // An indented top-level `:::` is literal text (corpus 160), so it gets no closer.
+  assert.equal(continuationPrefix('  ::: note\n', 1), '')
   assert.equal(continuationPrefix(':::\n', 1), '')
 })
 
@@ -100,4 +101,69 @@ test('no closer for a closed fence, a closing fence or a fence line inside code'
 test('is idempotent', () => {
   const once = formatDocument('# T')
   assert.equal(formatDocument(once), once)
+})
+
+test('lines of code, raw and comment blocks get no container continuation', () => {
+  assert.equal(prefixAfter('```\n> x'), '')
+  assert.equal(prefixAfter('```\n| a'), '')
+  assert.equal(prefixAfter('```\n: x'), '')
+  assert.equal(prefixAfter('%%%\n> x', '%%%'), '')
+  assert.equal(prefixAfter('```=html\n| a', '```'), '')
+  // The container the block sits in still continues, and an opener still gets its closer.
+  assert.equal(prefixAfter('> ```\n> x'), '> ')
+  assert.equal(prefixAfter('```'), '\n```')
+})
+
+test('a colon fence opened in a container writes the lead before the cursor and the closer after it', () => {
+  for (const [before, expected] of [
+    ['> ::: note', '> \n> :::'],
+    ['> > :::: warning', '> > \n> > ::::'],
+    ['- ::: note', '  \n  :::'],
+    ['1. ::: note', '   \n   :::'],
+    ['- a\n\n  ::: note', '  \n  :::'],
+    ['[^1]: ::: note', '  \n  :::'],
+    ['::: note', '\n:::'],
+  ] as const) {
+    assert.equal(prefixAfter(before), expected, before)
+    // The body typed at the cursor lands inside the container.
+    const [lead, closer] = expected.split('\n')
+    const html = carveToHtml(`x[^1]\n\n${before}\n${lead}body\n${closer}\n`)
+    assert.match(html, /<aside[^>]*>\s*<p>body<\/p>\s*<\/aside>/, before)
+  }
+  // Already closed: only the lead.
+  assert.equal(prefixAfter('- ::: note', '\n  :::'), '  ')
+})
+
+test('list continuation leaves a colon fence on a marker line to the fence continuation', () => {
+  assert.equal(listContinuationEdits('- ::: note\n\n', { line: 1, character: 0 }), null)
+  assert.equal(listContinuationEdits('> ::: note\n\n', { line: 1, character: 0 }), null)
+})
+
+test('keeps a missing final line ending missing when adding it changes the render', () => {
+  assert.equal(formatDocument('```\nx'), '```\nx')
+  assert.equal(formatDocument('```\nx\n```'), '```\nx\n```\n')
+})
+
+test('formatting stays render-equivalent when a corpus document loses its final newline', async () => {
+  const { readdirSync, readFileSync } = await import('node:fs')
+  const dir = new URL('../tests/spec/tests/corpus/', import.meta.url)
+  for (const name of readdirSync(dir).filter((entry) => entry.endsWith('.crv'))) {
+    const source = readFileSync(new URL(name, dir), 'utf8').replace(/\r?\n$/, '')
+    assert.equal(carveToHtml(formatDocument(source)), carveToHtml(source), name)
+  }
+})
+
+test('an inline comment does not stop a table or quote continuation', () => {
+  assert.equal(prefixAfter('| a | %% note'), '| ')
+  assert.equal(prefixAfter('> a %% note'), '> ')
+})
+
+test('closedness is judged with the cursor line holding the container lead', () => {
+  for (const [before, after, expected] of [
+    ['> ::: note', '> x\n> :::', '> '],
+    ['> > ::: note', '> > x\n> > :::', '> > '],
+    ['- ::: note', '  x\n  :::', '  '],
+    ['[^1]: ::: note', '  x\n  :::', '  '],
+    ['::: note', 'x\n:::', ''],
+  ] as const) assert.equal(prefixAfter(before, after), expected, before)
 })

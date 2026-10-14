@@ -18,6 +18,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   parent's range; the selection range is the heading line at its real length.
 - Semantic tokens color list and quote markers on every line, the bare `.`
   marker, and the opener and closer of `::: >` and other `:::` containers.
+- A paragraph that starts with a literal `:::` line (an unquoted fence title)
+  is no longer paired as a container by hints, highlights and linked editing.
+- Enter inside a code, raw or comment block no longer inserts a `> `, `| ` or
+  description prefix copied from the block's text.
+- Enter after a colon fence opened on a list item, footnote label or quote line
+  now inserts the closer at the container column instead of continuing the
+  list or quote; `continuationPrefix` returns the cursor-line lead before the
+  first newline (`> \n> :::`).
+- A colon fence opened on a footnote label pairs with its closer at the body
+  indent, and fence columns after an astral character are UTF-16.
+- Tab and Shift+Tab work on items whose marker carries attributes (`-{.c} b`).
+- The alignment-run padding quick fix edits the reported cell, and the run is
+  reported once; table diagnostics read tables from the AST, so fenced, quoted
+  and code-span pipes no longer miscount.
+- The missing footnote and link definition quick fixes add a blank line so the
+  definition does not join a trailing paragraph.
+- Formatting no longer adds a final newline that would change the render, such
+  as at the end of an unclosed code block.
+
 - Enter on a `:::` opener that already has its closer no longer inserts a
   second one; an unclosed opener nested in a closed container still gets its
   own.

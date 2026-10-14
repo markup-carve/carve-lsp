@@ -453,6 +453,7 @@ connection.onRequest(DocumentOnTypeFormattingRequest.type, (params) => {
   const list = listContinuationEdits(document.getText(), params.position)
   if (list) return list
   const prefix = continuationPrefix(document.getText(), params.position.line)
+  // LSP on-type edits cannot place the cursor; where it lands relative to a closer is up to the client.
   return prefix ? [{ range: { start: params.position, end: params.position }, newText: prefix }] : []
 })
 

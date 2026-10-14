@@ -1,51 +1,43 @@
 import { DiagnosticSeverity, type Diagnostic } from 'vscode-languageserver-types'
+import { parse } from '@markup-carve/carve'
+import { walkNodes, type AstNode } from './ast-walk.js'
 
-/** Draft #1344 diagnostics kept local until the pinned engine ships their lint producers. */
+/**
+ * The draft #1344 table check the engine lint does not run: a positional
+ * attribute with more entries than the table has columns. Padding, short
+ * arity, width totals and overlap come from the engine. Tables are read from
+ * the AST, so fenced, commented and quoted text is handled as the parser reads it.
+ */
 export function tableDiagnostics(source: string): Diagnostic[] {
+  let document: unknown
+  try {
+    document = parse(source, { positions: true })
+  } catch {
+    return []
+  }
   const diagnostics: Diagnostic[] = []
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
-  for (let line = 0; line < lines.length; line += 1) {
-    const text = lines[line]!
-    if (!/^\s*\|/.test(text)) continue
-    for (const match of text.matchAll(/\|=?[<>~^v]{1,2}(?=\S)/g)) {
-      diagnostics.push(diagnostic('table-alignment-run-padding', DiagnosticSeverity.Warning, line,
-        match.index!, match.index! + match[0].length,
-        'A table alignment run needs a terminating space; this spelling is literal content.'))
-    }
-
-    if (line > 0 && /^\s*\|/.test(lines[line - 1] ?? '')) continue
-    let end = line
-    while (end + 1 < lines.length && /^\s*\|/.test(lines[end + 1] ?? '')) end += 1
-    const columns = Math.max(...lines.slice(line, end + 1).map(columnCount), 0)
-    const attrLine = lines[line - 1] ?? ''
-    const attrs = positionalAttributes(attrLine)
-    for (const attr of attrs) {
+  walkNodes(document, (node) => {
+    if (node.type !== 'table' || !node.pos?.startLine || !Array.isArray(node.rows)) return
+    const attrLine = node.pos.startLine - 2
+    if (attrLine < 0) return
+    const rows = node.rows as Array<{ cells?: unknown[] }>
+    const columns = Math.max(0, ...rows.map((row) => row.cells?.length ?? 0))
+    for (const attr of positionalAttributes(lines[attrLine] ?? '').filter((entry) => keyed(node, entry.name))) {
       if (attr.values.length > columns) {
-        diagnostics.push(diagnostic('table-column-arity', DiagnosticSeverity.Error, line - 1,
+        diagnostics.push(diagnostic('table-column-arity', DiagnosticSeverity.Error, attrLine,
           attr.start, attr.end, `${attr.name} has ${attr.values.length} entries for a ${columns}-column table.`))
-      } else if (attr.values.length < columns) {
-        diagnostics.push(diagnostic('table-column-arity', DiagnosticSeverity.Warning, line - 1,
-          attr.start, attr.end, `${attr.name} leaves ${columns - attr.values.length} trailing column(s) unset.`))
-      }
-      if (attr.name === 'widths') {
-        const total = attr.values.reduce((sum, value) => sum + (Number(value) || 0), 0)
-        if (total > 100) diagnostics.push(diagnostic('table-width-total', DiagnosticSeverity.Warning, line - 1,
-          attr.start, attr.end, `Column widths total ${total}%, overcommitting the table.`))
       }
     }
-    const aligns = attrs.find((attr) => attr.name === 'aligns')
-    if (aligns && /\|=?[<>~>]/.test(text)) {
-      diagnostics.push(diagnostic('table-column-overlap', DiagnosticSeverity.Warning, line - 1,
-        aligns.start, aligns.end, 'An in-table horizontal alignment marker overrides this table attribute.'))
-    }
-    line = end
-  }
+    return false
+  })
   return diagnostics
 }
 
-function columnCount(line: string): number {
-  const pipes = [...line.matchAll(/(?<!\\)\|/g)].length
-  return Math.max(0, pipes - 1)
+/** The table's own attribute block carries `name`, so a match on its line is not stray text. */
+function keyed(table: AstNode, name: string): boolean {
+  const attrs = table.attrs as { keyValues?: Record<string, unknown> } | undefined
+  return attrs?.keyValues?.[name] !== undefined
 }
 
 function positionalAttributes(line: string): Array<{ name: string; values: string[]; start: number; end: number }> {
@@ -61,7 +53,7 @@ function diagnostic(
   code: string, severity: DiagnosticSeverity, line: number, start: number, end: number, message: string,
 ): Diagnostic {
   return { code, severity, source: 'carve', message, range: {
-    start: { line: Math.max(0, line), character: start },
-    end: { line: Math.max(0, line), character: end },
+    start: { line, character: start },
+    end: { line, character: end },
   } }
 }
