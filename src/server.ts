@@ -57,6 +57,7 @@ import { codeLenses } from './codelens.js'
 import { completionAt } from './completion.js'
 import { foldingRanges } from './folding.js'
 import { continuationEdits, formatDocument, formatRange, listContinuationEdits, listIndentEdits } from './format.js'
+import { alignTableCodeAction, alignTablesInDocument, tableAlignmentEdits } from './table-alignment.js'
 import { hoverAt } from './hover.js'
 import { migrationCodeActions } from './migration-actions.js'
 import { lintCodeActions } from './lint-actions.js'
@@ -144,7 +145,7 @@ connection.onInitialize((params) => {
       workspaceSymbolProvider: true,
       hoverProvider: true,
       codeActionProvider: {
-        codeActionKinds: [CodeActionKind.QuickFix, CodeActionKind.SourceFixAll, EXPORT_KIND],
+        codeActionKinds: [CodeActionKind.QuickFix, CodeActionKind.SourceFixAll, CodeActionKind.RefactorRewrite, EXPORT_KIND],
         resolveProvider: true,
       },
       documentFormattingProvider: true,
@@ -387,6 +388,9 @@ connection.onRequest(CodeActionRequest.type, (params) => {
     ? [
         ...migrationCodeActions(params.textDocument.uri, document.getText(), params.context.diagnostics),
         ...lintCodeActions(params.textDocument.uri, document.getText(), params.context.diagnostics),
+        ...(!params.context.only || params.context.only.some(kind => CodeActionKind.RefactorRewrite === kind || CodeActionKind.RefactorRewrite.startsWith(kind + '.'))
+          ? [alignTableCodeAction(params.textDocument.uri, document.getText(), params.range.start.line)].filter(action => action !== null)
+          : []),
         ...(carveSettings.exportActions ? exportCodeActions(params.textDocument.uri, exportClient, params.context.only, (format) => renderExport(document, format), readExportTarget) : []),
       ]
     : []
@@ -428,7 +432,9 @@ connection.onRequest(DocumentFormattingRequest.type, (params) => {
   const document = documents.get(params.textDocument.uri)
   if (!document) return []
   const text = document.getText()
-  const formatted = carveSettings.formatter === 'migration' ? carveToCarve(text) : formatDocument(text)
+  const formatted = carveSettings.formatter === 'migration'
+    ? (carveSettings.formatAlignTables ? alignTablesInDocument(carveToCarve(text)) : carveToCarve(text))
+    : formatDocument(carveSettings.formatAlignTables ? alignTablesInDocument(text) : text)
   if (formatted === text) return []
   return [
     {
@@ -441,6 +447,10 @@ connection.onRequest(DocumentFormattingRequest.type, (params) => {
 connection.onRequest(DocumentRangeFormattingRequest.type, (params) => {
   const document = documents.get(params.textDocument.uri)
   if (!document) return []
+  if (carveSettings.formatAlignTables) {
+    const edits = tableAlignmentEdits(document.getText(), params.range.start.line, params.range.end.line)
+    if (edits.length > 0) return edits.map(edit => edit.textEdit)
+  }
   const newText = formatRange(document.getText(), params.range.start.line, params.range.end.line)
   const lines = document.getText().replace(/\r\n?/g, '\n').split('\n')
   return [{
@@ -458,7 +468,12 @@ connection.onRequest(DocumentOnTypeFormattingRequest.type, (params) => {
   if (!document) return []
   const list = listContinuationEdits(document.getText(), params.position)
   if (list) return list
-  return continuationEdits(document.getText(), params.position)
+  const continuation = continuationEdits(document.getText(), params.position)
+  const aligned = carveSettings.formatAlignTables
+    ? tableAlignmentEdits(document.getText(), Math.max(0, params.position.line - 1), Math.max(0, params.position.line - 1))
+      .map(edit => edit.textEdit)
+    : []
+  return [...aligned, ...continuation]
 })
 
 connection.onRequest(FoldingRangeRequest.type, (params) => {
