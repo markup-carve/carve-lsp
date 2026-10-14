@@ -330,5 +330,8 @@ test('on-type formatting sends a container lead and its closer', async (context)
   assert.deepEqual(await client.request('textDocument/onTypeFormatting', {
     textDocument: { uri: 'untitled:fence.crv' }, position: { line: 1, character: 0 }, ch: '\n',
     options: { tabSize: 2, insertSpaces: true },
-  }), [{ range: at, newText: '> \n> :::' }])
+  }), [
+    { range: at, newText: '> ' },
+    { range: { start: { line: 2, character: 0 }, end: { line: 2, character: 0 } }, newText: '> :::\n' },
+  ])
 })

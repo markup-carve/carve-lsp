@@ -197,6 +197,25 @@ function codeBlockAt(source: string, line: number): { startLine: number; endLine
   return found
 }
 
+/**
+ * The edits Enter writes from a `continuationPrefix` result. LSP cannot place the
+ * cursor, and clients move it past an insert made at its position, so only the
+ * text before the first newline goes at the cursor and a closer goes at the start
+ * of the next line. On the last line the whole prefix stays one insert at the cursor.
+ */
+export function continuationEdits(source: string, position: { line: number; character: number }): ContinuationEdit[] {
+  const prefix = continuationPrefix(source, position.line)
+  if (prefix === '') return []
+  const at = { start: position, end: position }
+  const newline = prefix.indexOf('\n')
+  if (newline < 0) return [{ range: at, newText: prefix }]
+  // On the last line nothing lies after the cursor, and LSP4IJ reverses two inserts at one offset.
+  if (position.line + 1 >= sourceLines(source).length) return [{ range: at, newText: prefix }]
+  const next = { line: position.line + 1, character: 0 }
+  const closer: ContinuationEdit = { range: { start: next, end: next }, newText: `${prefix.slice(newline + 1)}\n` }
+  return newline > 0 ? [{ range: at, newText: prefix.slice(0, newline) }, closer] : [closer]
+}
+
 export interface ContinuationEdit {
   range: { start: { line: number; character: number }; end: { line: number; character: number } }
   newText: string

@@ -56,7 +56,7 @@ import { referencesAt } from './references.js'
 import { codeLenses } from './codelens.js'
 import { completionAt } from './completion.js'
 import { foldingRanges } from './folding.js'
-import { continuationPrefix, formatDocument, formatRange, listContinuationEdits, listIndentEdits } from './format.js'
+import { continuationEdits, formatDocument, formatRange, listContinuationEdits, listIndentEdits } from './format.js'
 import { hoverAt } from './hover.js'
 import { migrationCodeActions } from './migration-actions.js'
 import { lintCodeActions } from './lint-actions.js'
@@ -452,9 +452,7 @@ connection.onRequest(DocumentOnTypeFormattingRequest.type, (params) => {
   if (!document) return []
   const list = listContinuationEdits(document.getText(), params.position)
   if (list) return list
-  const prefix = continuationPrefix(document.getText(), params.position.line)
-  // LSP on-type edits cannot place the cursor; where it lands relative to a closer is up to the client.
-  return prefix ? [{ range: { start: params.position, end: params.position }, newText: prefix }] : []
+  return continuationEdits(document.getText(), params.position)
 })
 
 connection.onRequest(FoldingRangeRequest.type, (params) => {
