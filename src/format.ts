@@ -209,10 +209,11 @@ export function continuationEdits(source: string, position: { line: number; char
   const at = { start: position, end: position }
   const newline = prefix.indexOf('\n')
   if (newline < 0) return [{ range: at, newText: prefix }]
+  const eol = source.includes('\r\n') ? '\r\n' : '\n'
   // On the last line nothing lies after the cursor, and LSP4IJ reverses two inserts at one offset.
-  if (position.line + 1 >= sourceLines(source).length) return [{ range: at, newText: prefix }]
+  if (position.line + 1 >= sourceLines(source).length) return [{ range: at, newText: prefix.replaceAll('\n', eol) }]
   const next = { line: position.line + 1, character: 0 }
-  const closer: ContinuationEdit = { range: { start: next, end: next }, newText: `${prefix.slice(newline + 1)}\n` }
+  const closer: ContinuationEdit = { range: { start: next, end: next }, newText: `${prefix.slice(newline + 1).replaceAll('\n', eol)}${eol}` }
   return newline > 0 ? [{ range: at, newText: prefix.slice(0, newline) }, closer] : [closer]
 }
 
