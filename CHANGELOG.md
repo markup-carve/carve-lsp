@@ -71,6 +71,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Improvements
 
+- Enter after an ordinary line no longer parses the whole document to decide
+  that nothing continues.
+
 - Semantic tokens stay linear on very long lines, and inlay hints no longer
   re-split the document per heading. Folding, inlay hints, semantic tokens and
   diagnostics share one parse of an unchanged document.
