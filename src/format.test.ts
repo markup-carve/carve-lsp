@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { carveToHtml } from '@markup-carve/carve'
-import { continuationPrefix, formatDocument, formatRange, listContinuationEdits } from './format.js'
+import { continuationEdits, continuationPrefix, formatDocument, formatRange, listContinuationEdits } from './format.js'
 
 test('adds a missing final line ending', () => {
   assert.equal(formatDocument('# Title'), '# Title\n')
@@ -166,4 +166,19 @@ test('closedness is judged with the cursor line holding the container lead', () 
     ['[^1]: ::: note', '  x\n  :::', '  '],
     ['::: note', 'x\n:::', ''],
   ] as const) assert.equal(prefixAfter(before, after), expected, before)
+})
+
+test('continuationEdits keeps a closer off the cursor position', () => {
+  const at = (line: number, character: number) => ({ start: { line, character }, end: { line, character } })
+  assert.deepEqual(continuationEdits('::: note\n\nrest', { line: 1, character: 0 }), [{ range: at(2, 0), newText: ':::\n' }])
+  assert.deepEqual(continuationEdits('```js\n\n', { line: 1, character: 0 }), [{ range: at(2, 0), newText: '```\n' }])
+  assert.deepEqual(continuationEdits('> ::: note\n\n', { line: 1, character: 0 }), [
+    { range: at(1, 0), newText: '> ' },
+    { range: at(2, 0), newText: '> :::\n' },
+  ])
+  // The last line has no next line, so the prefix stays one insert at the cursor.
+  assert.deepEqual(continuationEdits('::: note\n', { line: 1, character: 0 }), [{ range: at(1, 0), newText: '\n:::' }])
+  assert.deepEqual(continuationEdits('> ::: note\n', { line: 1, character: 0 }), [{ range: at(1, 0), newText: '> \n> :::' }])
+  assert.deepEqual(continuationEdits('> q\n', { line: 1, character: 0 }), [{ range: at(1, 0), newText: '> ' }])
+  assert.deepEqual(continuationEdits('plain\n', { line: 1, character: 0 }), [])
 })

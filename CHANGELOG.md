@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixes
+
+- Enter after a `:::` or code fence opener keeps the cursor on the new body
+  line. The closer is sent as a separate edit at the start of the next line
+  instead of at the cursor, where VS Code and LSP4IJ moved the cursor past it;
+  a container lead such as `> ` is still inserted at the cursor. On the last
+  line of a document there is no next line, so the answer stays one insert at
+  the cursor and the client decides where the cursor goes.
+
 ## [0.1.11] - 2026-10-14
 
 ### Fixes
