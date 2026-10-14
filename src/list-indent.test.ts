@@ -131,3 +131,9 @@ test('carve.listIndent returns the edits, or null for the host Tab', async (cont
   assert.equal(await run(1, 'indent', 'untitled:missing.crv'), null)
   assert.equal(client.notifications.some((item) => item.method === 'workspace/applyEdit'), false)
 })
+
+test('Tab and Shift+Tab move an item whose marker carries attributes', () => {
+  assert.equal(apply('- a\n-{.c} b\n', listIndentEdits('- a\n-{.c} b\n', 1, 'indent')!), '- a\n  -{.c} b\n')
+  assert.equal(apply('- a\n  -{.c} b\n', listIndentEdits('- a\n  -{.c} b\n', 1, 'outdent')!), '- a\n-{.c} b\n')
+  assert.equal(depth(apply('- a\n-{.c} b\n', listIndentEdits('- a\n-{.c} b\n', 1, 'indent')!), 1), 1)
+})

@@ -24,22 +24,24 @@ export function lintCodeActions(uri: string, source: string, diagnostics: Diagno
         title = 'Insert the block-quote separator'
       }
     } else if (code === 'table-alignment-run-padding') {
-      const marker = /\|=?[<>~^v]{1,2}(?=\S)/.exec(line)
+      // The run the diagnostic covers, not the first one on the line.
+      const marker = [...line.matchAll(/\|=?[<>~^v]{1,2}(?=\S)/g)]
+        .find((run) => run.index! <= diagnostic.range.start.character && run.index! + run[0].length >= diagnostic.range.end.character)
       if (marker) {
-        const character = marker.index + marker[0].length
+        const character = marker.index! + marker[0].length
         edit = { range: point(diagnostic.range.start.line, character), newText: ' ' }
         title = 'Terminate the table alignment run with a space'
       }
     } else if (code === 'unresolved-footnote') {
       const match = /\[\^([^\]]+)\]/.exec(line.slice(diagnostic.range.start.character)) ?? /\[\^([^\]]+)\]/.exec(line)
       if (match) {
-        edit = append(source, `\n[^${match[1]}]: `)
+        edit = appendBlock(source, `[^${match[1]}]: `)
         title = `Create footnote definition “${match[1]}”`
       }
     } else if (code === 'unresolved-reference-link') {
       const match = /\]\[([^\]]+)\]/.exec(line.slice(diagnostic.range.start.character)) ?? /\]\[([^\]]+)\]/.exec(line)
       if (match && match[1]) {
-        edit = append(source, `\n[${match[1]}]: `)
+        edit = appendBlock(source, `[${match[1]}]: `)
         title = `Create link definition “${match[1]}”`
       }
     } else if (code === 'colon-fence-length-mismatch') {
@@ -72,10 +74,13 @@ export function lintCodeActions(uri: string, source: string, diagnostics: Diagno
   return actions
 }
 
-function append(source: string, newText: string): TextEdit {
+/** Appends a block at the end, after a blank line so it cannot join a trailing paragraph. */
+function appendBlock(source: string, block: string): TextEdit {
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   const line = Math.max(0, lines.length - 1)
-  return { range: point(line, lines[line]?.length ?? 0), newText }
+  const eol = source.includes('\r\n') ? '\r\n' : '\n'
+  const blanks = lines.length > 1 && (lines.at(-1) ?? '') === '' ? (lines.length > 2 && lines.at(-2)!.trim() === '' ? 0 : 1) : 2
+  return { range: point(line, lines[line]?.length ?? 0), newText: eol.repeat(source === '' ? 0 : blanks) + block }
 }
 
 function point(line: number, character: number) {

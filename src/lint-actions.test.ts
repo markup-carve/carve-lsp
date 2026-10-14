@@ -32,3 +32,23 @@ test('offers both explicit intentions for a near colon closer', () => {
   assert.equal(actions[0]?.edit?.changes?.['file:///a.crv']?.[0]?.newText, '::::')
   assert.equal(actions[1]?.edit?.changes?.['file:///a.crv']?.[0]?.newText, '\\')
 })
+
+const at = (code: string, line: number, start: number, end: number) => ({
+  code, message: code, range: { start: { line, character: start }, end: { line, character: end } },
+})
+
+test('pads the alignment run the diagnostic points at', () => {
+  const source = '| x |<c |>d |\n'
+  const edits = [at('table-alignment-run-padding', 0, 5, 6), at('table-alignment-run-padding', 0, 9, 10)]
+    .map((item) => lintCodeActions('file:///a.crv', source, [item])[0]?.edit?.changes?.['file:///a.crv']?.[0]?.range.start.character)
+  assert.deepEqual(edits, [6, 10])
+})
+
+test('a created definition is separated from a trailing paragraph', () => {
+  const newText = (source: string, code: string) => lintCodeActions('file:///a.crv', source, [diagnostic(code)])[0]?.edit?.changes?.['file:///a.crv']?.[0]?.newText
+  assert.equal(newText('Some text[^x]', 'unresolved-footnote'), '\n\n[^x]: ')
+  assert.equal(newText('Some text[^x]\n', 'unresolved-footnote'), '\n[^x]: ')
+  assert.equal(newText('Some text[^x]\n\n', 'unresolved-footnote'), '[^x]: ')
+  assert.equal(newText('See [x][r]', 'unresolved-reference-link'), '\n\n[r]: ')
+  assert.equal(newText('Some text[^x]\r\n', 'unresolved-footnote'), '\r\n[^x]: ')
+})

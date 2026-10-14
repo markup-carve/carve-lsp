@@ -1,5 +1,6 @@
 import { DiagnosticSeverity, DocumentHighlightKind, InlayHintKind, type Diagnostic, type DocumentHighlight, type Hover, type InlayHint, type Position, type Range } from 'vscode-languageserver-types'
 import { parse } from '@markup-carve/carve'
+import { astColumnToCharacter } from './position.js'
 
 interface UnclosedContainer { kind: string; line: number; column: number; startOffset: number; endOffset: number; fenceWidth: number }
 
@@ -26,7 +27,8 @@ export function colonFenceStructure(source: string): { openers: FenceSite[]; pai
   const unclosed: UnclosedContainer[] = []
   const document = parse(source, { positions: true, onUnclosedContainer: (site) => unclosed.push(site) })
   const key = (line: number, column: number, width: number) => `${line}:${column}:${width}`
-  const unclosedKeys = new Set(unclosed.map((site) => key(site.line, site.column, site.fenceWidth)))
+  // Keys use UTF-16 columns, the unit every FenceSite range carries.
+  const unclosedKeys = new Set(unclosed.map((site) => key(site.line, astColumnToCharacter(lines[site.line - 1] ?? '', site.column) + 1, site.fenceWidth)))
   const openers = new Map<number, FenceSite>()
   const opaque: Array<readonly [number, number]> = []
   const diagnostics: Diagnostic[] = []
@@ -123,7 +125,7 @@ function pairFences(lines: string[], openers: Map<number, FenceSite>, opaque: Ar
     }
     const top = stack[stack.length - 1]
     if (!top) continue
-    const column = top.range.start.character
+    const column = closerColumn(lines[top.range.start.line] ?? '', top.range.start.character)
     const text = lines[line] ?? ''
     // The closer repeats the opener's quote markers; a list marker before the opener is indent here.
     const prefix = text.slice(0, column)
@@ -134,6 +136,12 @@ function pairFences(lines: string[], openers: Map<number, FenceSite>, opaque: Ar
     stack.pop()
   }
   return pairs
+}
+
+/** A footnote label before the opener gives way to the two-space body indent its closer sits at. */
+function closerColumn(openerLine: string, column: number): number {
+  const label = /^((?:[ \t]*> )*[ \t]*)\[\^[^\]]*\]: +$/.exec(openerLine.slice(0, column))
+  return label ? label[1]!.length + 2 : column
 }
 
 function quoteDepth(line: string): number {
@@ -153,11 +161,21 @@ function fenceSite(line: number, character: number, width: number, kind: string)
  * without having to read `fenced`.
  */
 function astFenceSite(node: Record<string, unknown>, lines: string[]): FenceSite | null {
-  if (!Array.isArray(node.children)) return null
+  if (!Array.isArray(node.children) || holdsInlines(node)) return null
   const pos = node.pos as { startLine?: number; startColumn?: number } | undefined
   if (!pos?.startLine || !pos.startColumn) return null
-  const run = lineRun(lines[pos.startLine - 1] ?? '', pos.startColumn - 1)
-  return run ? fenceSite(pos.startLine - 1, pos.startColumn - 1, run.width, fenceKind(node)) : null
+  const text = lines[pos.startLine - 1] ?? ''
+  const character = astColumnToCharacter(text, pos.startColumn)
+  const run = lineRun(text, character)
+  return run ? fenceSite(pos.startLine - 1, character, run.width, fenceKind(node)) : null
+}
+
+// A paragraph whose first line is a literal `:::` run starts on it too, but holds text, not blocks.
+const INLINE_BLOCKS = new Set(['paragraph', 'heading'])
+
+function holdsInlines(node: Record<string, unknown>): boolean {
+  return INLINE_BLOCKS.has(String(node.type ?? '')) ||
+    (node.children as unknown[]).some((child) => (child as { type?: unknown } | null)?.type === 'text')
 }
 function fenceKind(node: Record<string, unknown>): string {
   const type = String(node.type ?? '')

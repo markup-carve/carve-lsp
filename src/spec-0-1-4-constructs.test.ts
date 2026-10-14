@@ -109,6 +109,6 @@ test('a fenced block quote is continued as the container it is (carve#1718)', ()
   // The 0.1.4 spelling of a quote goes through the colon-fence branch, so Enter
   // after the opener writes the closer rather than a `>` prefix.
   assert.equal(continuationPrefix('::: >\n', 1), '\n:::')
-  assert.equal(continuationPrefix('  :::: >\n', 1), '\n  ::::')
+  assert.equal(continuationPrefix('> :::: >\n', 1), '> \n> ::::')
   assert.equal(continuationPrefix('> quoted\n', 1), '> ')
 })

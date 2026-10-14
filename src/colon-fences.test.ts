@@ -45,3 +45,23 @@ test('a quoted container does not pair across the end of its quote', () => {
   // The quote ends the inner container, so the bare run closes the outer one.
   assert.deepEqual(pairLines('::: note\n> ::: tip\n> x\n\n:::\n'), [[0, 4, 0]])
 })
+
+test('a paragraph that starts with a literal colon run is not a container', () => {
+  // An unquoted title makes the whole fence plain text, closer included.
+  const source = '::: note Custom Title\nbody\n:::\n'
+  assert.deepEqual(colonFenceStructure(source).pairs, [])
+  assert.deepEqual(colonFenceInlayHints(source, { start: { line: 0, character: 0 }, end: { line: 3, character: 0 } }), [])
+  assert.equal(linkedColonFenceRanges(source, { line: 0, character: 1 }), null)
+})
+
+test('a fence opened on a footnote label pairs with the closer at the body indent', () => {
+  assert.deepEqual(pairLines('x[^1]\n\n[^1]: ::: note\n  body\n  :::\n'), [[2, 4, 2]])
+  assert.deepEqual(pairLines('x[^long]\n\n> [^long]: ::: note\n>   body\n>   :::\n'), [[2, 4, 4]])
+})
+
+test('fence columns are UTF-16 after an astral character', () => {
+  const source = 'x[^🎉]\n\n[^🎉]: ::: note\n  body\n  :::\n'
+  const [opener] = colonFenceStructure(source).openers
+  assert.deepEqual(opener?.range, { start: { line: 2, character: 7 }, end: { line: 2, character: 10 } })
+  assert.deepEqual(pairLines(source), [[2, 4, 2]])
+})

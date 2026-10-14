@@ -317,3 +317,18 @@ test('the bare continuation marker covers list and definition markers', () => {
   for (const bare of ['- ', '* ', '- [ ] ', '2. ', 'b) ', '. ', ': ', ':   ']) assert.ok(BARE_CONTINUATION_MARKER.test(bare), JSON.stringify(bare))
   for (const text of ['-', ':', ':\t', ': x', '- x', '-\t', '::: ']) assert.ok(!BARE_CONTINUATION_MARKER.test(text), JSON.stringify(text))
 })
+
+test('on-type formatting sends a container lead and its closer', async (context) => {
+  const client = LspStdioClient.spawnServer(fileURLToPath(new URL('./server.js', import.meta.url)))
+  context.after(() => client.stop())
+  await client.request('initialize', { processId: null, capabilities: {}, workspaceFolders: [], initializationOptions: {} })
+  client.notify('initialized', {})
+  client.notify('textDocument/didOpen', {
+    textDocument: { uri: 'untitled:fence.crv', languageId: 'carve', version: 1, text: '> ::: note\n\n' },
+  })
+  const at = { start: { line: 1, character: 0 }, end: { line: 1, character: 0 } }
+  assert.deepEqual(await client.request('textDocument/onTypeFormatting', {
+    textDocument: { uri: 'untitled:fence.crv' }, position: { line: 1, character: 0 }, ch: '\n',
+    options: { tabSize: 2, insertSpaces: true },
+  }), [{ range: at, newText: '> \n> :::' }])
+})
