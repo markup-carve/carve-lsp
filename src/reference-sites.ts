@@ -131,7 +131,7 @@ export function referenceModel(source: string): ReferenceModel {
         return
       }
       case 'footnote_ref': {
-        const id = node.id
+        const id = (node as { label?: unknown }).label
         if (typeof id !== 'string') return
         const keyStart = at.start + 2
         const written = text.slice(keyStart, keyStart + id.length) === id

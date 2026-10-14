@@ -1,6 +1,6 @@
 {
   "name": "@markup-carve/carve-lsp",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "type": "module",
   "description": "Language server for Carve markup documents",
   "license": "MIT",
@@ -43,7 +43,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@markup-carve/carve": "^0.1.9",
+    "@markup-carve/carve": "^0.1.11",
     "vscode-languageserver": "^9.0.1",
     "vscode-languageserver-textdocument": "^1.0.12",
     "vscode-languageserver-types": "^3.17.5"

@@ -73,7 +73,7 @@ test('an id the parent already claimed is reported as renamed', () => {
   const result = resolveIncludes('{#intro}\n# Parent\n\n{{ a }}\n', {
     resolver: virtualResolver({ a: '{#intro}\n# Child\n' }),
   })
-  assert.deepEqual(rules(result.warnings), ['include-heading-id-rename'])
+  assert.deepEqual(rules(result.warnings), ['include-id-rename'])
 })
 
 test('the rename names both the taken id and the one it was given', () => {
