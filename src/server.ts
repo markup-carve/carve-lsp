@@ -494,7 +494,7 @@ connection.onRequest(DefinitionRequest.type, (params) => {
       )
   if (local) return local
   const token = workspaceIndex.tokenAt(document.uri, params.position)
-  const target = token ? workspaceIndex.definitions(token.kind, token.key)[0] : undefined
+  const target = token ? workspaceIndex.definitions(token.kind, token.key, document.uri)[0] : undefined
   return target ? { uri: target.uri, range: target.range } : null
 })
 
@@ -502,7 +502,7 @@ connection.onRequest(ReferencesRequest.type, (params) => {
   const document = documents.get(params.textDocument.uri)
   if (!document) return null
   const token = workspaceIndex.tokenAt(document.uri, params.position)
-  if (token) return workspaceIndex.references(token.kind, token.key, params.context.includeDeclaration)
+  if (token) return workspaceIndex.references(token.kind, token.key, params.context.includeDeclaration, document.uri)
   return referencesAt(params.textDocument.uri, document.getText(), params.position, params.context)
 })
 

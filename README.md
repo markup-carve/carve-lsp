@@ -27,7 +27,7 @@ The server communicates over **stdio** (`--stdio` flag).
 | Hover | Markup, cross-reference, include, citation, and table-marker explanations |
 | Completion | Container kinds (admonitions, placement markers, extension containers), code fence languages, attributes, semantic spans, citations, references, heading titles as `[Heading][]` links, workspace anchors, and contained include paths, sections and options |
 | Navigation | Document links, go-to-definition, highlights, and references for anchors, captions, footnotes, citations, and link labels |
-| Rename | Workspace-wide, namespace-aware rename; generated heading ids become explicit when renamed |
+| Rename | Namespace-aware rename: anchors, captions and citation keys across the workspace, footnote and link labels within their document; generated heading ids become explicit when renamed |
 | Code actions | Migration and lint quick-fixes, table marker repair, creation of missing definitions, and export to Markdown or HTML |
 | Code lens | Reference counts for anchors, captions, citations, footnotes, and link labels |
 | Selection and folding | Syntax-aware selection expansion and folding, with tolerant fallbacks during incomplete edits |

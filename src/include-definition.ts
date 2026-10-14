@@ -1,6 +1,8 @@
 import { portableIncludePaths } from './include-paths.js'
 import { type Location, type Position, type Range } from 'vscode-languageserver-types'
-import { findDirectives, type Directive } from './include-directive.js'
+import { findDirectiveSites, parse } from '@markup-carve/carve'
+import { type Directive } from './include-directive.js'
+import { astOffsetToIndex } from './position.js'
 import { lineCount, sectionRange } from './include-selection.js'
 import type { IncludeOptions } from './includes.js'
 
@@ -17,9 +19,7 @@ export function includeDefinitionAt(
   if (!options?.resolver) return null
   const normalized = source.replace(/\r\n?/g, '\n')
   const offset = offsetAt(normalized, position)
-  const directive = findDirectives(normalized).find(
-    (candidate) => offset >= candidate.start && offset < candidate.end,
-  )
+  const directive = directiveAt(normalized, offset)
   if (!directive) return null
   const stack = options.sourcePath === undefined ? [] : [options.sourcePath]
   const resolved = options.resolver(directive.path, {
@@ -44,7 +44,7 @@ export function includeDefinitionAt(
  * the jump: the file itself resolved, and `include-section` already reports
  * the bad selection as a diagnostic.
  */
-function selectionRange(directive: Directive, source: string): Range {
+function selectionRange(directive: Omit<Directive, 'start' | 'end'>, source: string): Range {
   if (directive.section !== undefined) {
     return sectionRange(source, directive.section) ?? FILE_START
   }
@@ -57,6 +57,18 @@ function selectionRange(directive: Directive, source: string): Range {
     return { start: { line, character: 0 }, end: { line, character: 0 } }
   }
   return FILE_START
+}
+
+/** The directive the engine recognizes at `offset`; one in code, a comment or other verbatim text is not one. */
+function directiveAt(source: string, offset: number): Omit<Directive, 'start' | 'end'> | null {
+  try {
+    for (const site of findDirectiveSites(parse(source, { positions: true }))) {
+      if (offset >= astOffsetToIndex(source, site.start) && offset < astOffsetToIndex(source, site.end)) return site.directive
+    }
+  } catch {
+    // A document that does not parse has no directives to follow.
+  }
+  return null
 }
 
 function offsetAt(source: string, position: Position): number {

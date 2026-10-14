@@ -243,7 +243,7 @@ test('a collapsed reference IS a usage of a heading id', () => {
   const locations = referencesAt('file:///d.crv', source, { line: 2, character: 20 }, {
     includeDeclaration: false,
   })
-  assert.deepEqual(locations?.map((location) => location.range.start.character), [16, 4])
+  assert.deepEqual(locations?.map((location) => location.range.start.character), [4, 16])
 })
 
 test('the outline carries the group and nests its panels', () => {

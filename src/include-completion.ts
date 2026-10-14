@@ -17,6 +17,7 @@ import {
 } from 'vscode-languageserver-types'
 import type { IncludeOptions } from './includes.js'
 import { lineCount, sections } from './include-selection.js'
+import { inVerbatim, referenceModel } from './reference-sites.js'
 
 /**
  * The option names §19 defines, with the value shapes worth offering. The
@@ -91,8 +92,12 @@ export function includeCompletions(
 ): CompletionItem[] {
   if (!options?.sourcePath || !options.includeRoot) return []
   const line = source.replace(/\r\n?/g, '\n').split('\n')[position.line] ?? ''
-  const inner = directiveInner(line.slice(0, position.character))
+  const prefix = line.slice(0, position.character)
+  const inner = directiveInner(prefix)
   if (inner === null) return []
+  // A directive in code, a raw block or a comment is literal text (I9).
+  const model = referenceModel(source)
+  if (inVerbatim(model, model.offsetAt({ line: position.line, character: prefix.lastIndexOf('{{') }))) return []
   const root = realpathSafe(options.includeRoot)
   if (!root) return []
 

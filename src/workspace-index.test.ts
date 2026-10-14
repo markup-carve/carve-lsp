@@ -12,12 +12,12 @@ test('indexes declarations and uses across Carve namespaces', () => {
   ])
 })
 
-test('finds references and renames across indexed documents', () => {
+test('finds references and renames headings across indexed documents', () => {
   const index = new WorkspaceIndex()
-  index.update('file:///a.crv', '[^note]: body\n', 1)
-  index.update('file:///b.crv', 'Use [^note].\n', 1)
-  assert.equal(index.references('footnote', 'note', true).length, 2)
-  const edit = index.rename('file:///b.crv', { line: 0, character: 7 }, 'source')
+  index.update('file:///a.crv', '{#note}\n# Note\n', 1)
+  index.update('file:///b.crv', 'Use </#note>.\n', 1)
+  assert.equal(index.references('heading', 'note', true).length, 2)
+  const edit = index.rename('file:///b.crv', { line: 0, character: 8 }, 'source')
   assert.deepEqual(Object.keys(edit?.changes ?? {}).sort(), ['file:///a.crv', 'file:///b.crv'])
 })
 

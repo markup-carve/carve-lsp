@@ -10,13 +10,15 @@ import {
 import { astColumnToCharacter, characterToAstColumn, sourceLines } from './position.js'
 import { captionTargetById, type CaptionTarget } from './captions.js'
 import { colonFenceHover } from './colon-fences.js'
+import { walkNodes } from './ast-walk.js'
 
 interface HoverRule {
   pattern: RegExp
   contents: string
 }
 
-const rules: HoverRule[] = [
+/** Help the AST cannot place: table metadata, citations, includes and attribute blocks. */
+const lexicalRules: HoverRule[] = [
   {
     pattern: /\|=?\s*[<>~^v]{1,2}(?=\{| )/g,
     contents: '**Table alignment**\n\nA one- or two-character run sets horizontal and/or vertical cell alignment. Two-axis runs normalize to horizontal then vertical.',
@@ -33,6 +35,14 @@ const rules: HoverRule[] = [
     pattern: /\{\{[^}\n]+\}\}/g,
     contents: '**Include**\n\nProcessor-level file inclusion. The language server resolves it only in a trusted, explicitly enabled workspace.',
   },
+  {
+    pattern: /\{[^}\n]+\}/g,
+    contents: '**Attributes**\n\nAttach IDs, classes, and key/value pairs with `{#id .class key=value}`.',
+  },
+]
+
+/** Markup guesses, used only when the document does not parse. */
+const markupRules: HoverRule[] = [
   {
     pattern: /#{1,6}/g,
     contents: '**Heading**\n\n`#` through `######` create section headings.',
@@ -54,10 +64,6 @@ const rules: HoverRule[] = [
     contents: '**Strikethrough**\n\nCarve uses tildes for strikethrough: `~removed~`.',
   },
   {
-    pattern: /\{[^}\n]+\}/g,
-    contents: '**Attributes**\n\nAttach IDs, classes, and key/value pairs with `{#id .class key=value}`.',
-  },
-  {
     pattern: /\[[^\]\n]+\]\([^\s)]+(?:\s+"[^"]*")?\)/g,
     contents: '**Link**\n\nInline links use `[label](url)`.',
   },
@@ -76,11 +82,13 @@ export function hoverAt(source: string, position: Position): Hover | null {
   if (fence) return fence
   const lines = sourceLines(source)
 
+  let rules = lexicalRules
   try {
     const hover = astHoverAt(resolve(parse(source)), position, lines)
     if (hover) return hover
   } catch {
-    // Fall back to lexical help below for documents that do not parse.
+    // Guess at markup only for documents that do not parse.
+    rules = [...lexicalRules, ...markupRules]
   }
 
   const line = lines[position.line]
@@ -121,7 +129,12 @@ function astHoverAt(doc: Document, position: Position, lines: string[]): Hover |
   // scope for it while every other rule reads one node. It is looked up through
   // this resolver rather than from inside the inline walk.
   const resolveRef: RefResolver = (id) => captionTargetById(doc, id)
-  for (const node of doc.children) collectBlock(matches, node, cursor, resolveRef)
+  // Every node, footnote bodies and line blocks included.
+  walkNodes(doc, (node) => {
+    if (node.type === 'document') return
+    const contents = blockContents(node as unknown as BlockNode) ?? inlineContents(node as unknown as InlineNode, resolveRef)
+    addMatch(matches, node.pos as SourcePosition | undefined, cursor, contents)
+  })
   matches.sort((a, b) => spanSize(a.pos) - spanSize(b.pos))
   const match = matches[0]
   if (!match) return null
@@ -131,73 +144,6 @@ function astHoverAt(doc: Document, position: Position, lines: string[]): Hover |
       value: match.contents,
     },
     range: toRange(match.pos, lines),
-  }
-}
-
-function collectBlock(
-  matches: Array<{ pos: SourcePosition; contents: string }>,
-  node: BlockNode,
-  position: Position,
-  resolveRef: RefResolver,
-): void {
-  addMatch(matches, node.pos, position, blockContents(node))
-  switch (node.type) {
-    case 'heading':
-      collectInline(matches, node.children, position, resolveRef)
-      break
-    case 'paragraph':
-      collectInline(matches, node.children, position, resolveRef)
-      break
-    case 'block_quote':
-      node.children.forEach((child) => collectBlock(matches, child, position, resolveRef))
-      break
-    case 'list':
-      node.items.forEach((item) => item.children.forEach((child) => collectBlock(matches, child, position, resolveRef)))
-      break
-    case 'admonition':
-    case 'div':
-      node.children.forEach((child) => collectBlock(matches, child, position, resolveRef))
-      if (node.type === 'admonition' && node.title) collectInline(matches, node.title, position, resolveRef)
-      break
-    case 'definition_list':
-      node.items.forEach((item) => {
-        item.terms.forEach((term) => collectInline(matches, term, position, resolveRef))
-        item.definitions.forEach((definition) =>
-          definition.forEach((child) => collectBlock(matches, child, position, resolveRef)),
-        )
-      })
-      break
-    case 'figure':
-      collectBlock(matches, node.target, position, resolveRef)
-      collectInline(matches, node.caption, position, resolveRef)
-      break
-    case 'figure_group':
-      node.children.forEach((child) => collectBlock(matches, child, position, resolveRef))
-      if (node.caption) collectInline(matches, node.caption, position, resolveRef)
-      break
-    case 'table':
-      if (node.caption) collectInline(matches, node.caption, position, resolveRef)
-      // A cell carries EITHER inline children or imported `blocks` (carve-js#1980), never both.
-      // Carve source always yields the inline half, and this server only ever parses source.
-      node.rows.forEach((row) =>
-        row.cells.forEach((cell) => collectInline(matches, cell.children ?? [], position, resolveRef)),
-      )
-      break
-  }
-}
-
-function collectInline(
-  matches: Array<{ pos: SourcePosition; contents: string }>,
-  nodes: InlineNode[],
-  position: Position,
-  resolveRef: RefResolver,
-): void {
-  for (const node of nodes) {
-    addMatch(matches, node.pos, position, inlineContents(node, resolveRef))
-    const children = (node as { children?: InlineNode[] }).children
-    if (Array.isArray(children)) collectInline(matches, children, position, resolveRef)
-    const content = (node as { content?: InlineNode[] }).content
-    if (Array.isArray(content)) collectInline(matches, content, position, resolveRef)
   }
 }
 
