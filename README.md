@@ -138,10 +138,7 @@ watches it for changes.
 | `inlayHints` | `true` | Show inlay hints: generated heading identifiers, colon-fence closers, and the bare list marker hint. `false` turns all of them off; an object such as `{ "bareListMarkers": false }` keeps the others and turns that one off. |
 | `exportActions` | `true` | Offer the *Export as Markdown* / *Export as HTML* source actions. Editors with their own export commands can turn this off. |
 | `formatter` | `"conservative"` | Use whitespace-only conservative formatting; `"migration"` opts into canonical whole-document conversion. |
-| `format.alignTables` | `false` | Align table cells in document, range, and on-type formatting. The *Align table* action works without this setting. |
 | `severities` | `{}` | Override a diagnostic code with `"error"`, `"warning"`, `"information"`, `"hint"`, or `"off"`. |
-
-When table alignment is enabled, the selected table uses canonical Carve cell spelling before padding. Other source remains in the conservative formatter's form.
 
 Example `.carverc.json`:
 
@@ -152,7 +149,6 @@ Example `.carverc.json`:
     "extensions": ["semantic-span"],
     "inlayHints": { "bareListMarkers": true },
     "formatter": "conservative",
-    "format": { "alignTables": true },
     "severities": { "table-width-total": "error" }
   }
 }
