@@ -11,9 +11,15 @@ test('reads safe project settings and rejects unknown platform names', () => {
     platforms: ['github', 'unknown'], extensions: ['semantic-span'], inlayHints: false, exportActions: false, formatter: 'migration',
     severities: { 'table-width-total': 'error', bogus: 'loud' },
   } }), {
-    platforms: ['github'], extensions: ['semantic-span'], inlayHints: false, bareListMarkerHints: false, exportActions: false, formatter: 'migration',
+    platforms: ['github'], extensions: ['semantic-span'], inlayHints: false, bareListMarkerHints: false, exportActions: false, formatter: 'migration', formatAlignTables: false,
     severities: { 'table-width-total': 'error' },
   })
+})
+
+test('reads the optional table alignment setting', () => {
+  assert.equal(readCarveSettings({ carve: { format: { alignTables: true } } }).formatAlignTables, true)
+  assert.equal(readCarveSettings({ carve: { 'format.alignTables': true } }).formatAlignTables, true)
+  assert.equal(readCarveSettings({ carve: { format: { alignTables: 'true' } } }).formatAlignTables, false)
 })
 
 test('inlayHints takes a boolean or per-hint switches', () => {
