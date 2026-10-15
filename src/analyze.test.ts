@@ -442,3 +442,10 @@ test('diagnostic severity overrides can promote or suppress individual rules', (
   const hidden = analyzeCarve(source, { lint: { severities: { 'table-width-total': 'off' } } })
   assert.equal(hidden.diagnostics.some((item) => item.code === 'table-width-total'), false)
 })
+
+test('a bare empty definition resolves its reference in the diagnostics too (carve#2878)', () => {
+  // Completion and semantic tokens read `[r]:` as a definition; the engine has
+  // to agree, which needs carve-js 0.1.12 or later.
+  const result = analyzeCarve('[t][r]\n\n[r]:\n')
+  assert.deepEqual(result.diagnostics.map((d) => [d.code, d.range.start.line]), [['empty-reference-definition', 2]])
+})
