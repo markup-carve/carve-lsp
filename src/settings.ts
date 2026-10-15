@@ -10,7 +10,6 @@ export interface CarveSettings {
   bareListMarkerHints: boolean
   exportActions: boolean
   formatter: 'conservative' | 'migration'
-  formatAlignTables: boolean
   severities: Record<string, 'error' | 'warning' | 'information' | 'hint' | 'off'>
 }
 
@@ -21,7 +20,6 @@ export const DEFAULT_CARVE_SETTINGS: CarveSettings = {
   bareListMarkerHints: true,
   exportActions: true,
   formatter: 'conservative',
-  formatAlignTables: false,
   severities: {},
 }
 
@@ -41,16 +39,8 @@ export function readCarveSettings(raw: unknown): CarveSettings {
     bareListMarkerHints: carve['inlayHints'] !== false && subSetting(carve['inlayHints'], 'bareListMarkers'),
     exportActions: carve['exportActions'] !== false,
     formatter: carve['formatter'] === 'migration' ? 'migration' : 'conservative',
-    formatAlignTables: formatAlignTables(carve),
     severities: severitySettings(carve['severities']),
   }
-}
-
-function formatAlignTables(carve: Record<string, unknown>): boolean {
-  const format = carve['format']
-  return (format !== null && typeof format === 'object' && !Array.isArray(format)
-    && (format as Record<string, unknown>)['alignTables'] === true)
-    || carve['format.alignTables'] === true
 }
 
 // `inlayHints` is a boolean, or an object of per-hint switches that default to on.
