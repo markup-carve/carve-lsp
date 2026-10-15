@@ -477,10 +477,10 @@ function pushHeadingTitle(tokens: Token[], lines: string[], pos: Position | unde
  *   `>  q` and `> <TAB>q`         -> both quote
  */
 
-// `reference_definition = '[', reference_label, ']', ':', space, ...` and the
-// footnote form. The space is REQUIRED - the old `\s*` also matched none, so
-// `[a]:/u` was colored as a definition too.
+// Footnotes and abbreviations require content after a space.
 export const DEF_SEPARATOR = String.raw`\]: [ \t]*`
+// Link references also permit a bare empty destination after ASCII trim.
+export const REF_SEPARATOR = String.raw`\]:(?: [ \t]*(?=\S)|[ \t]*$)`
 
 // `blockquote_line = '>', (newline | (space, inline_content, newline))`. A bare
 // `>` is a blockquote line, which is why the space is optional only at
@@ -512,8 +512,8 @@ function scanAstGaps(tokens: Token[], line: number, text: string): void {
   }
 
   // reference definition: [label]: url
-  const refDef = new RegExp(String.raw`^(\[)([^\]\n]+)(` + DEF_SEPARATOR + String.raw`)(\S+)`).exec(text)
-  if (refDef) {
+  const refDef = new RegExp(String.raw`^(\[)([^\]\n]+)(` + REF_SEPARATOR + String.raw`)(\S*)`).exec(text)
+  if (refDef && (refDef[4] || !/^[\^@]/.test(refDef[2]!))) {
     push(tokens, line, refDef.index, 1, 'operator')
     push(tokens, line, refDef.index + 1, refDef[2]!.length, 'type')
     push(tokens, line, refDef.index + 1 + refDef[2]!.length, refDef[3]!.length, 'operator')
@@ -622,8 +622,8 @@ function lexicalSemanticTokens(source: string): Token[] {
     }
 
     // reference definition: [label]: url
-    const refDef = new RegExp(String.raw`^(\[)([^\]\n]+)(` + DEF_SEPARATOR + String.raw`)(\S+)`).exec(scanText)
-    if (refDef) {
+    const refDef = new RegExp(String.raw`^(\[)([^\]\n]+)(` + REF_SEPARATOR + String.raw`)(\S*)`).exec(scanText)
+    if (refDef && (refDef[4] || !/^[\^@]/.test(refDef[2]!))) {
       push(tokens, line, refDef.index, 1, 'operator')
       push(tokens, line, refDef.index + 1, refDef[2]!.length, 'type')
       push(tokens, line, refDef.index + 1 + refDef[2]!.length, refDef[3]!.length, 'operator')
