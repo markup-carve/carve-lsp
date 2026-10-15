@@ -149,6 +149,71 @@ test('a document with no directive previews the same with or without a root', ()
   assert.equal(rooted.preview.plain, carveToHtml(DOCS.plain))
 })
 
+test('preview uses unsaved text from an open included document', async () => {
+  const built = tree()
+  const client = LspStdioClient.spawnServer(serverPath, built.project)
+  const rootUri = pathToFileURL(built.workspace).toString()
+  const parent = pathToFileURL(path.join(built.workspace, 'main.crv')).toString()
+  const child = pathToFileURL(path.join(built.workspace, 'chapters/one.crv')).toString()
+  try {
+    await client.request('initialize', {
+      processId: null, capabilities: {}, rootUri,
+      workspaceFolders: [{ uri: rootUri, name: 'ws' }],
+      initializationOptions: { workspaceTrusted: true, carve: { includes: { enabled: 'on', includeRoot: built.workspace } } },
+    })
+    client.notify('initialized', {})
+    client.notify('textDocument/didOpen', { textDocument: { uri: parent, languageId: 'carve', version: 1, text: DOCS.expand } })
+    client.notify('textDocument/didOpen', { textDocument: { uri: child, languageId: 'carve', version: 1, text: 'UNSAVED-BODY\n' } })
+    const first = await client.request('workspace/executeCommand', { command: 'carve.previewHtml', arguments: [parent] }) as string
+    assert.match(first, /UNSAVED-BODY/)
+    client.notify('textDocument/didChange', {
+      textDocument: { uri: child, version: 2 },
+      contentChanges: [{ text: 'SECOND-UNSAVED-BODY\n' }],
+    })
+    const second = await client.request('workspace/executeCommand', { command: 'carve.previewHtml', arguments: [parent] }) as string
+    assert.match(second, /SECOND-UNSAVED-BODY/)
+  } finally {
+    await client.stop()
+  }
+})
+
+test('editing an open child republishes diagnostics for its parent', async () => {
+  const built = tree()
+  const client = LspStdioClient.spawnServer(serverPath, built.project)
+  const rootUri = pathToFileURL(built.workspace).toString()
+  const parent = pathToFileURL(path.join(built.workspace, 'main.crv')).toString()
+  const child = pathToFileURL(path.join(built.workspace, 'chapters/one.crv')).toString()
+  try {
+    await client.request('initialize', {
+      processId: null, capabilities: {}, rootUri,
+      workspaceFolders: [{ uri: rootUri, name: 'ws' }],
+      initializationOptions: { workspaceTrusted: true, carve: { includes: { enabled: 'on', includeRoot: built.workspace } } },
+    })
+    client.notify('initialized', {})
+    client.notify('textDocument/didOpen', { textDocument: { uri: parent, languageId: 'carve', version: 1, text: DOCS.expand } })
+    client.notify('textDocument/didOpen', { textDocument: { uri: child, languageId: 'carve', version: 1, text: '{{ missing.crv }}\n' } })
+    const before = await client.request('textDocument/diagnostic', { textDocument: { uri: parent } }) as { items: Array<{ code?: string }> }
+    assert.ok(before.items.some((item) => item.code === 'include-unresolved'))
+    const notificationsBefore = client.notifications.length
+    client.notify('textDocument/didChange', {
+      textDocument: { uri: child, version: 2 }, contentChanges: [{ text: 'Clean body.\n' }],
+    })
+    const deadline = Date.now() + 3000
+    let republished = false
+    while (Date.now() < deadline && !republished) {
+      republished = client.notifications.slice(notificationsBefore).some((entry) => {
+        if (entry.method !== 'textDocument/publishDiagnostics') return false
+        const params = entry.params as { uri?: string; diagnostics?: Array<{ code?: string }> }
+        return params.uri === parent && !params.diagnostics?.some((item) => item.code === 'include-unresolved')
+      })
+      if (!republished) await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    assert.equal(republished, true)
+  } finally {
+    await client.stop()
+  }
+})
+
 for (const [label, observed] of [
   ['an omitted includeRoot', omitted],
   ['a blank includeRoot', blank],
