@@ -276,13 +276,13 @@ function footnoteLabels(source: string): string[] {
   }
 }
 
-/** Scrape reference definitions, including bare `[label]:` lines. */
+/** Scrape `[label]: url` reference definitions straight from the source. */
 function linkReferenceLabels(source: string): string[] {
   const labels = new Set<string>()
   for (const line of source.split(/\r?\n/)) {
-    const match = /^[ \t]{0,3}\[([^\]]+)\]:(?: [ \t]*(\S)|[ \t]*$)/.exec(line)
+    const match = /^\s{0,3}\[([^\]]+)\]:\s+\S/.exec(line)
     // `[^label]:` is a footnote definition, not a link reference definition.
-    if (match && !match[1]!.startsWith('^') && (match[2] || !match[1]!.startsWith('@'))) labels.add(match[1]!)
+    if (match && !match[1]!.startsWith('^')) labels.add(match[1]!)
   }
   return [...labels]
 }

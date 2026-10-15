@@ -17,9 +17,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The server no longer exits when a client refuses a capability registration
   (`client/registerCapability`). It logs a warning and keeps serving without
   the configuration notifications or file watchers it asked for (#556).
-- A bare link reference definition with an empty destination (`[label]:`)
-  is colored as a definition and its label is offered in reference
-  completion. Bare `[^label]:` and `[@label]:` lines stay excluded (#558).
 - In a document with CRLF line endings, the closer that Enter writes after a
   `:::` or code fence opener ends in CRLF too, instead of a bare LF (#559).
 

@@ -27,16 +27,6 @@ test('suggests link reference labels', () => {
   assert.deepEqual(labels(source, 2, 11), ['site'])
 })
 
-test('suggests bare empty link reference labels', () => {
-  const source = '[r]:\n\nsee [x]['
-  assert.deepEqual(labels(source, 2, 8), ['r'])
-})
-
-test('trims trailing tabs and excludes reserved bare labels', () => {
-  const source = '[r]:\t\n[@k]:\n[^fn]:\n\nsee [x]['
-  assert.deepEqual(labels(source, 4, 8), ['r'])
-})
-
 test('does not offer footnote definitions as link references', () => {
   const source = '[site]: https://example.com\n[^fn]: a footnote\n\nsee [text]['
   assert.deepEqual(labels(source, 3, 11), ['site'])
