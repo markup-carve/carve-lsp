@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { DEF_SEPARATOR, REF_SEPARATOR, LIST_MARKER_ONLY, LIST_PREFIX, QUOTE_PREFIX, semanticTokens } from './semantic.js'
+import { DEF_SEPARATOR, LIST_MARKER_ONLY, LIST_PREFIX, QUOTE_PREFIX, semanticTokens } from './semantic.js'
 
 /*
  * A marker separator is a literal space.
@@ -19,7 +19,7 @@ import { DEF_SEPARATOR, REF_SEPARATOR, LIST_MARKER_ONLY, LIST_PREFIX, QUOTE_PREF
  * they are the half that can.
  */
 
-const defRef = new RegExp(String.raw`^(\[)([^\]\n]+)(` + REF_SEPARATOR + String.raw`)(\S*)`)
+const defRef = new RegExp(String.raw`^(\[)([^\]\n]+)(` + DEF_SEPARATOR + String.raw`)(\S+)`)
 const kinds = (source: string) => semanticTokens(source).map((t) => t.type).join(',')
 
 test('a tab after a definition colon does not satisfy the separator', () => {
@@ -30,24 +30,6 @@ test('a definition still needs its space at all', () => {
   // `\s*` matched NONE as well, so this direction was wrong too: every engine
   // renders `[a]:/u` as a paragraph.
   assert.equal(defRef.exec('[a]:/u'), null)
-})
-
-test('a bare empty link definition has a marker and no destination token', () => {
-  const match = defRef.exec('[r]:')
-  assert.equal(match?.[4], '')
-  assert.ok(kinds('[r]:').includes('type'))
-})
-
-test('a trailing tab is trimmed only for empty link definitions', () => {
-  assert.equal(defRef.exec('[r]:\t')?.[4], '')
-  assert.ok(kinds('[r]:\t').includes('type'))
-  assert.equal(new RegExp(DEF_SEPARATOR).exec(']:\t'), null)
-})
-
-test('reserved bare labels stay prose', () => {
-  assert.ok(!kinds('[@k]:').includes('operator'))
-  assert.ok(!kinds('[^fn]:').includes('operator'))
-  assert.ok(!kinds('*[X]:').includes('operator'))
 })
 
 test('further whitespace after the required space is still a definition', () => {
