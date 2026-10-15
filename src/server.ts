@@ -80,7 +80,7 @@ import { selectionRanges } from './selection.js'
 import { WorkspaceIndex } from './workspace-index.js'
 import { backlinks, generatedNavigation, rebuildImpact, workspaceGraph } from './workspace-graph.js'
 import { indexWorkspace } from './workspace-loader.js'
-import { readFileSync, statSync } from 'node:fs'
+import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { VersionedCache } from './versioned-cache.js'
 import { includeCompletions } from './include-completion.js'
 import { DEFAULT_CARVE_SETTINGS, readCarveSettings, readProjectSettings, type CarveSettings } from './settings.js'
@@ -234,11 +234,14 @@ const diagnostics = new DiagnosticScheduler({
 // latency, so it runs straight away.
 documents.onDidOpen((event) => {
   workspaceIndex.update(event.document.uri, event.document.getText(), event.document.version)
+  invalidateIncludedParse(event.document.uri)
   diagnostics.flush(event.document.uri, event.document.version)
+  revalidateIncludingDocuments(event.document.uri)
 })
 documents.onDidChangeContent((event) => {
   workspaceIndex.update(event.document.uri, event.document.getText(), event.document.version)
   diagnostics.schedule(event.document.uri, event.document.version)
+  revalidateIncludingDocuments(event.document.uri)
 })
 documents.onDidClose((event) => {
   editedLines.delete(event.document.uri)
@@ -253,9 +256,11 @@ documents.onDidClose((event) => {
     workspaceIndex.remove(event.document.uri)
   }
   analysisCache.remove(event.document.uri)
+  invalidateIncludedParse(event.document.uri)
   semanticBuilders.delete(event.document.uri)
   if (dependencyIndex.remove(event.document.uri)) refreshWatchers()
   connection.sendDiagnostics({ uri: event.document.uri, diagnostics: [] })
+  revalidateIncludingDocuments(event.document.uri)
 })
 
 connection.onDidChangeWatchedFiles((params) => {
@@ -599,11 +604,52 @@ function includeGateInput(document: TextDocument): IncludeGateInput {
 }
 
 function includeOptions(document: TextDocument) {
-  return includeOptionsFor(includeGateInput(document))
+  return withOpenDocuments(includeOptionsFor(includeGateInput(document)))
 }
 
 function previewIncludeOptions(document: TextDocument) {
-  return previewIncludeOptionsFor(includeGateInput(document))
+  return withOpenDocuments(previewIncludeOptionsFor(includeGateInput(document)))
+}
+
+function withOpenDocuments(options: ReturnType<typeof includeOptionsFor>) {
+  if (!options) return undefined
+  const diskResolver = options.resolver
+  if (!diskResolver) return options
+  const openByPath = new Map<string, TextDocument>()
+  for (const document of documents.all()) {
+    const target = fsPath(document.uri)
+    if (!target) continue
+    try { openByPath.set(realpathSync(target), document) } catch { /* no disk identity */ }
+  }
+  options.resolver = (includePath, context) => {
+    const result = diskResolver(includePath, context)
+    if (!result.ok) return result
+    const open = openByPath.get(result.id)
+    if (!open) return result
+    const source = open.getText()
+    return { ...result, source, bytes: Buffer.byteLength(source), version: `open:${open.version}` }
+  }
+  return options
+}
+
+function invalidateIncludedParse(uri: string): void {
+  const target = fsPath(uri)
+  if (!target) return
+  try { includeParseCache.invalidate(realpathSync(target)) } catch { /* no disk identity */ }
+}
+
+function revalidateIncludingDocuments(uri: string): void {
+  const target = fsPath(uri)
+  if (!target) return
+  let canonical: string
+  try { canonical = realpathSync(target) } catch { return }
+  for (const parentUri of dependencyIndex.documentsFor(canonical)) {
+    if (parentUri === uri) continue
+    const parent = documents.get(parentUri)
+    if (!parent) continue
+    analysisCache.remove(parentUri)
+    diagnostics.schedule(parentUri, parent.version)
+  }
 }
 
 function refreshWatchers(): void {
