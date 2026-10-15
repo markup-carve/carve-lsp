@@ -72,8 +72,17 @@ test('keeps authored header markers and cell tabs while aligning', () => {
   assert.equal(carveToHtml(alignedHeaders), carveToHtml(headers))
   const tab = '|\ta | b |\n| x | longer |\n'
   const alignedTab = alignTablesInDocument(tab)
-  assert.match(alignedTab, /^\|\ta /)
+  assert.equal(alignedTab, tab)
   assert.equal(carveToHtml(alignedTab), carveToHtml(tab))
+})
+
+test('aligns rows with literal or escaped backticks', () => {
+  for (const firstRow of ['| \\` | a |', '| `x | a |']) {
+    const source = firstRow + '\n| bbbbbb | c |\n'
+    const aligned = alignTablesInDocument(source)
+    assert.equal(carveToHtml(aligned), carveToHtml(source))
+    if (firstRow.includes('\\`')) assert.notEqual(aligned, source)
+  }
 })
 
 test('aligns a table that begins on a list marker line', () => {

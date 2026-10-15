@@ -447,12 +447,21 @@ connection.onRequest(DocumentFormattingRequest.type, (params) => {
 connection.onRequest(DocumentRangeFormattingRequest.type, (params) => {
   const document = documents.get(params.textDocument.uri)
   if (!document) return []
+  const text = document.getText()
   if (carveSettings.formatAlignTables) {
-    const edits = tableAlignmentEdits(document.getText(), params.range.start.line, params.range.end.line)
-    if (edits.length > 0) return edits.map(edit => edit.textEdit)
+    const edits = tableAlignmentEdits(text, params.range.start.line, params.range.end.line)
+    if (edits.length > 0) {
+      const firstLine = Math.min(params.range.start.line, ...edits.map(edit => edit.startLine))
+      const lastLine = Math.max(params.range.end.line, ...edits.map(edit => edit.endLine))
+      const lines = text.replace(/\r\n?/g, '\n').split('\n')
+      return [{
+        range: { start: { line: firstLine, character: 0 }, end: { line: lastLine, character: (lines[lastLine] ?? '').length } },
+        newText: formatRange(alignTablesInDocument(text), firstLine, lastLine),
+      }]
+    }
   }
-  const newText = formatRange(document.getText(), params.range.start.line, params.range.end.line)
-  const lines = document.getText().replace(/\r\n?/g, '\n').split('\n')
+  const newText = formatRange(text, params.range.start.line, params.range.end.line)
+  const lines = text.replace(/\r\n?/g, '\n').split('\n')
   return [{
     range: {
       start: { line: params.range.start.line, character: 0 },
@@ -472,6 +481,8 @@ connection.onRequest(DocumentOnTypeFormattingRequest.type, (params) => {
   const aligned = carveSettings.formatAlignTables
     ? tableAlignmentEdits(document.getText(), Math.max(0, params.position.line - 1), Math.max(0, params.position.line - 1))
       .map(edit => edit.textEdit)
+      .filter(edit => !continuation.some(next =>
+        next.range.start.line >= edit.range.start.line && next.range.start.line <= edit.range.end.line))
     : []
   return [...aligned, ...continuation]
 })

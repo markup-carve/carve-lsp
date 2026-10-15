@@ -11,10 +11,13 @@ function splitRow(line: string): { marker: string, cells: string[], attrs: strin
   let codeRun = 0
   for (let index = 1; index < line.length; index++) {
     if (line[index] === '`') {
+      let slashes = 0
+      for (let previous = index - 1; previous >= start && line[previous] === '\\'; previous--) slashes++
+      if (slashes % 2 !== 0) continue
       let end = index + 1
       while (line[end] === '`') end++
       const length = end - index
-      if (codeRun === 0) codeRun = length
+      if (codeRun === 0 && hasClosingRun(line, end, length)) codeRun = length
       else if (codeRun === length) codeRun = 0
       index = end - 1
       continue
@@ -31,7 +34,22 @@ function splitRow(line: string): { marker: string, cells: string[], attrs: strin
   return { marker, cells, attrs: line.slice(start) }
 }
 
+function hasClosingRun(line: string, from: number, length: number): boolean {
+  for (let index = from; index < line.length; index++) {
+    if (line[index] !== '`') continue
+    let slashes = 0
+    for (let previous = index - 1; previous >= 0 && line[previous] === '\\'; previous--) slashes++
+    if (slashes % 2 !== 0) continue
+    let end = index + 1
+    while (line[end] === '`') end++
+    if (end - index === length) return true
+    index = end - 1
+  }
+  return false
+}
+
 function alignCanonicalTable(source: string): string {
+  if (source.includes('\t')) return source
   const lines = source.replace(/\n$/, '').split('\n')
   const rows = lines.map(splitRow)
   const widths: number[] = []

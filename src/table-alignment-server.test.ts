@@ -37,4 +37,25 @@ test('table alignment setting reaches document, range, on-type and action paths'
     textDocument: { uri }, range, context: { diagnostics: [] },
   }) as { title: string; edit?: { changes?: Record<string, { newText: string }[]> } }[]
   assert.equal(actions.find(action => action.title === 'Align table')?.edit?.changes?.[uri]?.[0]?.newText, aligned.trimEnd())
+
+  const splitRow = '| xxxxx | y |\n| a |\n| b |\n'
+  client.notify('textDocument/didChange', {
+    textDocument: { uri, version: 2 }, contentChanges: [{ text: splitRow }],
+  })
+  const overlapping = await client.request('textDocument/onTypeFormatting', {
+    textDocument: { uri }, position: { line: 2, character: 0 }, ch: '\n', options,
+  }) as { range: { start: { line: number }; end: { line: number } }; newText: string }[]
+  assert.ok(overlapping.some(edit => edit.newText.includes('| ')))
+  assert.ok(overlapping.every(edit => !(edit.range.start.line <= 2 && edit.range.end.line >= 2 && edit.newText.includes('| xxxxx'))))
+
+  const mixed = '| a | bb |\r\n| long | c |\nText\r\n'
+  client.notify('textDocument/didChange', {
+    textDocument: { uri, version: 3 }, contentChanges: [{ text: mixed }],
+  })
+  const mixedRange = await client.request('textDocument/rangeFormatting', {
+    textDocument: { uri }, range: { start: { line: 0, character: 0 }, end: { line: 2, character: 4 } }, options,
+  }) as { newText: string }[]
+  assert.ok(mixedRange[0]?.newText.includes('| long'))
+  assert.ok(mixedRange[0]?.newText.includes('Text'))
+  assert.doesNotMatch(mixedRange[0]?.newText ?? '', /(?<!\r)\n/)
 })

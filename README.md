@@ -141,6 +141,8 @@ watches it for changes.
 | `format.alignTables` | `false` | Align table cells in document, range, and on-type formatting. The *Align table* action works without this setting. |
 | `severities` | `{}` | Override a diagnostic code with `"error"`, `"warning"`, `"information"`, `"hint"`, or `"off"`. |
 
+Table alignment leaves tables containing tabs as written because tab width depends on editor settings.
+
 Example `.carverc.json`:
 
 ```json
