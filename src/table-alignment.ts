@@ -1,4 +1,4 @@
-import { carveToHtml, parse } from '@markup-carve/carve'
+import { carveToCarve, carveToHtml, parse } from '@markup-carve/carve'
 import { CodeAction, CodeActionKind, Range, TextEdit } from 'vscode-languageserver-types'
 import { walkNodes } from './ast-walk.js'
 import { tableDisplayWidth } from './table-display-width.js'
@@ -11,9 +11,11 @@ function splitRow(line: string): { marker: string, cells: string[], attrs: strin
   let codeRun = 0
   for (let index = 1; index < line.length; index++) {
     if (line[index] === '`') {
-      let slashes = 0
-      for (let previous = index - 1; previous >= start && line[previous] === '\\'; previous--) slashes++
-      if (slashes % 2 !== 0) continue
+      if (codeRun === 0) {
+        let slashes = 0
+        for (let previous = index - 1; previous >= start && line[previous] === '\\'; previous--) slashes++
+        if (slashes % 2 !== 0) continue
+      }
       let end = index + 1
       while (line[end] === '`') end++
       const length = end - index
@@ -37,9 +39,6 @@ function splitRow(line: string): { marker: string, cells: string[], attrs: strin
 function hasClosingRun(line: string, from: number, length: number): boolean {
   for (let index = from; index < line.length; index++) {
     if (line[index] !== '`') continue
-    let slashes = 0
-    for (let previous = index - 1; previous >= 0 && line[previous] === '\\'; previous--) slashes++
-    if (slashes % 2 !== 0) continue
     let end = index + 1
     while (line[end] === '`') end++
     if (end - index === length) return true
@@ -49,7 +48,6 @@ function hasClosingRun(line: string, from: number, length: number): boolean {
 }
 
 function alignCanonicalTable(source: string): string {
-  if (source.includes('\t')) return source
   const lines = source.replace(/\n$/, '').split('\n')
   const rows = lines.map(splitRow)
   const widths: number[] = []
@@ -101,7 +99,8 @@ function findTableAlignmentEdits(source: string, firstLine: number, lastLine: nu
     const prefixes = original.map(line => line.text.slice(0, prefixLength))
     if (original.length === 0 || original.some(line => line.text.length < prefixLength)) return false
     const bare = original.map(line => line.text.slice(prefixLength)).join('\n') + '\n'
-    const formatted = alignCanonicalTable(bare)
+    const canonical = carveToCarve(bare)
+    const formatted = carveToHtml(bare) === carveToHtml(canonical) ? alignCanonicalTable(canonical) : bare
     const renderedLines = formatted.replace(/\n$/, '').split('\n')
     const replaced = renderedLines.map((line, index) => prefixes[index] + line +
       (index < renderedLines.length - 1 ? (original[index]?.eol ?? original[0]!.eol) || '\n' : '')).join('')

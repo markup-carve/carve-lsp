@@ -65,15 +65,19 @@ test('keeps a pipe inside inline code in the same cell', () => {
   assert.equal(alignTablesInDocument(aligned), aligned)
 })
 
-test('keeps authored header markers and cell tabs while aligning', () => {
+test('canonicalizes table cells before padding', () => {
   const headers = '|= a |= b |\n|:--|--:|\n| c | dd |\n'
   const alignedHeaders = alignTablesInDocument(headers)
-  assert.match(alignedHeaders, /^\|= a /)
   assert.equal(carveToHtml(alignedHeaders), carveToHtml(headers))
+  assert.equal(alignTablesInDocument(alignedHeaders), alignedHeaders)
   const tab = '|\ta | b |\n| x | longer |\n'
   const alignedTab = alignTablesInDocument(tab)
-  assert.equal(alignedTab, tab)
   assert.equal(carveToHtml(alignedTab), carveToHtml(tab))
+
+  const stalePadding = '| a      | b |\n| c | d |\n'
+  const normalized = alignTablesInDocument(stalePadding)
+  assert.equal(normalized, '| a | b |\n| c | d |\n')
+  assert.equal(alignTablesInDocument(normalized), normalized)
 })
 
 test('aligns rows with literal or escaped backticks', () => {
@@ -83,6 +87,14 @@ test('aligns rows with literal or escaped backticks', () => {
     assert.equal(carveToHtml(aligned), carveToHtml(source))
     if (firstRow.includes('\\`')) assert.notEqual(aligned, source)
   }
+})
+
+test('a backslash inside code does not hide its closing backtick', () => {
+  const source = '| `\\` | `x` |\n| a | b |\n'
+  const aligned = alignTablesInDocument(source)
+  assert.equal(carveToHtml(aligned), carveToHtml(source))
+  assert.equal(alignTablesInDocument(aligned), aligned)
+  assert.match(aligned, /\| a\s+\| b/)
 })
 
 test('aligns a table that begins on a list marker line', () => {
