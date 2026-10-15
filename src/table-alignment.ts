@@ -102,6 +102,7 @@ function findTableAlignmentEdits(source: string, firstLine: number, lastLine: nu
     const canonical = carveToCarve(bare)
     const formatted = carveToHtml(bare) === carveToHtml(canonical) ? alignCanonicalTable(canonical) : bare
     const renderedLines = formatted.replace(/\n$/, '').split('\n')
+    if (renderedLines.length !== original.length) return false
     const replaced = renderedLines.map((line, index) => prefixes[index] + line +
       (index < renderedLines.length - 1 ? (original[index]?.eol ?? original[0]!.eol) || '\n' : '')).join('')
     const startOffset = original[0]!.start
