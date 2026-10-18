@@ -74,10 +74,11 @@ export function semanticTokens(source: string): Token[] {
 
 function astSemanticTokens(doc: Document, source: string): Token[] {
   const tokens: Token[] = []
+  const keywords: Token[] = []
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
-  for (const node of doc.children) collectBlock(tokens, lines, node)
+  for (const node of doc.children) collectBlock(tokens, lines, node, keywords)
   for (const body of Object.values(doc.footnoteDefs ?? {})) {
-    for (const node of body) collectBlock(tokens, lines, node)
+    for (const node of body) collectBlock(tokens, lines, node, keywords)
   }
   const codeBlock = codeBlockLines(doc)
 
@@ -104,23 +105,36 @@ function astSemanticTokens(doc: Document, source: string): Token[] {
     // Scan lines for constructs that the AST resolves away or treats as plain text.
     const scanText = commentStart !== -1 ? text.slice(0, commentStart) : text
     scanAstGaps(tokens, i, scanText)
+    // A block attribute line: the AST keeps no position for it.
+    scan(tokens, i, scanText, /^[ \t]*\{[^}\n]+\}[ \t]*$/g, 'property')
   }
   return withoutOverlaps(
-    tokens.sort((a, b) => a.line - b.line || a.character - b.character || b.length - a.length),
+    splitProperties(tokens, keywords).sort((a, b) => a.line - b.line || a.character - b.character || b.length - a.length),
   )
 }
 
-function collectBlock(tokens: Token[], lines: string[], node: BlockNode): void {
+function collectBlock(tokens: Token[], lines: string[], node: BlockNode, keywords: Token[]): void {
+  const names = node.type === 'table'
+    ? ('sourceFormat' in node && node.sourceFormat ? ['table'] : ['header-rows', 'footer-rows', 'header-cols', 'aligns', 'valigns', 'widths'])
+    : node.type === 'list' || node.type === 'definition_list' ? ['loose'] : []
+  if (names.length && node.pos?.startLine !== undefined) {
+    for (let line = node.pos.startLine - 2; line >= 0; line--) {
+      const value = lines[line]!.trim()
+      if (!value) continue
+      if (!/^\{[^}\n]+\}$/.test(value)) break
+      collectAttributeKeywords(keywords, line, lines[line]!, names)
+    }
+  }
   switch (node.type) {
     case 'heading': {
       const first = tokens.length
       pushLinePrefix(tokens, lines, node.pos, /^#{1,6}/, 'operator')
-      collectInline(tokens, lines, node.children)
+      collectInline(tokens, lines, node.children, keywords)
       pushHeadingTitle(tokens, lines, node.pos, first)
       break
     }
     case 'paragraph':
-      collectInline(tokens, lines, node.children)
+      collectInline(tokens, lines, node.children, keywords)
       break
     case 'code_block':
     case 'raw_block':
@@ -137,36 +151,36 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode): void {
       } else {
         pushQuoteMarkers(tokens, lines, node.pos)
       }
-      for (const child of node.children) collectBlock(tokens, lines, child)
+      for (const child of node.children) collectBlock(tokens, lines, child, keywords)
       break
     case 'list':
       for (const item of node.items) {
         pushMarker(tokens, lines, item.pos, LIST_MARKER_ONLY, 'operator')
-        for (const child of item.children) collectBlock(tokens, lines, child)
+        for (const child of item.children) collectBlock(tokens, lines, child, keywords)
       }
       break
     case 'admonition':
       pushLinePrefix(tokens, lines, node.pos, /^\s*:{3,}\s*[A-Za-z][\w-]*/, 'type')
       pushFenceCloser(tokens, lines, node.pos)
-      for (const child of node.children) collectBlock(tokens, lines, child)
-      if (node.title) collectInline(tokens, lines, node.title)
+      for (const child of node.children) collectBlock(tokens, lines, child, keywords)
+      if (node.title) collectInline(tokens, lines, node.title, keywords)
       break
     case 'div':
       pushLinePrefix(tokens, lines, node.pos, /^\s*:{3,}/, 'operator')
       pushFenceCloser(tokens, lines, node.pos)
-      for (const child of node.children) collectBlock(tokens, lines, child)
+      for (const child of node.children) collectBlock(tokens, lines, child, keywords)
       break
     case 'definition_list':
       for (const item of node.items) {
-        for (const term of item.terms) collectInline(tokens, lines, term)
+        for (const term of item.terms) collectInline(tokens, lines, term, keywords)
         for (const definition of item.definitions) {
-          for (const child of definition) collectBlock(tokens, lines, child)
+          for (const child of definition) collectBlock(tokens, lines, child, keywords)
         }
       }
       break
     case 'figure':
-      collectFigureTarget(tokens, lines, node.target)
-      collectInline(tokens, lines, node.caption)
+      collectFigureTarget(tokens, lines, node.target, keywords)
+      collectInline(tokens, lines, node.caption, keywords)
       break
     // A composite figure (PART 9 §4c): one figure of ordered panels, opened by a
     // BARE `::: figure` fence. Its opener carries the reserved kind word, so the
@@ -177,8 +191,8 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode): void {
     // and not from any one of them.
     case 'figure_group':
       pushLinePrefix(tokens, lines, node.pos, /^\s*:{3,}\s*figure/, 'type')
-      for (const child of node.children) collectBlock(tokens, lines, child)
-      if (node.caption) collectInline(tokens, lines, node.caption)
+      for (const child of node.children) collectBlock(tokens, lines, child, keywords)
+      if (node.caption) collectInline(tokens, lines, node.caption, keywords)
       break
     case 'table':
       if (node.pos) {
@@ -186,11 +200,11 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode): void {
           scanTableLine(tokens, line, lines[line] ?? '')
         }
       }
-      if (node.caption) collectInline(tokens, lines, node.caption)
+      if (node.caption) collectInline(tokens, lines, node.caption, keywords)
       for (const row of node.rows) {
         // A cell carries EITHER inline children or imported `blocks` (carve-js#1980), never both.
         // Carve source always yields the inline half, and this server only ever parses source.
-        for (const cell of row.cells) collectInline(tokens, lines, cell.children ?? [])
+        for (const cell of row.cells) collectInline(tokens, lines, cell.children ?? [], keywords)
       }
       break
     case 'image':
@@ -216,12 +230,12 @@ function scanTableLine(tokens: Token[], line: number, text: string): void {
   }
 }
 
-function collectFigureTarget(tokens: Token[], lines: string[], node: BlockNode): void {
+function collectFigureTarget(tokens: Token[], lines: string[], node: BlockNode, keywords: Token[]): void {
   if (node.type === 'image') pushPosition(tokens, lines, node.pos, 'string')
-  else collectBlock(tokens, lines, node)
+  else collectBlock(tokens, lines, node, keywords)
 }
 
-function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[]): void {
+function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[], keywords: Token[]): void {
   for (const node of nodes) {
     // carve-js renamed this AST type from `critic-comment` to `critic_comment`,
     // completing the kebab-to-snake vocabulary convergence (carve#401). The
@@ -279,6 +293,15 @@ function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[]): v
         pushPosition(tokens, lines, node.pos, 'variable', ['readonly'])
         break
       case 'span':
+        pushPosition(tokens, lines, node.pos, 'property')
+        if (node.pos?.endLine !== undefined && node.pos.endColumn !== undefined) {
+          const line = node.pos.endLine - 1
+          const text = lines[line] ?? ''
+          const end = astColumnToCharacter(text, node.pos.endColumn)
+          const attrs = /\{[^}\n]+\}$/.exec(text.slice(0, end))
+          if (attrs) collectAttributeKeywords(keywords, line, attrs[0], ['kbd', 'abbr', 'time'], end - attrs[0].length)
+        }
+        break
       case 'inline_extension':
         pushPosition(tokens, lines, node.pos, 'property')
         break
@@ -304,10 +327,40 @@ function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[]): v
     }
 
     const children = (node as { children?: InlineNode[] }).children
-    if (Array.isArray(children)) collectInline(tokens, lines, children)
+    if (Array.isArray(children)) collectInline(tokens, lines, children, keywords)
     const content = (node as { content?: InlineNode[] }).content
-    if (Array.isArray(content)) collectInline(tokens, lines, content)
+    if (Array.isArray(content)) collectInline(tokens, lines, content, keywords)
   }
+}
+
+function collectAttributeKeywords(tokens: Token[], line: number, text: string, names: string[], offset = 0): void {
+  for (const block of text.matchAll(/\{[^}\n]+\}/g)) {
+    for (const key of block[0].matchAll(/(?:^|[\s{])([A-Za-z][\w-]*)(?=[\s}=])/g)) {
+      if (names.includes(key[1]!)) {
+        push(tokens, line, offset + block.index! + key.index! + key[0].length - key[1]!.length, key[1]!.length, 'keyword')
+      }
+    }
+  }
+}
+
+function splitProperties(tokens: Token[], keywords: Token[]): Token[] {
+  const result: Token[] = []
+  for (const token of tokens) {
+    if (token.type !== 'property') {
+      result.push(token)
+      continue
+    }
+    let start = token.character
+    const end = start + token.length
+    for (const key of keywords.filter((item) => item.line === token.line && item.character >= start && item.character + item.length <= end)
+      .sort((a, b) => a.character - b.character)) {
+      push(result, token.line, start, key.character - start, 'property')
+      start = key.character + key.length
+    }
+    push(result, token.line, start, end - start, 'property')
+  }
+  result.push(...keywords)
+  return result
 }
 
 // A code body is left without tokens: a semantic token overrides the editor's
