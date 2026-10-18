@@ -4,6 +4,18 @@ All notable changes to carve-lsp are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.13] - 2026-10-18
+
+### Added
+
+- Optional table alignment is available through `format.alignTables` and the **Align table** action (#565; markup-carve/carve#3184).
+- Completions and semantic tokens recognize bare empty link definitions while excluding footnote and abbreviation labels (#566; markup-carve/carve#2878).
+- Includes use an open editor buffer in previews and diagnostics, and including documents refresh when that buffer opens, changes or closes (#570).
+
+### Changed
+
+- Requires `@markup-carve/carve` 0.1.12 or later for empty-reference parsing (#569).
+
 ## [0.1.12] - 2026-10-15
 
 ### Fixes
