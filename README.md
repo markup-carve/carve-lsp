@@ -231,6 +231,9 @@ sitting right there sends an author looking for a typo that is not there. A
 target that is not a regular file reports `include-non-text`. In every case the
 directive stays literal.
 
+Lint findings inside included files appear on their directive, with the child
+file and line named in the message.
+
 The distinction discloses nothing about the machine: a path outside the root is
 refused identically whether or not it exists, and the absolute and remote
 refusals are decided from the spelling the author wrote, before any path is

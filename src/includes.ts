@@ -257,6 +257,21 @@ function rootSpan(warning: EngineWarning, sites: DirectiveSite[]): { start: numb
  * this layer - the capability does not exist until a host hands over a
  * resolver, so no caller can reach the filesystem by forgetting a flag.
  */
+/** This server's resolver in the engine's shape, for lint, which expands on its own. */
+export function engineIncludeResolver(options: IncludeOptions): ((written: string, ctx: EngineContext) => EngineResolved | EngineUnresolved) | undefined {
+  const resolver = options.resolver
+  if (!resolver) return undefined
+  return (written, ctx) => {
+    const result = resolver(written, {
+      stack: [...ctx.stack],
+      depth: ctx.depth,
+      ...(options.sourcePath !== undefined ? { sourcePath: options.sourcePath } : {}),
+    })
+    if (!result.ok) return { source: null, id: result.watch ?? result.id }
+    return { source: result.source.replace(/\r(?!\n)/g, '\n'), id: result.id }
+  }
+}
+
 export function resolveIncludes(source: string, options: IncludeOptions = {}): IncludeResolution {
   const inert: IncludeResolution = {
     warnings: [],
