@@ -1,6 +1,6 @@
 /**
- * The two selections an include directive can carry - `#section` and a line
- * range - resolved against a child's own source (PART 9 §19 I4, I5).
+ * The selections an include directive can carry - `#section`, a line range
+ * and a named region - resolved against a child's own source (PART 9 §19 I4, I5).
  *
  * Both are decidable from the child alone: no merge, no heading shift, no id
  * renaming. That is what lets this server diagnose and navigate them while
@@ -48,6 +48,39 @@ export function sections(source: string): Section[] {
 /** Where a named section starts in the child, or undefined when it has none. */
 export function sectionRange(source: string, id: string): Range | undefined {
   return sections(source).find((section) => section.id === id)?.range
+}
+
+/**
+ * The 1-based line range inside a uniquely named, correctly paired comment
+ * region, or null when the child has no such region (I1b).
+ *
+ * Mirrors `regionLines` in carve-js `src/includes.ts`, which the engine does
+ * not export: a marker is `#region name` / `#endregion`, bare or after `//`.
+ */
+export function regionLines(source: string, selected: string): { start: number; end: number } | null {
+  const lines = source.replace(/\r\n?/g, '\n').split('\n')
+  if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop()
+  const seen = new Set<string>()
+  const stack: Array<{ name: string; line: number }> = []
+  let range: { start: number; end: number } | null = null
+  for (const [index, sourceLine] of lines.entries()) {
+    const line = sourceLine.replace(/^[ \t]+/, '')
+    const body = line.startsWith('//') ? line.slice(2).replace(/^[ \t]+/, '') : line
+    if (!/^#(?:end)?region\b/.test(body)) continue
+    const marker = /^#(end)?region(?:[ \t]+([A-Za-z_][\w-]*))?[ \t]*$/.exec(body)
+    if (!marker) return null
+    const name = marker[2]
+    if (marker[1]) {
+      const open = stack.pop()
+      if (!open || (name !== undefined && name !== open.name)) return null
+      if (open.name === selected) range = { start: open.line + 2, end: index }
+    } else {
+      if (!name || seen.has(name)) return null
+      seen.add(name)
+      stack.push({ name, line: index })
+    }
+  }
+  return stack.length === 0 ? range : null
 }
 
 /**

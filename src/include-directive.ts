@@ -18,6 +18,7 @@ export interface Directive {
   path: string
   section?: string
   lines?: { start: number; end: number }
+  region?: string
   /** Literal signed offset, or "auto" to derive it from the include site. */
   shift: number | 'auto'
   /** 0-based start offset in the scanned source, inclusive. */
@@ -148,6 +149,7 @@ export function parseDirective(
   const sectionPart = m[4]?.trim()
   const section = sectionPart ? sectionPart.slice(1) : undefined
   let lines: Directive['lines']
+  let region: string | undefined
   let shift: number | 'auto' = 0
   const rest = m[5]?.trim()
   if (rest) {
@@ -169,6 +171,9 @@ export function parseDirective(
         if (!lm) return invalid()
         lines = { start: Number(lm[1]), end: Number(lm[2]) }
         if (lines.end < lines.start) return invalid()
+      } else if (key[1] === 'region') {
+        if (!/^[A-Za-z_][\w-]*$/.test(value)) return invalid()
+        region = value
       } else if (key[1] === 'shift') {
         // I8: a signed integer or the literal "auto", never both forms.
         if (value === 'auto') shift = 'auto'
@@ -182,6 +187,7 @@ export function parseDirective(
   const directive: Omit<Directive, 'start' | 'end'> = { raw, path: includePath, shift }
   if (section !== undefined) directive.section = section
   if (lines !== undefined) directive.lines = lines
+  if (region !== undefined) directive.region = region
   return directive
 }
 
