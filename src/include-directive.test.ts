@@ -157,3 +157,13 @@ test('parseDirective rejects a token that is not a directive', () => {
   assert.equal(parseDirective('{{ oops'), null)
   assert.equal(parseDirective('{{ }}'), null)
 })
+
+test('a region option is recognized, as the engine reads it (I1b)', () => {
+  assert.equal(parseDirective('{{ src/snippets.crv@region:backup }}')?.region, 'backup')
+})
+
+test('a region name that is not an identifier is an unknown option', () => {
+  const seen: string[] = []
+  assert.deepEqual(findDirectives('{{ child @region:9x }}', (part) => seen.push(part)), [])
+  assert.deepEqual(seen, ['@region:9x'])
+})

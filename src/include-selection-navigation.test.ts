@@ -86,3 +86,31 @@ test('the last line of the child is still a legal landing', () => {
   const location = includeDefinitionAt('{{ chapter.crv @lines:7-7 }}', cursor, optionsFor(root, doc))
   assert.equal(location?.range.start.line, 6)
 })
+
+const SNIPPETS = ['# Snippets', '', 'Intro.', '#region backup', 'Back up first.', 'Then restore.', '#endregion', ''].join('\n')
+
+function regionWorkspace(): { root: string; doc: string } {
+  const root = mkdtempSync(path.join(tmpdir(), 'carve-lsp-incregion-'))
+  writeFileSync(path.join(root, 'snippets.crv'), SNIPPETS)
+  return { root, doc: path.join(root, 'book.crv') }
+}
+
+test('a region selection lands on its first selected line, after the opening marker', () => {
+  const { root, doc } = regionWorkspace()
+  const location = includeDefinitionAt('{{ snippets.crv@region:backup }}', cursor, optionsFor(root, doc))
+  assert.deepEqual(location?.range.start, { line: 4, character: 0 })
+})
+
+test('a region opened behind a // comment marker lands inside it', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'carve-lsp-incregion-'))
+  writeFileSync(path.join(root, 'demo.js'), ['const a = 1', '// #region core', 'run()', '// #endregion core', ''].join('\n'))
+  const location = includeDefinitionAt('{{ demo.js @region:core }}', cursor, optionsFor(root, path.join(root, 'book.crv')))
+  assert.equal(location?.range.start.line, 2)
+})
+
+test('a region the child does not declare falls back to the top of the file', () => {
+  const { root, doc } = regionWorkspace()
+  const location = includeDefinitionAt('{{ snippets.crv @region:nope }}', cursor, optionsFor(root, doc))
+  assert.equal(location?.range.start.line, 0)
+  assert.ok(location?.uri.endsWith('snippets.crv'))
+})

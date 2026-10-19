@@ -3,7 +3,7 @@ import { type Location, type Position, type Range } from 'vscode-languageserver-
 import { findDirectiveSites, parse } from '@markup-carve/carve'
 import { type Directive } from './include-directive.js'
 import { astOffsetToIndex } from './position.js'
-import { lineCount, sectionRange } from './include-selection.js'
+import { lineCount, regionLines, sectionRange } from './include-selection.js'
 import type { IncludeOptions } from './includes.js'
 
 const FILE_START: Range = {
@@ -37,9 +37,9 @@ export function includeDefinitionAt(
 /**
  * Where in the child the jump lands.
  *
- * A directive that selects a section or a line range names a PLACE, and both
- * are already parsed onto the directive - throwing them away and landing on
- * line 1 every time discards information the caller is holding. A selection
+ * A directive that selects a section, a line range or a region names a PLACE,
+ * and each is already parsed onto the directive - throwing them away and
+ * landing on line 1 every time discards information the caller is holding. A selection
  * that does not resolve falls back to the top of the file rather than refusing
  * the jump: the file itself resolved, and `include-section` already reports
  * the bad selection as a diagnostic.
@@ -53,10 +53,18 @@ function selectionRange(directive: Omit<Directive, 'start' | 'end'>, source: str
     // definition can be invoked independently of the diagnostic that reports
     // it, so the out-of-bounds position must not leave this function.
     if (directive.lines.start > lineCount(source)) return FILE_START
-    const line = directive.lines.start - 1
-    return { start: { line, character: 0 }, end: { line, character: 0 } }
+    return lineStart(directive.lines.start)
+  }
+  if (directive.region !== undefined) {
+    const region = regionLines(source, directive.region)
+    return region ? lineStart(region.start) : FILE_START
   }
   return FILE_START
+}
+
+function lineStart(oneBased: number): Range {
+  const line = oneBased - 1
+  return { start: { line, character: 0 }, end: { line, character: 0 } }
 }
 
 /** The directive the engine recognizes at `offset`; one in code, a comment or other verbatim text is not one. */
