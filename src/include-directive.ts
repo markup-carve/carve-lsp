@@ -19,6 +19,8 @@ export interface Directive {
   section?: string
   lines?: { start: number; end: number }
   region?: string
+  /** Set by `@code` or `@code:lang` (I1c): the selection becomes one code block. */
+  code?: { lang?: string }
   /** Literal signed offset, or "auto" to derive it from the include site. */
   shift: number | 'auto'
   /** 0-based start offset in the scanned source, inclusive. */
@@ -150,10 +152,16 @@ export function parseDirective(
   const section = sectionPart ? sectionPart.slice(1) : undefined
   let lines: Directive['lines']
   let region: string | undefined
+  let code: Directive['code']
   let shift: number | 'auto' = 0
   const rest = m[5]?.trim()
   if (rest) {
     for (const part of splitOptions(rest)) {
+      // The one option that takes no value.
+      if (part === '@code') {
+        code = {}
+        continue
+      }
       const key = OPTION_KEY_RE.exec(part)
       const invalid = (): null => {
         // I1: an unrecognized (or malformed) option makes the directive
@@ -174,6 +182,9 @@ export function parseDirective(
       } else if (key[1] === 'region') {
         if (!/^[A-Za-z_][\w-]*$/.test(value)) return invalid()
         region = value
+      } else if (key[1] === 'code') {
+        if (!/^[A-Za-z0-9_+#./-]+$/.test(value)) return invalid()
+        code = { lang: value }
       } else if (key[1] === 'shift') {
         // I8: a signed integer or the literal "auto", never both forms.
         if (value === 'auto') shift = 'auto'
@@ -188,6 +199,7 @@ export function parseDirective(
   if (section !== undefined) directive.section = section
   if (lines !== undefined) directive.lines = lines
   if (region !== undefined) directive.region = region
+  if (code !== undefined) directive.code = code
   return directive
 }
 

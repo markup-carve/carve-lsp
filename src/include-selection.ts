@@ -84,6 +84,49 @@ export function regionLines(source: string, selected: string): { start: number; 
 }
 
 /**
+ * The region names a child declares, in file order, read with the marker set
+ * the include would use (I1b): a Carve include knows only `%% #region`, a
+ * `@code` include also the source-comment forms. Empty when any marker is
+ * malformed, unpaired or duplicated, since the engine then rejects every name.
+ *
+ * Mirrors `regionLines` on carve-js main (`selectIncludeRegion`), which the
+ * pinned 0.1.12 engine neither exports nor follows yet.
+ */
+export function regionNames(source: string, code: boolean): string[] {
+  const names: string[] = []
+  const open: string[] = []
+  for (const sourceLine of source.split(/\r\n|[\r\n]/)) {
+    const line = sourceLine.replace(/^[ \t]*/, '')
+    let body: string
+    let closer = ''
+    if (line.startsWith('%%') && !line.startsWith('%%%')) body = line.slice(2)
+    else if (!code) continue
+    else if (line.startsWith('//') || line.startsWith('--')) body = line.slice(2)
+    else if (line.startsWith('/*')) {
+      body = line.slice(2)
+      closer = String.raw`\*/`
+    } else if (line.startsWith('<!--')) {
+      body = line.slice(4)
+      closer = '-->'
+    } else body = line
+    body = body.replace(/^[ \t]*/, '')
+    if (!/^#(?:end)?region(?![A-Za-z0-9_])/.test(body)) continue
+    const marker = new RegExp(`^#(end)?region(?:[ \t]+([A-Za-z_][\\w-]*))?[ \t]*${closer}[ \t]*$`).exec(body)
+    if (!marker) return []
+    const name = marker[2]
+    if (marker[1]) {
+      const opened = open.pop()
+      if (opened === undefined || (name !== undefined && name !== opened)) return []
+    } else {
+      if (!name || names.includes(name)) return []
+      names.push(name)
+      open.push(name)
+    }
+  }
+  return open.length === 0 ? names : []
+}
+
+/**
  * Lines as the line-range option counts them. A trailing newline does not open
  * a further line, so `@lines:3-3` on a three-line file is in range.
  */

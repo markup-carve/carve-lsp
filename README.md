@@ -268,7 +268,12 @@ workspace edit, and can be turned off with the `exportActions` setting. Most
 editors apply the edit to a buffer and leave saving to the user.
 
 Completion inside a directive offers contained `.crv` paths, the target's
-heading ids, the option names, and their value shapes. Every suggestion is
+heading ids, the option names, and their value shapes. After `@region:` it
+lists the regions the target declares: a Carve include reads only `%% #region`
+markers, while a directive that also carries `@code` reads the source-comment
+forms (`// #region`, `/* #region */`, `<!-- #region -->` and the rest). After
+`@code:` it offers the same languages as a fence opener. Options that would
+conflict with a selection already in the directive are left out. Every suggestion is
 inserted in the spelling the directive grammar accepts: a fragment typed
 without its separating space is repaired to carry one, since `{{ ch1.crv#id }}`
 is not a directive at all and would silently degrade to prose.
