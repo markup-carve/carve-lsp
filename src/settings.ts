@@ -66,16 +66,62 @@ function severitySettings(value: unknown): CarveSettings['severities'] {
     .filter((entry): entry is [string, CarveSettings['severities'][string]] => allowed.has(String(entry[1]))))
 }
 
-export function readProjectSettings(roots: readonly string[]): CarveSettings | null {
+type CarveSection = Record<string, unknown>
+
+export function carveSection(raw: unknown): CarveSection | undefined {
+  const carve = (raw as { carve?: unknown } | null | undefined)?.carve
+  return carve !== null && typeof carve === 'object' && !Array.isArray(carve) ? carve as CarveSection : undefined
+}
+
+// Folds the dotted `format.alignTables` spelling into `format`, so a client
+// `false` can override a project `true` key by key.
+function normalizeSection(carve: CarveSection): CarveSection {
+  const { 'format.alignTables': dotted, ...rest } = carve
+  if (dotted === undefined) return rest
+  const format = rest['format'] !== null && typeof rest['format'] === 'object' && !Array.isArray(rest['format'])
+    ? rest['format'] as CarveSection
+    : {}
+  return { ...rest, format: { ...format, alignTables: dotted } }
+}
+
+/**
+ * Client keys win, keys the client did not send come from `.carverc.json`,
+ * the rest are defaults.
+ */
+export function mergeCarveSettings(client: CarveSection | undefined, project: CarveSection | undefined): CarveSettings {
+  if (!client && !project) return DEFAULT_CARVE_SETTINGS
+  const fromProject = project ? normalizeSection(project) : {}
+  const fromClient = client ? normalizeSection(client) : {}
+  const merged: CarveSection = { ...fromProject }
+  for (const [key, value] of Object.entries(fromClient)) {
+    const base = merged[key]
+    // Object settings (`format`, `severities`, `inlayHints`) merge one level deep.
+    merged[key] = isPlainObject(base) && isPlainObject(value) ? { ...base, ...value } : value
+  }
+  return readCarveSettings({ carve: merged })
+}
+
+function isPlainObject(value: unknown): value is CarveSection {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+/** The `carve` section of the first `.carverc.json`; `null` when that file is unreadable or invalid. */
+export function readProjectSection(roots: readonly string[]): CarveSection | undefined | null {
   for (const root of roots) {
     try {
       const parsed: unknown = JSON.parse(readFileSync(path.join(root, '.carverc.json'), 'utf8'))
-      return readCarveSettings(parsed)
+      return carveSection(parsed)
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code
       if (code === 'ENOENT') continue
       return null
     }
   }
-  return null
+  return undefined
+}
+
+export function readProjectSettings(roots: readonly string[]): CarveSettings | null {
+  const section = readProjectSection(roots)
+  if (section === null) return null
+  return section ? readCarveSettings({ carve: section }) : null
 }
