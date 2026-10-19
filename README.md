@@ -28,7 +28,7 @@ The server communicates over **stdio** (`--stdio` flag).
 | Completion | Container kinds (admonitions, placement markers, extension containers), code fence languages, attributes, semantic spans, citations, references, heading titles as `[Heading][]` links, workspace anchors, and contained include paths, sections and options |
 | Navigation | Document links, go-to-definition, highlights, and references for anchors, captions, footnotes, citations, and link labels |
 | Rename | Namespace-aware rename: anchors, captions and citation keys across the workspace, footnote and link labels within their document; generated heading ids become explicit when renamed |
-| Code actions | Migration and lint quick-fixes, table marker repair, creation of missing definitions, and export to Markdown or HTML |
+| Code actions | Migration and lint quick-fixes, table marker repair, table conversion, creation of missing definitions, and export to Markdown or HTML |
 | Code lens | Reference counts for anchors, captions, citations, footnotes, and link labels |
 | Selection and folding | Syntax-aware selection expansion and folding, with tolerant fallbacks during incomplete edits |
 | Formatting | Conservative document/range formatting, on-type continuation (see below), or explicit migration formatting |
@@ -36,6 +36,10 @@ The server communicates over **stdio** (`--stdio` flag).
 | Inlay hints | Generated heading ids, colon-fence closers, and a `list item` / `task` hint after a bare list marker on the line being edited (configurable) |
 | Commands | Preview/AST output, list indent/outdent (`carve.listIndent`), workspace graph, backlinks, generated navigation, and transitive rebuild impact |
 | File inclusion | Resolves `{{ path }}` directives, watches dependencies, and reports failures as diagnostics - **off by default**, see below |
+
+### Table code actions
+
+Use **Align table** to line up pipe table cells. **Convert to pipe table** changes CSV or TSV tables, and **Convert to CSV table** changes plain pipe tables. Conversion is offered only when it preserves rendered HTML and every cell's text.
 
 Workspace navigation is backed by a versioned `.crv` index. The initial scan
 ignores `.git` and `node_modules` and is bounded at 10,000 files / 64 MiB;
