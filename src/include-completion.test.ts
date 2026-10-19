@@ -120,14 +120,14 @@ test('completes the option names after the sigil', () => {
   const { root, sourcePath } = workspace()
   const text = '{{ chapter.crv @'
   const items = includeCompletions(text, at(text), { sourcePath, includeRoot: root })
-  assert.deepEqual(labels(items).sort(), ['@lines:', '@shift:'])
+  assert.deepEqual(labels(items).sort(), ['@code', '@code:', '@lines:', '@region:', '@shift:'])
 })
 
 test('an option already spelled is not offered a second time', () => {
   const { root, sourcePath } = workspace()
   const text = '{{ chapter.crv @shift:2 @'
   const items = includeCompletions(text, at(text), { sourcePath, includeRoot: root })
-  assert.deepEqual(labels(items), ['@lines:'])
+  assert.deepEqual(labels(items), ['@lines:', '@region:', '@code', '@code:'])
 })
 
 test('an option completion replaces the sigil and its separator', () => {
@@ -237,7 +237,7 @@ test('a quoted path completes its option names', () => {
   const { root, sourcePath } = workspace()
   const text = '{{ "with space.crv" @'
   const items = includeCompletions(text, at(text), { sourcePath, includeRoot: root })
-  assert.deepEqual(labels(items).sort(), ['@lines:', '@shift:'])
+  assert.deepEqual(labels(items).sort(), ['@code', '@code:', '@lines:', '@region:', '@shift:'])
 })
 
 test('a half-typed quoted path completes the file name', () => {
@@ -309,7 +309,8 @@ test('an option is still offered after a section, which IS a legal prefix', () =
   const { root, sourcePath } = workspace()
   const text = '{{ chapter.crv #Deeper-bit @'
   const items = includeCompletions(text, at(text), { sourcePath, includeRoot: root })
-  assert.deepEqual(labels(items).sort(), ['@lines:', '@shift:'])
+  // Only the transform: @lines, @region and @code each conflict with a section.
+  assert.deepEqual(labels(items), ['@shift:'])
 })
 
 // --- curly quotes and an empty target ------------------------------------
@@ -334,4 +335,109 @@ test('an empty target is offered no line range', () => {
   writeFileSync(path.join(root, 'empty.crv'), '')
   const text = '{{ empty.crv @lines:'
   assert.deepEqual(includeCompletions(text, at(text), { sourcePath, includeRoot: root }), [])
+})
+
+// --- @region and @code (carve-lsp#589) -----------------------------------
+
+function regionWorkspace(): { root: string; sourcePath: string } {
+  const { root, sourcePath } = workspace()
+  writeFileSync(
+    path.join(root, 'readme.crv'),
+    ['%% #region requirements', '- PHP 8.3', '%% #endregion requirements', '#region bare', 'Text.', '#endregion', ''].join('\n'),
+  )
+  writeFileSync(
+    path.join(root, 'server.js'),
+    [
+      '// #region start',
+      'listen()',
+      '// #endregion start',
+      '/* #region css */',
+      '/* #endregion */',
+      '<!-- #region html -->',
+      '<!-- #endregion -->',
+      '-- #region sql',
+      '-- #endregion',
+      '#region py',
+      '#endregion',
+      '%% #region carve',
+      '%% #endregion',
+      '',
+    ].join('\n'),
+  )
+  return { root, sourcePath }
+}
+
+test('a Carve include offers only the regions behind a %% marker', () => {
+  const { root, sourcePath } = regionWorkspace()
+  const text = '{{ readme.crv @region:'
+  const items = includeCompletions(text, at(text), { sourcePath, includeRoot: root })
+  // The bare `#region bare` pair is ordinary text in a Carve include.
+  assert.deepEqual(labels(items), ['requirements'])
+  const carveOnly = '{{ server.js @region:'
+  assert.deepEqual(labels(includeCompletions(carveOnly, at(carveOnly), { sourcePath, includeRoot: root })), ['carve'])
+})
+
+test('a malformed %% marker leaves no region to offer', () => {
+  const { root, sourcePath } = regionWorkspace()
+  writeFileSync(path.join(root, 'broken.crv'), '%% #region ok\n- PHP\n%% #endregion\n%% #region-x\n')
+  const text = '{{ broken.crv @region:'
+  assert.deepEqual(includeCompletions(text, at(text), { sourcePath, includeRoot: root }), [])
+})
+
+test('a code include offers the regions of every source-comment form', () => {
+  const { root, sourcePath } = regionWorkspace()
+  const text = '{{ server.js @code:js @region:'
+  const items = includeCompletions(text, at(text), { sourcePath, includeRoot: root })
+  assert.deepEqual(labels(items), ['start', 'css', 'html', 'sql', 'py', 'carve'])
+})
+
+test('a @code later in the directive still selects the code marker set', () => {
+  const { root, sourcePath } = regionWorkspace()
+  const line = '{{ server.js@region: @code:js }}'
+  const cursor = { line: 0, character: '{{ server.js@region:'.length }
+  const items = includeCompletions(line, cursor, { sourcePath, includeRoot: root })
+  assert.deepEqual(labels(items), ['start', 'css', 'html', 'sql', 'py', 'carve'])
+})
+
+test('an unpaired or duplicated marker leaves no region to offer', () => {
+  const { root, sourcePath } = regionWorkspace()
+  writeFileSync(path.join(root, 'broken.js'), '// #region a\n// #region a\n// #endregion\n// #endregion\n')
+  const text = '{{ broken.js @code @region:'
+  assert.deepEqual(includeCompletions(text, at(text), { sourcePath, includeRoot: root }), [])
+})
+
+test('applying a region completion yields a directive the scanner accepts', () => {
+  const { root, sourcePath } = regionWorkspace()
+  const text = '{{ server.js @code:js @region:'
+  const item = includeCompletions(text, at(text), { sourcePath, includeRoot: root }).find((c) => c.label === 'start')
+  const [directive] = findDirectives(`${applied(text, item)} }}`)
+  assert.equal(directive?.region, 'start')
+  assert.deepEqual(directive?.code, { lang: 'js' })
+})
+
+test('@code offers the fence languages', () => {
+  const { root, sourcePath } = workspace()
+  const text = '{{ chapter.crv @code:'
+  const items = labels(includeCompletions(text, at(text), { sourcePath, includeRoot: root }))
+  for (const language of ['javascript', 'python', 'text', 'mermaid']) assert.ok(items.includes(language), language)
+})
+
+test('a bare @code completes and the next option is still offered after it', () => {
+  const { root, sourcePath } = workspace()
+  const text = '{{ chapter.crv @co'
+  const item = includeCompletions(text, at(text), { sourcePath, includeRoot: root }).find((c) => c.label === '@code')
+  const after = `${applied(text, item)} @`
+  assert.deepEqual(findDirectives(`${applied(text, item)} }}`)[0]?.code, {})
+  const next = labels(includeCompletions(after, at(after), { sourcePath, includeRoot: root }))
+  assert.deepEqual(next, ['@lines:', '@region:', '@shift:'])
+})
+
+test('a selection is not offered a second selection', () => {
+  const { root, sourcePath } = workspace()
+  const text = '{{ chapter.crv @lines:1-2 @'
+  assert.deepEqual(labels(includeCompletions(text, at(text), { sourcePath, includeRoot: root })), [
+    '@shift:',
+    '@code',
+    '@code:',
+  ])
 })

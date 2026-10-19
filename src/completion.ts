@@ -35,10 +35,10 @@ const SYMBOL_CONTAINERS = [
 ]
 
 /** Fence languages worth offering; any word is valid. */
-const CODE_LANGUAGES = ['bash', 'c', 'carve', 'cpp', 'csharp', 'css', 'diff', 'go', 'html', 'java', 'javascript', 'json',
+export const CODE_LANGUAGES = ['bash', 'c', 'carve', 'cpp', 'csharp', 'css', 'diff', 'go', 'html', 'java', 'javascript', 'json',
   'kotlin', 'markdown', 'php', 'python', 'ruby', 'rust', 'shell', 'sql', 'swift', 'text', 'toml', 'typescript', 'xml', 'yaml']
 /** Languages an extension renders instead of printing as code. */
-const RENDERED_LANGUAGES = ['math', 'mermaid', 'svg']
+export const RENDERED_LANGUAGES = ['math', 'mermaid', 'svg']
 const RAW_FORMATS = ['=html', '=latex']
 
 /** Semantic span names: core `kbd`, `abbr`, `time`; the rest need the SemanticSpan extension. */

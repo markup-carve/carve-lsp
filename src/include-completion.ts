@@ -16,18 +16,21 @@ import {
   type Position,
 } from 'vscode-languageserver-types'
 import type { IncludeOptions } from './includes.js'
-import { lineCount, sections } from './include-selection.js'
+import { CODE_LANGUAGES, RENDERED_LANGUAGES } from './completion.js'
+import { lineCount, regionNames, sections } from './include-selection.js'
 import { inVerbatim, referenceModel } from './reference-sites.js'
 
 /**
  * The option names §19 defines, with the value shapes worth offering. The
  * line range has no fixed values, so its shape is completed from the child's
  * own length; the shift offset does, and `auto` is the one authors do not
- * discover on their own.
+ * discover on their own. `@code` is the one option that also stands bare.
  */
 const OPTION_NAMES = [
-  { name: 'lines', detail: 'Select a line range, N-M' },
-  { name: 'shift', detail: 'Shift heading levels by N, or auto' },
+  { name: 'lines', detail: 'Select a line range, N-M', selection: true },
+  { name: 'region', detail: 'Select a named source region', selection: true },
+  { name: 'shift', detail: 'Shift heading levels by N, or auto', selection: false },
+  { name: 'code', detail: 'Include as one code block in language lang', selection: false },
 ] as const
 
 /** Text between the innermost unclosed `{{` and the cursor, or null. */
@@ -68,7 +71,7 @@ const LEADING_PATH_RE = new RegExp(`^\\s*(${PATH_TOKEN})`)
  * which is the one outcome this module exists to avoid.
  */
 const OPTION_PREFIX_RE = new RegExp(
-  `^\\s*${PATH_TOKEN}(?:\\s+#[A-Za-z_][\\w-]*)?(?:\\s+@[A-Za-z_][\\w-]*:[^\\s#@}]+)*\\s*$`,
+  `^\\s*${PATH_TOKEN}(?:\\s+#[A-Za-z_][\\w-]*)?(?:\\s+@(?:[A-Za-z_][\\w-]*:[^\\s#@}]+|code(?=\\s|$)))*\\s*$`,
 )
 
 /** `{{ <path> … @<name>`, with whatever separator precedes the sigil. */
@@ -104,7 +107,7 @@ export function includeCompletions(
   const value = OPTION_VALUE_RE.exec(inner)
   if (value) {
     return OPTION_PREFIX_RE.test(inner.slice(0, value.index))
-      ? optionValues(inner, value, position, options, root)
+      ? optionValues(inner + directiveRest(line.slice(position.character)), value, position, options, root)
       : []
   }
 
@@ -123,6 +126,17 @@ export function includeCompletions(
 
   const asPath = PATH_RE.exec(inner)
   return asPath ? paths(asPath[2]!, position, options, root, undefined) : []
+}
+
+/** What follows the cursor up to the directive's closer, so a later `@code` still counts. */
+function directiveRest(suffix: string): string {
+  const close = suffix.indexOf('}}')
+  return close < 0 ? suffix : suffix.slice(0, close)
+}
+
+/** Whether the directive carries `@code`, bare or with a language. */
+function hasCode(text: string): boolean {
+  return /(?:^|\s)@code(?::|\s|$)/.test(text)
 }
 
 /** A path the bare token cannot spell, so the directive has to quote it. */
@@ -244,16 +258,22 @@ function optionNames(inner: string, match: RegExpExecArray, position: Position):
   const tail = separator.length + 1 + typed.length
   const before = inner.slice(0, inner.length - tail)
   const start = position.character - tail
-  return OPTION_NAMES.filter((option) => !new RegExp(`@${option.name}:`).test(before)).map((option) =>
-    item(
-      `@${option.name}:`,
-      CompletionItemKind.Property,
-      position,
-      start,
-      option.detail,
-      ` @${option.name}:`,
-    ),
-  )
+  const afterPath = before.slice(LEADING_PATH_RE.exec(before)?.[0].length ?? 0)
+  const section = /(?:^|\s)#[A-Za-z_]/.test(afterPath)
+  // #section, @lines and @region are mutually exclusive, and @code never pairs
+  // with #section: each such pair is an include-selection-conflict.
+  const selected = section || /@(?:lines|region):/.test(afterPath)
+  const out: CompletionItem[] = []
+  for (const option of OPTION_NAMES) {
+    if (option.name === 'code') {
+      if (section || hasCode(afterPath)) continue
+      out.push(item('@code', CompletionItemKind.Property, position, start, 'Include as one code block', ' @code'))
+    } else if (new RegExp(`@${option.name}:`).test(afterPath) || (option.selection && selected)) {
+      continue
+    }
+    out.push(item(`@${option.name}:`, CompletionItemKind.Property, position, start, option.detail, ` @${option.name}:`))
+  }
+  return out
 }
 
 /** Value shapes for the option being typed. */
@@ -273,9 +293,15 @@ function optionValues(
       item('-1', CompletionItemKind.Value, position, start, 'Shift headings one level shallower'),
     ]
   }
-  if (name !== 'lines') return []
-  // The only range worth guessing is the whole file, and it is only worth
-  // offering because it also tells the author how long the child actually is.
+  if (name === 'code') {
+    return [
+      ...CODE_LANGUAGES.map((language) => item(language, CompletionItemKind.Value, position, start, 'Code language')),
+      ...RENDERED_LANGUAGES.map((language) =>
+        item(language, CompletionItemKind.Value, position, start, 'Code language, rendered by an extension'),
+      ),
+    ]
+  }
+  if (name !== 'lines' && name !== 'region') return []
   const token = LEADING_PATH_RE.exec(inner)?.[1]
   if (!token) return []
   const filePart = decodePath(token)
@@ -283,6 +309,14 @@ function optionValues(
   if (!target || !isInside(root, target)) return []
   const source = readSafe(target)
   if (source === null) return []
+  if (name === 'region') {
+    const code = hasCode(inner)
+    return regionNames(source, code).map((region) =>
+      item(region, CompletionItemKind.Reference, position, start, code ? 'Source region in included file' : 'Region in included file'),
+    )
+  }
+  // The only range worth guessing is the whole file, and it is only worth
+  // offering because it also tells the author how long the child actually is.
   const total = lineCount(source)
   // An empty target has no line to select, and `1-0` is not a range the
   // scanner accepts, so there is nothing honest to offer.
