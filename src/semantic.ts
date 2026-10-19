@@ -203,6 +203,11 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode, keyword
       if (node.caption) collectInline(tokens, lines, node.caption, keywords, spanNames)
       break
     case 'table':
+      if (node.sourceFormat) {
+        pushFenceLines(tokens, lines, node.pos)
+        if (node.caption) collectInline(tokens, lines, node.caption, keywords, spanNames)
+        break
+      }
       if (node.pos) {
         for (let line = node.pos.startLine - 1; line < node.pos.endLine; line += 1) {
           scanTableLine(tokens, line, lines[line] ?? '')
@@ -388,7 +393,7 @@ function pushFenceLines(tokens: Token[], lines: string[], pos: Position | undefi
   }
 }
 
-// Zero-based lines of code and raw blocks, fences included, at any nesting depth.
+// Zero-based lines of fenced blocks, fences included, at any nesting depth.
 // pushFenceLines owns their tokens; the generic scanners must not add to them.
 function codeBlockLines(doc: Document): Set<number> {
   const body = new Set<number>()
@@ -399,13 +404,14 @@ function codeBlockLines(doc: Document): Set<number> {
     }
     if (value === null || typeof value !== 'object') return
     const node = value as { type?: unknown; pos?: Position }
-    if ((node.type === 'code_block' || node.type === 'raw_block') && node.pos?.startLine !== undefined && node.pos.endLine !== undefined) {
+    if ((node.type === 'code_block' || node.type === 'raw_block' || (node.type === 'table' && 'sourceFormat' in node && node.sourceFormat)) && node.pos?.startLine !== undefined && node.pos.endLine !== undefined) {
       for (let line = node.pos.startLine - 1; line < node.pos.endLine; line++) body.add(line)
       return
     }
     for (const key of Object.keys(node)) if (key !== 'pos') visit((node as Record<string, unknown>)[key])
   }
   visit(doc.children)
+  visit(Object.values(doc.footnoteDefs ?? {}))
   return body
 }
 
