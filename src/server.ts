@@ -58,6 +58,7 @@ import { completionAt } from './completion.js'
 import { foldingRanges } from './folding.js'
 import { continuationEdits, formatDocument, formatRange, listContinuationEdits, listIndentEdits } from './format.js'
 import { alignTableCodeAction, alignTablesInDocument, tableAlignmentEdits } from './table-alignment.js'
+import { tableConversionCodeActions } from './table-conversion.js'
 import { hoverAt } from './hover.js'
 import { migrationCodeActions } from './migration-actions.js'
 import { lintCodeActions } from './lint-actions.js'
@@ -413,7 +414,8 @@ connection.onRequest(CodeActionRequest.type, (params) => {
         ...migrationCodeActions(params.textDocument.uri, document.getText(), params.context.diagnostics),
         ...lintCodeActions(params.textDocument.uri, document.getText(), params.context.diagnostics),
         ...(!params.context.only || params.context.only.some(kind => CodeActionKind.RefactorRewrite === kind || CodeActionKind.RefactorRewrite.startsWith(kind + '.'))
-          ? [alignTableCodeAction(params.textDocument.uri, document.getText(), params.range.start.line)].filter(action => action !== null)
+          ? [alignTableCodeAction(params.textDocument.uri, document.getText(), params.range.start.line),
+              ...tableConversionCodeActions(params.textDocument.uri, document.getText(), params.range.start.line)].filter(action => action !== null)
           : []),
         ...(carveSettings.exportActions ? exportCodeActions(params.textDocument.uri, exportClient, params.context.only, (format) => renderExport(document, format), readExportTarget) : []),
       ]

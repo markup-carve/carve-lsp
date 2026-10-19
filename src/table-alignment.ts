@@ -47,7 +47,7 @@ function hasClosingRun(line: string, from: number, length: number): boolean {
   return false
 }
 
-function alignCanonicalTable(source: string): string {
+export function alignCanonicalTable(source: string): string {
   const lines = source.replace(/\n$/, '').split('\n')
   const rows = lines.map(splitRow)
   const widths: number[] = []
