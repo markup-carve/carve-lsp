@@ -409,6 +409,51 @@ test('an enabled include publishes its warning as a diagnostic on the directive 
   })
   assert.equal(diagnostic.source, 'carve')
   assert.deepEqual(result.dependencies, [{ id: 'absent.crv', resolved: false }])
+  assert.equal(result.diagnostics.filter((d) => d.code === 'include-unresolved').length, 1)
+})
+
+test('lints a CSV code include at its directive', () => {
+  const child = 'Plan,Seats,Price\nStarter,1,"$0"\nTeam,10,"$49" billed yearly\n'
+  const source = '{table}\n{{ data/plans.csv @code:csv }}\n'
+  const options = {
+    includes: {
+      resolver: (includePath: string) => ({ ok: true as const, id: includePath, source: child, bytes: Buffer.byteLength(child, 'utf8') }),
+      sourcePath: 'doc.crv',
+    },
+  }
+  const diagnostic = analyzeCarve(source, options).diagnostics
+  assert.equal(diagnostic.length, 1)
+  assert.equal(diagnostic[0]!.code, 'delimited-table-malformed')
+  assert.deepEqual(diagnostic[0]!.range, {
+    start: { line: 1, character: 0 },
+    end: { line: 1, character: 30 },
+  })
+  assert.match(diagnostic[0]!.message, /data\/plans\.csv:3\)$/)
+  assert.equal(diagnostic[0]!.relatedInformation, undefined)
+  assert.equal(analyzeCarve(source, { ...options, lint: { severities: { 'delimited-table-malformed': 'error' } } }).diagnostics[0]!.severity, 1)
+  assert.equal(analyzeCarve(source).diagnostics.some((d) => d.code === 'delimited-table-malformed'), false)
+  assert.equal(analyzeCarve(source, { includes: { sourcePath: 'doc.crv' } }).diagnostics.some((d) => d.code === 'delimited-table-malformed'), false)
+})
+
+test('lints Carve content in a child and links a watched file', () => {
+  const source = '{{ child.crv }}\n'
+  const child = '>quoted\n'
+  const diagnostics = analyzeCarve(source, {
+    includes: {
+      resolver: (includePath) => ({ ok: true, id: `/book/${includePath}`, watch: `/book/${includePath}`, source: child, bytes: Buffer.byteLength(child, 'utf8') }),
+      sourcePath: '/book/doc.crv',
+      includeRoot: '/book',
+    },
+  }).diagnostics
+  const diagnostic = diagnostics.find((d) => d.code === 'blockquote-marker-without-space')
+  assert.ok(diagnostic)
+  assert.deepEqual(diagnostic.range, { start: { line: 0, character: 0 }, end: { line: 0, character: 15 } })
+  assert.match(diagnostic.message, /child\.crv:1\)$/)
+  assert.deepEqual(diagnostic.relatedInformation?.[0]?.location, {
+    uri: 'file:///book/child.crv',
+    range: { start: { line: 0, character: 0 }, end: { line: 0, character: 7 } },
+  })
+  assert.equal(analyzeCarve(source).diagnostics.some((d) => d.code === 'blockquote-marker-without-space'), false)
 })
 
 test('a denial class never reaches the published diagnostic message', () => {
