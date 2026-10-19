@@ -127,9 +127,12 @@ own Tab.
 ## Language settings
 
 Clients can send these under `carve` in initialization options or
-`workspace/didChangeConfiguration`. If the client does not supply a `carve`
-section, the server reads the first `.carverc.json` in the workspace roots and
-watches it for changes.
+`workspace/didChangeConfiguration`. The server also reads the first
+`.carverc.json` in the workspace roots and watches it for changes. Settings
+merge key by key: a key the client sends wins, a key it leaves out comes from
+`.carverc.json`, and anything set in neither uses the default. Object
+settings (`format`, `severities`, `inlayHints`) merge one level deeper, so a
+client severity for one code keeps the project severities for the others.
 
 | Setting | Default | Meaning |
 |---|---|---|

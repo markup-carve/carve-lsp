@@ -83,7 +83,7 @@ import { indexWorkspace } from './workspace-loader.js'
 import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { VersionedCache } from './versioned-cache.js'
 import { includeCompletions } from './include-completion.js'
-import { DEFAULT_CARVE_SETTINGS, readCarveSettings, readProjectSettings, type CarveSettings } from './settings.js'
+import { carveSection, DEFAULT_CARVE_SETTINGS, mergeCarveSettings, readProjectSection, type CarveSettings } from './settings.js'
 import { colonFenceInlayHints, linkedColonFenceRanges } from './colon-fences.js'
 
 const connection = createConnection(ProposedFeatures.all)
@@ -105,7 +105,8 @@ let carveSettings: CarveSettings = DEFAULT_CARVE_SETTINGS
 let workspaceTrusted = false
 let exportClient: ExportSupport = { createFile: false, resolveEdit: false }
 let workspaceRoots: string[] = []
-let clientOwnsCarveSettings = false
+// The last `carve` section the client sent; its keys override `.carverc.json` one by one.
+let clientCarveSection: Record<string, unknown> | undefined
 let semanticTokensRefreshSupported = false
 const includeCache = new IncludeSourceCache()
 const includeParseCache = new IncludeParseCache()
@@ -115,6 +116,10 @@ const semanticBuilders = new Map<string, SemanticTokensBuilder>()
 const analysisCache = new VersionedCache<Analysis>()
 let watcherRegistration: Disposable | undefined
 let watcherRefresh = Promise.resolve()
+
+function resolveCarveSettings(): CarveSettings {
+  return mergeCarveSettings(clientCarveSection, readProjectSection(workspaceRoots) ?? undefined)
+}
 
 function sameExtensions(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((name, index) => name === right[index])
@@ -139,10 +144,8 @@ connection.onInitialize((params) => {
   const folders = (params.workspaceFolders ?? []).map((folder) => fsPath(folder.uri))
   const legacyRoot = params.rootUri != null ? fsPath(params.rootUri) : undefined
   workspaceRoots = [...folders, legacyRoot].filter((root): root is string => root !== undefined)
-  clientOwnsCarveSettings = Boolean((params.initializationOptions as { carve?: unknown } | undefined)?.carve)
-  carveSettings = clientOwnsCarveSettings
-    ? readCarveSettings(params.initializationOptions)
-    : readProjectSettings(workspaceRoots) ?? DEFAULT_CARVE_SETTINGS
+  clientCarveSection = carveSection(params.initializationOptions)
+  carveSettings = resolveCarveSettings()
 
   return {
     capabilities: {
@@ -209,12 +212,14 @@ connection.onInitialized(() => {
 
 connection.onDidChangeConfiguration((change) => {
   const previousExtensions = carveSettings.extensions
-  includeSettings = readIncludeSettings(change.settings, logIncludeSettings)
-  const supplied = Boolean((change.settings as { carve?: unknown } | undefined)?.carve)
-  if (supplied) clientOwnsCarveSettings = true
-  carveSettings = supplied || clientOwnsCarveSettings
-    ? readCarveSettings(change.settings)
-    : readProjectSettings(workspaceRoots) ?? DEFAULT_CARVE_SETTINGS
+  // `settings: null` (sent by vscode-languageclient on any settings change)
+  // carries nothing, so it keeps what the client sent before; an object
+  // without a `carve` section clears it.
+  if (change.settings != null) {
+    includeSettings = readIncludeSettings(change.settings, logIncludeSettings)
+    clientCarveSection = carveSection(change.settings)
+  }
+  carveSettings = resolveCarveSettings()
   if (semanticTokensRefreshSupported && !sameExtensions(previousExtensions, carveSettings.extensions)) {
     connection.languages.semanticTokens.refresh()
   }
@@ -280,9 +285,9 @@ connection.onDidChangeWatchedFiles((params) => {
     if (target === undefined) continue
     includeCache.invalidate(target)
     includeParseCache.invalidate(target)
-    if (target.endsWith('.carverc.json') && !clientOwnsCarveSettings) {
+    if (target.endsWith('.carverc.json')) {
       const previousExtensions = carveSettings.extensions
-      carveSettings = readProjectSettings(workspaceRoots) ?? DEFAULT_CARVE_SETTINGS
+      carveSettings = resolveCarveSettings()
       if (semanticTokensRefreshSupported && !sameExtensions(previousExtensions, carveSettings.extensions)) {
         connection.languages.semanticTokens.refresh()
       }
