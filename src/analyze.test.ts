@@ -228,6 +228,45 @@ test('returns semantic tokens for fenced blocks', () => {
   )
 })
 
+test('leaves CSV table bodies to the editor grammar', () => {
+  const source = '{table}\n```csv\nPlan,Seats,Price per month\nStarter,1,"$0"\nTeam,10,"$49, billed yearly"\nA|B,"$1","$2",{=x=}\n```\n'
+
+  assert.deepEqual(
+    semanticTokens(source).map((token) => [token.line, token.character, token.length, token.type]),
+    [
+      [0, 0, 1, 'property'],
+      [0, 1, 5, 'keyword'],
+      [0, 6, 1, 'property'],
+      [1, 0, 3, 'operator'],
+      [1, 3, 3, 'type'],
+      [6, 0, 3, 'operator'],
+    ],
+  )
+})
+
+test('leaves TSV table bodies to the editor grammar', () => {
+  const source = '{table}\n```tsv\nName\tNote\nA|B\t"%% $1 {=x=}"\n```\n'
+
+  assert.deepEqual(
+    semanticTokens(source).map((token) => [token.line, token.character, token.length, token.type]),
+    [
+      [0, 0, 1, 'property'],
+      [0, 1, 5, 'keyword'],
+      [0, 6, 1, 'property'],
+      [1, 0, 3, 'operator'],
+      [1, 3, 3, 'type'],
+      [4, 0, 3, 'operator'],
+    ],
+  )
+})
+
+test('leaves a CSV table body in a footnote to the editor grammar', () => {
+  const source = 'a[^n]\n\n[^n]: x\n\n  {table}\n  ```csv\n  A|B,{=x=}\n  ```\n'
+  const body = semanticTokens(source).filter((token) => token.line === 6)
+
+  assert.deepEqual(body, [])
+})
+
 test('returns semantic tokens for critic insert markup', () => {
   const result = semanticTokens('{+ inserted text +}')
   assert.deepEqual(
