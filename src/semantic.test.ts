@@ -149,6 +149,62 @@ test('classifies table pipes and two-axis alignment runs', () => {
 const at = (source: string, line: number) =>
   semanticTokens(source).filter((t) => t.line === line).map((t) => `${t.character}+${t.length}:${t.type}`)
 
+test('consumed block attributes color only their key words', () => {
+  for (const format of ['csv', 'tsv']) {
+    const source = `{table #data}\n\n\`\`\`${format}\na,b\n1,2\n\`\`\``
+    assert.ok(at(source, 0).includes('1+5:keyword'), format)
+    assert.ok(at(source, 0).some((token) => token.endsWith(':property')), format)
+  }
+  for (const body of ['- one\n- two', ':: Term\n: definition']) {
+    assert.ok(at(`{loose}\n\n${body}`, 0).includes('1+5:keyword'), body)
+  }
+  const table = '{header-rows=1 footer-rows=0 header-cols=1 aligns=lc valigns=tt widths=12 #x}\n\n| a | b |\n|---|---|\n| c | d |'
+  for (const name of ['header-rows', 'footer-rows', 'header-cols', 'aligns', 'valigns', 'widths']) {
+    assert.ok(semanticTokens(table).some((token) => token.line === 0 && token.character === table.indexOf(name) && token.length === name.length && token.type === 'keyword'), name)
+  }
+})
+
+test('table attribute words in a cell are not keywords', () => {
+  assert.ok(!semanticTokens('| header-rows=1 | b |\n|---|---|\n| c | d |').some((token) => token.type === 'keyword'))
+})
+
+test('a consumed key reaches its block through a stacked attribute line', () => {
+  assert.ok(at('{table}\n{#id}\n```csv\na,b\n```', 0).includes('1+5:keyword'))
+  assert.ok(at('{loose}\n{.c}\n- one', 0).includes('1+5:keyword'))
+})
+
+test('structural words on other blocks remain properties', () => {
+  assert.deepEqual(at('{table}\n\nparagraph', 0), ['0+7:property'])
+  assert.deepEqual(at('{loose}\n\n> quote', 0), ['0+7:property'])
+  assert.deepEqual(at('{header-rows=1}\n\nparagraph', 0), ['0+15:property'])
+})
+
+test('core semantic span names color only on span attributes', () => {
+  for (const name of ['kbd', 'abbr', 'time']) {
+    const source = `[Tab]{${name} #key}`
+    assert.ok(semanticTokens(source).some((token) => token.character === 6 && token.length === name.length && token.type === 'keyword'), name)
+    assert.deepEqual(at(`{${name}}\n\nparagraph`, 0), [`0+${name.length + 2}:property`])
+  }
+  assert.ok(!semanticTokens('[Tab]{samp}').some((token) => token.type === 'keyword'))
+})
+
+test('semantic-span extension colors only span attribute names', () => {
+  const enabled = { extensions: ['semantic-span'] }
+  for (const name of ['samp', 'var', 'cite', 'dfn']) {
+    const source = `[ls -l]{${name}}`
+    const character = source.indexOf(name)
+    assert.ok(semanticTokens(source, enabled).some((token) =>
+      token.character === character && token.length === name.length && token.type === 'keyword'), name)
+    assert.ok(semanticTokens(source).some((token) =>
+      token.character <= character && token.character + token.length >= character + name.length && token.type === 'property'), name)
+    assert.ok(!semanticTokens(`{${name}}\n\nparagraph`, enabled).some((token) => token.type === 'keyword'), name)
+  }
+  for (const options of [{}, enabled]) {
+    assert.ok(semanticTokens('[Tab]{kbd}', options).some((token) =>
+      token.character === 6 && token.length === 3 && token.type === 'keyword'))
+  }
+})
+
 test('a code body carries no semantic token', () => {
   const source = '```js\nconst a = 1\n[l](u) %% not a comment\n```\n'
   assert.deepEqual(at(source, 0), ['0+3:operator', '3+2:type'])

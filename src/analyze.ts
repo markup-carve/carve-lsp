@@ -1,3 +1,4 @@
+import { SEMANTIC_SPAN_EXTENSION_NAMES } from './semantic-span-names.js'
 import {
   DiagnosticSeverity,
   DocumentSymbol,
@@ -113,7 +114,7 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
   // attributes, legacy raw fences, leaked block markers).
   const lintExtensions = (options.lint?.extensions ?? []).map((name) =>
     name === 'semantic-span'
-      ? { name, semanticSpanNames: ['samp', 'var', 'cite', 'dfn'] }
+      ? { name, semanticSpanNames: [...SEMANTIC_SPAN_EXTENSION_NAMES] }
       : { name })
   for (const warning of lintCarve(source, {
     platforms: options.lint?.platforms,
