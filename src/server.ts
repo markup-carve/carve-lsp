@@ -106,6 +106,7 @@ let workspaceTrusted = false
 let exportClient: ExportSupport = { createFile: false, resolveEdit: false }
 let workspaceRoots: string[] = []
 let clientOwnsCarveSettings = false
+let semanticTokensRefreshSupported = false
 const includeCache = new IncludeSourceCache()
 const includeParseCache = new IncludeParseCache()
 const dependencyIndex = new DependencyIndex()
@@ -114,6 +115,10 @@ const semanticBuilders = new Map<string, SemanticTokensBuilder>()
 const analysisCache = new VersionedCache<Analysis>()
 let watcherRegistration: Disposable | undefined
 let watcherRefresh = Promise.resolve()
+
+function sameExtensions(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((name, index) => name === right[index])
+}
 
 /**
  * Say so when a configured `includeRoot` was dropped. A root the client
@@ -125,6 +130,7 @@ function logIncludeSettings(message: string): void {
 }
 
 connection.onInitialize((params) => {
+  semanticTokensRefreshSupported = params.capabilities.workspace?.semanticTokens?.refreshSupport === true
   includeSettings = readIncludeSettings(params.initializationOptions, logIncludeSettings)
   workspaceTrusted = readWorkspaceTrusted(params.initializationOptions)
   exportClient = exportSupport(params.capabilities)
@@ -202,12 +208,16 @@ connection.onInitialized(() => {
 })
 
 connection.onDidChangeConfiguration((change) => {
+  const previousExtensions = carveSettings.extensions
   includeSettings = readIncludeSettings(change.settings, logIncludeSettings)
   const supplied = Boolean((change.settings as { carve?: unknown } | undefined)?.carve)
   if (supplied) clientOwnsCarveSettings = true
   carveSettings = supplied || clientOwnsCarveSettings
     ? readCarveSettings(change.settings)
     : readProjectSettings(workspaceRoots) ?? DEFAULT_CARVE_SETTINGS
+  if (semanticTokensRefreshSupported && !sameExtensions(previousExtensions, carveSettings.extensions)) {
+    connection.languages.semanticTokens.refresh()
+  }
   analysisCache.clear()
   // Coalesced: a settings change can arrive alongside others, and revalidating
   // every open document synchronously is the same cost this ticket is removing.
@@ -271,7 +281,11 @@ connection.onDidChangeWatchedFiles((params) => {
     includeCache.invalidate(target)
     includeParseCache.invalidate(target)
     if (target.endsWith('.carverc.json') && !clientOwnsCarveSettings) {
+      const previousExtensions = carveSettings.extensions
       carveSettings = readProjectSettings(workspaceRoots) ?? DEFAULT_CARVE_SETTINGS
+      if (semanticTokensRefreshSupported && !sameExtensions(previousExtensions, carveSettings.extensions)) {
+        connection.languages.semanticTokens.refresh()
+      }
       analysisCache.clear()
       for (const document of documents.all()) diagnostics.schedule(document.uri, document.version)
     }
@@ -546,7 +560,7 @@ connection.languages.semanticTokens.on((params) => {
   if (!document) return { data: [] }
   const builder = new SemanticTokensBuilder()
   semanticBuilders.set(document.uri, builder)
-  return buildSemanticTokens(document.getText(), builder)
+  return buildSemanticTokens(document.getText(), builder, { extensions: carveSettings.extensions })
 })
 
 connection.languages.semanticTokens.onDelta((params) => {
@@ -554,13 +568,13 @@ connection.languages.semanticTokens.onDelta((params) => {
   if (!document) return { data: [] }
   const builder = semanticBuilders.get(document.uri) ?? new SemanticTokensBuilder()
   semanticBuilders.set(document.uri, builder)
-  return updateSemanticTokens(document.getText(), builder, params.previousResultId)
+  return updateSemanticTokens(document.getText(), builder, params.previousResultId, { extensions: carveSettings.extensions })
 })
 
 connection.languages.semanticTokens.onRange((params) => {
   const document = documents.get(params.textDocument.uri)
   return document
-    ? buildSemanticTokensRange(document.getText(), params.range.start.line, params.range.end.line)
+    ? buildSemanticTokensRange(document.getText(), params.range.start.line, params.range.end.line, { extensions: carveSettings.extensions })
     : { data: [] }
 })
 

@@ -134,7 +134,7 @@ watches it for changes.
 | Setting | Default | Meaning |
 |---|---|---|
 | `platforms` | `[]` | Extra platform lint profiles. Currently supports `"github"`. |
-| `extensions` | `[]` | Enabled extension names, for example `"semantic-span"`. |
+| `extensions` | `[]` | Enabled extension names. `"semantic-span"` colors `samp`, `var`, `cite`, and `dfn` as keywords in span attributes. |
 | `inlayHints` | `true` | Show inlay hints: generated heading identifiers, colon-fence closers, and the bare list marker hint. `false` turns all of them off; an object such as `{ "bareListMarkers": false }` keeps the others and turns that one off. |
 | `exportActions` | `true` | Offer the *Export as Markdown* / *Export as HTML* source actions. Editors with their own export commands can turn this off. |
 | `formatter` | `"conservative"` | Use whitespace-only conservative formatting; `"migration"` opts into canonical whole-document conversion. |

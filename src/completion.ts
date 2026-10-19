@@ -1,3 +1,4 @@
+import { SEMANTIC_SPAN_EXTENSION_NAMES } from './semantic-span-names.js'
 import {
   CompletionItemKind,
   type CompletionItem,
@@ -45,7 +46,7 @@ const SEMANTIC_SPANS = [
   { name: 'kbd', detail: 'Semantic span' },
   { name: 'abbr=', detail: 'Semantic span' },
   { name: 'time=', detail: 'Semantic span' },
-  ...['samp', 'var', 'cite', 'dfn'].map((name) => ({ name, detail: 'Semantic span (SemanticSpan extension)' })),
+  ...SEMANTIC_SPAN_EXTENSION_NAMES.map((name) => ({ name, detail: 'Semantic span (SemanticSpan extension)' })),
 ]
 
 /**

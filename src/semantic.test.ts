@@ -188,6 +188,23 @@ test('core semantic span names color only on span attributes', () => {
   assert.ok(!semanticTokens('[Tab]{samp}').some((token) => token.type === 'keyword'))
 })
 
+test('semantic-span extension colors only span attribute names', () => {
+  const enabled = { extensions: ['semantic-span'] }
+  for (const name of ['samp', 'var', 'cite', 'dfn']) {
+    const source = `[ls -l]{${name}}`
+    const character = source.indexOf(name)
+    assert.ok(semanticTokens(source, enabled).some((token) =>
+      token.character === character && token.length === name.length && token.type === 'keyword'), name)
+    assert.ok(semanticTokens(source).some((token) =>
+      token.character <= character && token.character + token.length >= character + name.length && token.type === 'property'), name)
+    assert.ok(!semanticTokens(`{${name}}\n\nparagraph`, enabled).some((token) => token.type === 'keyword'), name)
+  }
+  for (const options of [{}, enabled]) {
+    assert.ok(semanticTokens('[Tab]{kbd}', options).some((token) =>
+      token.character === 6 && token.length === 3 && token.type === 'keyword'))
+  }
+})
+
 test('a code body carries no semantic token', () => {
   const source = '```js\nconst a = 1\n[l](u) %% not a comment\n```\n'
   assert.deepEqual(at(source, 0), ['0+3:operator', '3+2:type'])

@@ -7,6 +7,7 @@ import {
 } from '@markup-carve/carve'
 import { astColumnToCharacter } from './position.js'
 import { resolvedDocument } from './parse-cache.js'
+import { SEMANTIC_SPAN_EXTENSION_NAMES } from './semantic-span-names.js'
 
 export const semanticTokenTypes = [
   'keyword',
@@ -35,20 +36,20 @@ export interface Token {
   modifiers?: TokenModifier[]
 }
 
-export function buildSemanticTokens(source: string, builder = new SemanticTokensBuilder()): SemanticTokens {
-  fillBuilder(builder, semanticTokens(source))
+export function buildSemanticTokens(source: string, builder = new SemanticTokensBuilder(), options: SemanticOptions = {}): SemanticTokens {
+  fillBuilder(builder, semanticTokens(source, options))
   return builder.build()
 }
 
-export function buildSemanticTokensRange(source: string, startLine: number, endLine: number): SemanticTokens {
+export function buildSemanticTokensRange(source: string, startLine: number, endLine: number, options: SemanticOptions = {}): SemanticTokens {
   const builder = new SemanticTokensBuilder()
-  fillBuilder(builder, semanticTokens(source).filter((token) => token.line >= startLine && token.line <= endLine))
+  fillBuilder(builder, semanticTokens(source, options).filter((token) => token.line >= startLine && token.line <= endLine))
   return builder.build()
 }
 
-export function updateSemanticTokens(source: string, builder: SemanticTokensBuilder, previousResultId: string) {
+export function updateSemanticTokens(source: string, builder: SemanticTokensBuilder, previousResultId: string, options: SemanticOptions = {}) {
   builder.previousResult(previousResultId)
-  fillBuilder(builder, semanticTokens(source))
+  fillBuilder(builder, semanticTokens(source, options))
   return builder.buildEdits()
 }
 
@@ -64,21 +65,28 @@ function fillBuilder(builder: SemanticTokensBuilder, tokens: Token[]): void {
   }
 }
 
-export function semanticTokens(source: string): Token[] {
+export interface SemanticOptions {
+  extensions?: readonly string[]
+}
+
+export function semanticTokens(source: string, options: SemanticOptions = {}): Token[] {
   try {
-    return astSemanticTokens(resolvedDocument(source), source)
+    return astSemanticTokens(resolvedDocument(source), source, options)
   } catch {
     return lexicalSemanticTokens(source)
   }
 }
 
-function astSemanticTokens(doc: Document, source: string): Token[] {
+function astSemanticTokens(doc: Document, source: string, options: SemanticOptions): Token[] {
+  const spanNames = options.extensions?.includes('semantic-span')
+    ? ['kbd', 'abbr', 'time', ...SEMANTIC_SPAN_EXTENSION_NAMES]
+    : ['kbd', 'abbr', 'time']
   const tokens: Token[] = []
   const keywords: Token[] = []
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
-  for (const node of doc.children) collectBlock(tokens, lines, node, keywords)
+  for (const node of doc.children) collectBlock(tokens, lines, node, keywords, spanNames)
   for (const body of Object.values(doc.footnoteDefs ?? {})) {
-    for (const node of body) collectBlock(tokens, lines, node, keywords)
+    for (const node of body) collectBlock(tokens, lines, node, keywords, spanNames)
   }
   const codeBlock = codeBlockLines(doc)
 
@@ -113,7 +121,7 @@ function astSemanticTokens(doc: Document, source: string): Token[] {
   )
 }
 
-function collectBlock(tokens: Token[], lines: string[], node: BlockNode, keywords: Token[]): void {
+function collectBlock(tokens: Token[], lines: string[], node: BlockNode, keywords: Token[], spanNames: string[]): void {
   const names = node.type === 'table'
     ? ('sourceFormat' in node && node.sourceFormat ? ['table'] : ['header-rows', 'footer-rows', 'header-cols', 'aligns', 'valigns', 'widths'])
     : node.type === 'list' || node.type === 'definition_list' ? ['loose'] : []
@@ -129,12 +137,12 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode, keyword
     case 'heading': {
       const first = tokens.length
       pushLinePrefix(tokens, lines, node.pos, /^#{1,6}/, 'operator')
-      collectInline(tokens, lines, node.children, keywords)
+      collectInline(tokens, lines, node.children, keywords, spanNames)
       pushHeadingTitle(tokens, lines, node.pos, first)
       break
     }
     case 'paragraph':
-      collectInline(tokens, lines, node.children, keywords)
+      collectInline(tokens, lines, node.children, keywords, spanNames)
       break
     case 'code_block':
     case 'raw_block':
@@ -151,36 +159,36 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode, keyword
       } else {
         pushQuoteMarkers(tokens, lines, node.pos)
       }
-      for (const child of node.children) collectBlock(tokens, lines, child, keywords)
+      for (const child of node.children) collectBlock(tokens, lines, child, keywords, spanNames)
       break
     case 'list':
       for (const item of node.items) {
         pushMarker(tokens, lines, item.pos, LIST_MARKER_ONLY, 'operator')
-        for (const child of item.children) collectBlock(tokens, lines, child, keywords)
+        for (const child of item.children) collectBlock(tokens, lines, child, keywords, spanNames)
       }
       break
     case 'admonition':
       pushLinePrefix(tokens, lines, node.pos, /^\s*:{3,}\s*[A-Za-z][\w-]*/, 'type')
       pushFenceCloser(tokens, lines, node.pos)
-      for (const child of node.children) collectBlock(tokens, lines, child, keywords)
-      if (node.title) collectInline(tokens, lines, node.title, keywords)
+      for (const child of node.children) collectBlock(tokens, lines, child, keywords, spanNames)
+      if (node.title) collectInline(tokens, lines, node.title, keywords, spanNames)
       break
     case 'div':
       pushLinePrefix(tokens, lines, node.pos, /^\s*:{3,}/, 'operator')
       pushFenceCloser(tokens, lines, node.pos)
-      for (const child of node.children) collectBlock(tokens, lines, child, keywords)
+      for (const child of node.children) collectBlock(tokens, lines, child, keywords, spanNames)
       break
     case 'definition_list':
       for (const item of node.items) {
-        for (const term of item.terms) collectInline(tokens, lines, term, keywords)
+        for (const term of item.terms) collectInline(tokens, lines, term, keywords, spanNames)
         for (const definition of item.definitions) {
-          for (const child of definition) collectBlock(tokens, lines, child, keywords)
+          for (const child of definition) collectBlock(tokens, lines, child, keywords, spanNames)
         }
       }
       break
     case 'figure':
-      collectFigureTarget(tokens, lines, node.target, keywords)
-      collectInline(tokens, lines, node.caption, keywords)
+      collectFigureTarget(tokens, lines, node.target, keywords, spanNames)
+      collectInline(tokens, lines, node.caption, keywords, spanNames)
       break
     // A composite figure (PART 9 §4c): one figure of ordered panels, opened by a
     // BARE `::: figure` fence. Its opener carries the reserved kind word, so the
@@ -191,8 +199,8 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode, keyword
     // and not from any one of them.
     case 'figure_group':
       pushLinePrefix(tokens, lines, node.pos, /^\s*:{3,}\s*figure/, 'type')
-      for (const child of node.children) collectBlock(tokens, lines, child, keywords)
-      if (node.caption) collectInline(tokens, lines, node.caption, keywords)
+      for (const child of node.children) collectBlock(tokens, lines, child, keywords, spanNames)
+      if (node.caption) collectInline(tokens, lines, node.caption, keywords, spanNames)
       break
     case 'table':
       if (node.pos) {
@@ -200,11 +208,11 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode, keyword
           scanTableLine(tokens, line, lines[line] ?? '')
         }
       }
-      if (node.caption) collectInline(tokens, lines, node.caption, keywords)
+      if (node.caption) collectInline(tokens, lines, node.caption, keywords, spanNames)
       for (const row of node.rows) {
         // A cell carries EITHER inline children or imported `blocks` (carve-js#1980), never both.
         // Carve source always yields the inline half, and this server only ever parses source.
-        for (const cell of row.cells) collectInline(tokens, lines, cell.children ?? [], keywords)
+        for (const cell of row.cells) collectInline(tokens, lines, cell.children ?? [], keywords, spanNames)
       }
       break
     case 'image':
@@ -230,12 +238,12 @@ function scanTableLine(tokens: Token[], line: number, text: string): void {
   }
 }
 
-function collectFigureTarget(tokens: Token[], lines: string[], node: BlockNode, keywords: Token[]): void {
+function collectFigureTarget(tokens: Token[], lines: string[], node: BlockNode, keywords: Token[], spanNames: string[]): void {
   if (node.type === 'image') pushPosition(tokens, lines, node.pos, 'string')
-  else collectBlock(tokens, lines, node, keywords)
+  else collectBlock(tokens, lines, node, keywords, spanNames)
 }
 
-function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[], keywords: Token[]): void {
+function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[], keywords: Token[], spanNames: string[]): void {
   for (const node of nodes) {
     // carve-js renamed this AST type from `critic-comment` to `critic_comment`,
     // completing the kebab-to-snake vocabulary convergence (carve#401). The
@@ -299,7 +307,7 @@ function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[], ke
           const text = lines[line] ?? ''
           const end = astColumnToCharacter(text, node.pos.endColumn)
           const attrs = /\{[^}\n]+\}$/.exec(text.slice(0, end))
-          if (attrs) collectAttributeKeywords(keywords, line, attrs[0], ['kbd', 'abbr', 'time'], end - attrs[0].length)
+          if (attrs) collectAttributeKeywords(keywords, line, attrs[0], spanNames, end - attrs[0].length)
         }
         break
       case 'inline_extension':
@@ -327,9 +335,9 @@ function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[], ke
     }
 
     const children = (node as { children?: InlineNode[] }).children
-    if (Array.isArray(children)) collectInline(tokens, lines, children, keywords)
+    if (Array.isArray(children)) collectInline(tokens, lines, children, keywords, spanNames)
     const content = (node as { content?: InlineNode[] }).content
-    if (Array.isArray(content)) collectInline(tokens, lines, content, keywords)
+    if (Array.isArray(content)) collectInline(tokens, lines, content, keywords, spanNames)
   }
 }
 
