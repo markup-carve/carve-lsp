@@ -41,3 +41,8 @@ test('a client value still overrides .carverc.json', async context => {
   const result = await formatWith({ ...vscodeSection, format: { alignTables: false } }, { carve: { format: { alignTables: true } } }, context)
   assert.notEqual(result, aligned)
 })
+
+test('didChangeConfiguration with settings null keeps the client section', async context => {
+  const result = await formatWith({ ...vscodeSection, format: { alignTables: true } }, {}, context)
+  assert.equal(result, aligned)
+})

@@ -212,10 +212,13 @@ connection.onInitialized(() => {
 
 connection.onDidChangeConfiguration((change) => {
   const previousExtensions = carveSettings.extensions
-  includeSettings = readIncludeSettings(change.settings, logIncludeSettings)
-  // A notification without a `carve` section (VS Code sends `settings: null`)
-  // keeps what the client sent before instead of resetting it.
-  clientCarveSection = carveSection(change.settings) ?? clientCarveSection
+  // `settings: null` (sent by vscode-languageclient on any settings change)
+  // carries nothing, so it keeps what the client sent before; an object
+  // without a `carve` section clears it.
+  if (change.settings != null) {
+    includeSettings = readIncludeSettings(change.settings, logIncludeSettings)
+    clientCarveSection = carveSection(change.settings)
+  }
   carveSettings = resolveCarveSettings()
   if (semanticTokensRefreshSupported && !sameExtensions(previousExtensions, carveSettings.extensions)) {
     connection.languages.semanticTokens.refresh()
