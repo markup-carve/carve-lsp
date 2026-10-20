@@ -402,6 +402,7 @@ export function listIndentEdits(source: string, line: number, direction: ListInd
   const indent = lead.slice(fixed)
   if (/[^ \t]/.test(indent)) return null
   const shape: Shape = { line, fixed, indent, marker: own[1]!, separator: own[2]!, quotes: (lead.slice(0, fixed).match(/>/g) ?? []).length }
+  // A lone `+` left of the item's marker column is an ancestor's marker (carve#3421).
   if (indent && Array.from({ length: item.endLine - line }, (_, offset) => completed[line + offset + 1]!).some((entry) => {
     let at = 0
     for (let level = 0; level < shape.quotes; level++) {
@@ -409,7 +410,8 @@ export function listIndentEdits(source: string, line: number, direction: ListInd
       if (!quote) return false
       at += quote[0].length
     }
-    return /^\+[ \t]*$/.test(entry.slice(at))
+    const plus = /^([ \t]*)\+[ \t]*$/.exec(entry.slice(at))
+    return plus !== null && columns(plus[1]!) < columns(indent)
   })) return null
 
   if (direction === 'indent') {
@@ -519,7 +521,7 @@ function shiftItem(lines: string[], item: TreeItem, shape: Shape, delta: number,
   edits.push({ range: { start: { line: shape.line, character: shape.fixed }, end: { line: shape.line, character: end } }, newText: replacement })
   next[shape.line] = next[shape.line]!.slice(0, shape.fixed) + replacement + next[shape.line]!.slice(end)
   const shift = delta + marker.length - shape.marker.length
-  let attached = false
+  const content = columns(shape.indent) + shape.marker.length + shape.separator.length
   for (let line = item.line + 1; line <= item.endLine; line++) {
     const text = lines[line]!
     let at = 0
@@ -530,16 +532,11 @@ function shiftItem(lines: string[], item: TreeItem, shape: Shape, delta: number,
       at += quote[0].length
       level++
     }
-    if (level === shape.quotes && /^\+[ \t]*$/.test(text.slice(at)) && !shape.indent && delta > 0) {
-      const blank = text.slice(0, at).trimEnd()
-      edits.push({ range: { start: { line, character: 0 }, end: { line, character: text.length } }, newText: blank })
-      next[line] = blank
-      attached = true
-      continue
-    }
     // A lazy line (fewer quote markers) or a blank one is left as written.
     if (level < shape.quotes || text.slice(at).trim() === '') continue
-    const width = attached ? indent.length + marker.length + shape.separator.length : shift
+    // Left of the content column sit the item's `+` markers and the blocks they attach,
+    // which stay on the marker column as it moves (carve#3421).
+    const width = columns(/^[ \t]*/.exec(text.slice(at))![0]) < content ? delta : shift
     if (width === 0) continue
     if (width > 0) {
       edits.push({ range: { start: { line, character: at }, end: { line, character: at } }, newText: ' '.repeat(width) })
@@ -609,4 +606,11 @@ function fromRoman(text: string): number | null {
   let rest = text
   for (const [amount, digits] of ROMAN) while (rest.startsWith(digits)) { value += amount; rest = rest.slice(digits.length) }
   return rest === '' && value > 0 ? value : null
+}
+
+/** Width of a leading run, a tab advancing to the next multiple of 4 (PART 9 §24). */
+function columns(run: string): number {
+  let width = 0
+  for (const char of run) width = char === '\t' ? width + 4 - (width % 4) : width + 1
+  return width
 }

@@ -89,17 +89,16 @@ test('Tab and Shift+Tab move a list item to the intended depth', () => {
   }
 })
 
-test('Tab replaces continuation markers and nests their attached blocks', () => {
-  for (const [source, expected] of [
-    ['- a\n- b\n+\n```\nx\n```\n', '- a\n  - b\n\n    ```\n    x\n    ```\n'],
-    ['> - a\n> - b\n> +\n> ```\n> x\n> ```\n', '> - a\n>   - b\n>\n>     ```\n>     x\n>     ```\n'],
-    ['- a\n- b\n+\nP1\n+\nP2\n', '- a\n  - b\n\n    P1\n\n    P2\n'],
+test('Tab keeps a continuation marker on the moved item\'s marker column', () => {
+  for (const [source, line, direction, expected] of [
+    ['- a\n- b\n+\n```\nx\n```\n', 1, 'indent', '- a\n  - b\n  +\n  ```\n  x\n  ```\n'],
+    ['> - a\n> - b\n> +\n> ```\n> x\n> ```\n', 1, 'indent', '> - a\n>   - b\n>   +\n>   ```\n>   x\n>   ```\n'],
+    ['- a\n- b\n+\nP1\n+\nP2\n', 1, 'indent', '- a\n  - b\n  +\n  P1\n  +\n  P2\n'],
+    ['- a\n  - b\n  +\n  P1\n', 1, 'outdent', '- a\n- b\n+\nP1\n'],
   ] as const) {
-    const edits = listIndentEdits(source, 1, 'indent')
+    const edits = listIndentEdits(source, line, direction)
     assert.ok(edits, JSON.stringify(source))
-    const result = apply(source, edits)
-    assert.equal(result, expected)
-    assert.equal(result.split('\n').some((line) => /^\s+\+\s*$/.test(line)), false)
+    assert.equal(apply(source, edits), expected)
   }
 })
 
