@@ -56,7 +56,7 @@ function selectionRange(directive: Omit<Directive, 'start' | 'end'>, source: str
     return lineStart(directive.lines.start)
   }
   if (directive.region !== undefined) {
-    const region = regionLines(source, directive.region)
+    const region = regionLines(source, directive.region, directive.code !== undefined)
     return region ? lineStart(region.start) : FILE_START
   }
   return FILE_START
