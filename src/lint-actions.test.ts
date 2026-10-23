@@ -97,5 +97,6 @@ test('replaces a near-miss consumed key with the key the engine suggests', () =>
   const csv = '```csv\na,b\n1,2\n```\n'
   assert.equal(applyFirst(`{tabel}\n${csv}`, 'Change'), `{table}\n${csv}`)
   assert.equal(applyFirst(`{#t tables .wide}\n${csv}`, 'Change'), `{#t table .wide}\n${csv}`)
+  assert.equal(applyFirst(`{tabel title="a tabel b"}\n${csv}`, 'Change'), `{table title="a tabel b"}\n${csv}`)
   assert.deepEqual(analyzeCarve(`{table}\n${csv}`).diagnostics.filter((d) => d.code === 'consumed-key-near-miss'), [])
 })

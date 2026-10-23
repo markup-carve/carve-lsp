@@ -135,7 +135,9 @@ function nearMissEdit(lines: string[], diagnostic: Diagnostic): { edit: TextEdit
       if (line < diagnostic.range.start.line) break
       continue
     }
-    for (const hit of text.matchAll(word)) hits.push({ line, character: hit.index! })
+    // Blank quoted values, keeping offsets, so only keys and bare words match.
+    const keys = text.replace(/"(?:[^"\\]|\\.)*"/g, (quoted) => ' '.repeat(quoted.length))
+    for (const hit of keys.matchAll(word)) hits.push({ line, character: hit.index! })
   }
   if (hits.length !== 1) return null
   const { line, character } = hits[0]!
