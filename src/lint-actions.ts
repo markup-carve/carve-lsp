@@ -5,6 +5,8 @@ import { CodeActionKind, type CodeAction, type Diagnostic, type TextEdit } from 
 export function lintCodeActions(uri: string, source: string, diagnostics: Diagnostic[]): CodeAction[] {
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   const actions: CodeAction[] = []
+  let rendered: string | undefined
+  const original = () => (rendered ??= carveToHtml(lines.join('\n')))
   for (const diagnostic of diagnostics) {
     const code = String(diagnostic.code ?? '')
     const line = lines[diagnostic.range.start.line] ?? ''
@@ -31,7 +33,7 @@ export function lintCodeActions(uri: string, source: string, diagnostics: Diagno
         const escaped = [...lines]
         escaped[lineNo] = `${line.slice(0, at)}\\${line.slice(at)}`
         // The refused marker already reads as text; the escape only states that.
-        if (carveToHtml(lines.join('\n')) === carveToHtml(escaped.join('\n'))) {
+        if (original() === carveToHtml(escaped.join('\n'))) {
           edit = { range: point(lineNo, at), newText: '\\' }
           title = 'Escape the + as literal text'
         }
