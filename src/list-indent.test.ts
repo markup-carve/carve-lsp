@@ -89,6 +89,19 @@ test('Tab and Shift+Tab move a list item to the intended depth', () => {
   }
 })
 
+test('Tab keeps a continuation marker on the moved item\'s marker column', () => {
+  for (const [source, line, direction, expected] of [
+    ['- a\n- b\n+\n```\nx\n```\n', 1, 'indent', '- a\n  - b\n  +\n  ```\n  x\n  ```\n'],
+    ['> - a\n> - b\n> +\n> ```\n> x\n> ```\n', 1, 'indent', '> - a\n>   - b\n>   +\n>   ```\n>   x\n>   ```\n'],
+    ['- a\n- b\n+\nP1\n+\nP2\n', 1, 'indent', '- a\n  - b\n  +\n  P1\n  +\n  P2\n'],
+    ['- a\n  - b\n  +\n  P1\n', 1, 'outdent', '- a\n- b\n+\nP1\n'],
+  ] as const) {
+    const edits = listIndentEdits(source, line, direction)
+    assert.ok(edits, JSON.stringify(source))
+    assert.equal(apply(source, edits), expected)
+  }
+})
+
 test('nothing to nest under or out of leaves Tab to the host', () => {
   for (const [source, line, direction] of [
     ['- a', 0, 'indent'],

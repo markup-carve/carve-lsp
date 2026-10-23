@@ -23,6 +23,7 @@ import { smartPunctuationText } from './inline-text.js'
 import { panelLetter } from './captions.js'
 import { includeDenialCode } from './include-denial.js'
 import {
+  engineIncludeResolver,
   resolveIncludes,
   type IncludeDependency,
   type IncludeOptions,
@@ -116,23 +117,52 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
     name === 'semantic-span'
       ? { name, semanticSpanNames: [...SEMANTIC_SPAN_EXTENSION_NAMES] }
       : { name })
-  for (const warning of lintCarve(source, {
+  const lintResolver = engineIncludeResolver(options.includes ?? {})
+  const lintOptions = {
     platforms: options.lint?.platforms,
     extensions: lintExtensions,
-  })) {
+    ...(lintResolver ? { includes: {
+      resolve: lintResolver,
+      sourcePath: options.includes?.sourcePath,
+      maxDepth: options.includes?.maxDepth,
+      maxBytes: options.includes?.maxBytes,
+      maxResolverCalls: options.includes?.maxResolverCalls,
+    } } : {}),
+  }
+  const includes = resolveIncludes(norm, options.includes ?? {})
+  const paths = options.includes?.paths ?? portableIncludePaths
+  type IncludedLintWarning = ReturnType<typeof lintCarve>[number] & {
+    file?: string
+    includedBy?: Array<{ start: number; end: number }>
+  }
+  for (const warning of lintCarve(source, lintOptions) as IncludedLintWarning[]) {
+    if (warning.rule.startsWith('include-')) continue
+    const site = warning.includedBy?.[0]
+    const child = warning.file === undefined ? undefined : includes.documents.find((document) => document.id === warning.file)
+    const childName = warning.file === undefined ? undefined : safeChildName(warning.file, options.includes, paths)
     // `start`/`end` are UTF-16 offsets into the source as given; `column` counts codepoints.
     const diagnostic: Diagnostic = {
       severity: DiagnosticSeverity.Warning,
       range: {
-        start: positionAt(source, warning.start),
-        end: positionAt(source, Math.max(warning.start + 1, warning.end)),
+        start: site ? positionAt(source, astOffsetToIndex(source, site.start)) : positionAt(source, warning.start),
+        end: site ? positionAt(source, astOffsetToIndex(source, site.end)) : positionAt(source, Math.max(warning.start + 1, warning.end)),
       },
       source: 'carve',
       code: warning.rule,
-      message: warning.message,
+      message: childName ? `${warning.message} (in ${childName}:${warning.line})` : warning.message,
       data: (warning as typeof warning & { data?: unknown }).data,
     }
-    const related = options.uri ? firstDuplicateDeclaration(source, warning.rule, warning.message, warning.line - 1) : null
+    if (site && child?.watch !== undefined) diagnostic.relatedInformation = [{
+      location: {
+        uri: paths.toUri(child.watch),
+        range: {
+          start: positionAt(child.source, warning.start),
+          end: positionAt(child.source, Math.max(warning.start + 1, warning.end)),
+        },
+      },
+      message: warning.message,
+    }]
+    const related = !site && options.uri ? firstDuplicateDeclaration(source, warning.rule, warning.message, warning.line - 1) : null
     if (options.uri && related) diagnostic.relatedInformation = [{
       location: { uri: options.uri, range: related },
       message: 'First declaration is here.',
@@ -154,8 +184,6 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
   // Include resolution (PART 9 §19). Inert without a resolver, so a document
   // in an untrusted or unconfigured workspace keeps its `{{ … }}` literal and
   // nothing on disk is touched.
-  const includes = resolveIncludes(norm, options.includes ?? {})
-  const paths = options.includes?.paths ?? portableIncludePaths
   for (const warning of includes.warnings) {
     const child = childLocation(warning, includes.documents, paths)
     diagnostics.push({
@@ -330,6 +358,11 @@ function attributeToChild(
   if (file === undefined || file === includes?.sourcePath) return message
   const root = includes?.includeRoot
   return `${message} (in ${root === undefined ? file : paths.relativeToRoot(file, root)})`
+}
+
+function safeChildName(file: string, includes: IncludeOptions | undefined, paths: IncludePaths): string {
+  const relative = includes?.includeRoot === undefined ? file : paths.relativeToRoot(file, includes.includeRoot)
+  return /^(?:[a-z]:[\\/]|[\\/])/i.test(relative) ? paths.basename(relative) : relative
 }
 
 function documentSymbols(doc: Document, source: string): DocumentSymbol[] {

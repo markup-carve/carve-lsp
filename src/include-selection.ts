@@ -12,7 +12,7 @@
  * generates perfectly well, and a false diagnostic on a working document is
  * worse than a missing one.
  */
-import { parse, resolve, type BlockNode } from '@markup-carve/carve'
+import { parse, resolve, selectIncludeRegion, type BlockNode } from '@markup-carve/carve'
 import type { Range } from 'vscode-languageserver-types'
 
 export interface Section {
@@ -52,35 +52,12 @@ export function sectionRange(source: string, id: string): Range | undefined {
 
 /**
  * The 1-based line range inside a uniquely named, correctly paired comment
- * region, or null when the child has no such region (I1b).
- *
- * Mirrors `regionLines` in carve-js `src/includes.ts`, which the engine does
- * not export: a marker is `#region name` / `#endregion`, bare or after `//`.
+ * region, or null when the child has no such region (I1b). The engine decides:
+ * a Carve include knows `%% #region`, a `@code` include also source comments.
  */
-export function regionLines(source: string, selected: string): { start: number; end: number } | null {
-  const lines = source.replace(/\r\n?/g, '\n').split('\n')
-  if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop()
-  const seen = new Set<string>()
-  const stack: Array<{ name: string; line: number }> = []
-  let range: { start: number; end: number } | null = null
-  for (const [index, sourceLine] of lines.entries()) {
-    const line = sourceLine.replace(/^[ \t]+/, '')
-    const body = line.startsWith('//') ? line.slice(2).replace(/^[ \t]+/, '') : line
-    if (!/^#(?:end)?region\b/.test(body)) continue
-    const marker = /^#(end)?region(?:[ \t]+([A-Za-z_][\w-]*))?[ \t]*$/.exec(body)
-    if (!marker) return null
-    const name = marker[2]
-    if (marker[1]) {
-      const open = stack.pop()
-      if (!open || (name !== undefined && name !== open.name)) return null
-      if (open.name === selected) range = { start: open.line + 2, end: index }
-    } else {
-      if (!name || seen.has(name)) return null
-      seen.add(name)
-      stack.push({ name, line: index })
-    }
-  }
-  return stack.length === 0 ? range : null
+export function regionLines(source: string, selected: string, code = false): { start: number; end: number } | null {
+  const result = selectIncludeRegion(source, selected, code ? 'code' : 'carve')
+  return result.ok ? { start: result.start, end: result.end } : null
 }
 
 /**
@@ -89,8 +66,8 @@ export function regionLines(source: string, selected: string): { start: number; 
  * `@code` include also the source-comment forms. Empty when any marker is
  * malformed, unpaired or duplicated, since the engine then rejects every name.
  *
- * Mirrors `regionLines` on carve-js main (`selectIncludeRegion`), which the
- * pinned 0.1.12 engine neither exports nor follows yet.
+ * Follows the marker rules of `selectIncludeRegion`, which answers one name but
+ * does not list them.
  */
 export function regionNames(source: string, code: boolean): string[] {
   const names: string[] = []
