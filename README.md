@@ -41,6 +41,20 @@ The server communicates over **stdio** (`--stdio` flag).
 
 Use **Align table** to line up pipe table cells. **Convert to pipe table** changes CSV or TSV tables, and **Convert to CSV table** changes plain pipe tables. Conversion is offered only when it preserves rendered HTML and every cell's text.
 
+### Lint quick fixes
+
+| Finding | Quick fix |
+|---|---|
+| `blockquote-marker-without-space` | Insert the space after `>` |
+| `raw-block-syntax` | Rewrite a `raw` fence as a `=format` raw fence |
+| `table-alignment-run-padding` | Insert the space that ends the alignment run |
+| `colon-fence-length-mismatch` | Resize the colon run, or keep it as literal text |
+| `unresolved-footnote`, `unresolved-reference-link` | Append the missing definition |
+| `continuation-marker-refused` | Escape the `+` as text, offered only when the output stays the same |
+| `list-marker-below-content-column` | Indent the marker to nest it, or outdent it to the item's own column |
+| `description-separator-below-content-column` | Indent the separator to continue the definition list |
+| `consumed-key-near-miss` | Replace the misspelled key with the one the engine suggests |
+
 Workspace navigation is backed by a versioned `.crv` index. The initial scan
 ignores `.git` and `node_modules` and is bounded at 10,000 files / 64 MiB;
 open buffers replace their disk snapshot and closing a buffer restores it.
