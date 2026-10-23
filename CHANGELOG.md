@@ -19,6 +19,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Include completion offers the region option and both code option spellings, lists the regions a target declares, and offers languages after `code:` (#592).
 - *Convert to pipe table* and *Convert to CSV table* code actions, offered only when the converted document renders to identical HTML (#595).
 - Lint findings from included files are published at their include directive (#598, #590).
+- Quick fixes for the new lint findings: escape a refused `+` as text, move a list marker or description separator to the column the finding names, and replace a near-miss consumed key with the suggested one (#612).
 
 ### Changed
 
