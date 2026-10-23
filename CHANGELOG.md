@@ -4,6 +4,27 @@ All notable changes to carve-lsp are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.14] - 2026-10-23
+
+### Fixed
+
+- `.carverc.json` applies key by key when the client sends a `carve` section: a key the client sends wins, a key it leaves out comes from `.carverc.json` (#585).
+- A `workspace/didChangeConfiguration` with `settings: null` no longer resets `format.alignTables`, `formatter`, `includeRoot` and the other client settings to their defaults (#585).
+- Go to definition on a region include lands on the first line of the region instead of the top of the file (#586). It now uses the engine's `selectIncludeRegion`, so a Carve include matches only `%% #region` and a `code` include also matches source-comment markers such as `/* #region */` (#598, #588).
+- Semantic tokens leave the body of a `csv` or `tsv` table fence to the editor grammar instead of painting operators and strings over its fields (#594).
+
+### Added
+
+- Semantic tokens mark attribute words that change the element as `keyword`: `table`, `loose`, the pipe-table layout keys, and `kbd`, `abbr` and `time` on a span; with the `semantic-span` extension also `samp`, `var`, `cite` and `dfn` (#580).
+- Include completion offers the region option and both code option spellings, lists the regions a target declares, and offers languages after `code:` (#592).
+- *Convert to pipe table* and *Convert to CSV table* code actions, offered only when the converted document renders to identical HTML (#595).
+- Lint findings from included files are published at their include directive (#598, #590).
+
+### Changed
+
+- Tab and Shift+Tab keep a continuation marker `+` on the moved item's marker column, and refuse a move past a `+` that belongs to an ancestor (#598).
+- Requires `@markup-carve/carve` 0.1.13 or later (#598).
+
 ## [0.1.13] - 2026-10-18
 
 ### Added
