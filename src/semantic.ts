@@ -559,14 +559,14 @@ export const QUOTE_PREFIX = /^([ \t]*>+)(?: |$)/
 // bullet, so a `+ ` line is paragraph text.
 //
 // `task_marker = '[', task_state, ']', space`, and `task_state` is any of
-// ` x X - _ > ?`; the old class admitted only ` xX`, so four of the seven
+// ` x X - _ / ! > ?`; the old class admitted only ` xX`, so four of the original seven
 // states were not colored at all. The lookahead is the measured behavior: the
 // separator run is spaces, and what follows has to be content.
 // The marker alone, for the AST path, which already knows the line opens a
 // list and only needs the marker's width. Same bullet class: `+` is not one.
 export const LIST_MARKER_ONLY = /^[ \t]*(?:[-*]|\.(?= |$)|\(?[0-9A-Za-z]+[.)])/
 
-export const LIST_PREFIX = /^([ \t]*)([-*]|\(?[0-9]+[.)]|\(?[A-Za-z][.)]) +(\[[ xX\-_>?]\] +(?=\S))?/
+export const LIST_PREFIX = /^([ \t]*)([-*]|\(?[0-9]+[.)]|\(?[A-Za-z][.)]) +(\[[ xX\-_>\/!?]\] +(?=\S))?/
 
 function scanAstGaps(tokens: Token[], line: number, text: string): void {
   // footnote definition: [^label]: content — must be checked before reference def

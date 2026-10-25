@@ -102,9 +102,9 @@ test('a tab after a bullet is not a list marker', () => {
 })
 
 test('the states beyond x and X are still task markers', () => {
-  // `task_state = ' ' | 'x' | 'X' | '-' | '_' | '>' | '?'`. Four of the seven
-  // were absent from the old class, so those checkboxes were never colored.
-  for (const state of [' ', 'x', 'X', '-', '_', '>', '?']) {
+  // `task_state = ' ' | 'x' | 'X' | '-' | '_' | '/' | '!' | '>' | '?'`. The original four extended
+  // states were absent from the old class, so those checkboxes were never colored.
+  for (const state of [' ', 'x', 'X', '-', '_', '/', '!', '>', '?']) {
     assert.ok(LIST_PREFIX.exec(`- [${state}] a`)?.[3], `state ${JSON.stringify(state)}`)
   }
 })

@@ -226,7 +226,7 @@ const BULLET = /^([ \t]*)([-*])([ \t]+)/
 const BARE_DOT = /^([ \t]*)(\.)([ \t]+)/
 const ORDERED = /^([ \t]*)([0-9]+|[A-Za-z]+)([.)])([ \t]+)/
 const MARKER_ATTRS = /^([ \t]*(?:[-*.]|(?:[0-9]+|[A-Za-z]+)[.)]))\{[^}\n]*\}[ \t]*/
-const TASK = /^\[[ xX_>?-]\]( [ \t]*|$)/
+const TASK = /^\[[ xX_>\/!?-]\]( [ \t]*|$)/
 // A marker and its separator alone on a line, as the continuation writes it. A
 // lone `-` with no separator is left alone: it may be prose. The separator must
 // open with a space and roman numerals are single-case, as the parser reads them;
