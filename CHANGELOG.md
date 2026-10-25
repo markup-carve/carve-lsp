@@ -4,6 +4,12 @@ All notable changes to carve-lsp are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.15] - 2026-10-25
+
+### Added
+
+- Formatting and semantic tokens recognize progress `[/]` and blocked `[!]` task markers (#620).
+
 ## [0.1.14] - 2026-10-23
 
 ### Fixed
