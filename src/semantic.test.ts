@@ -124,15 +124,14 @@ test('the space spellings all still tokenize', () => {
   }
 })
 
-test('an unclosed top-level comment fence degrades to one comment line', () => {
-  const tokens = semanticTokens('%%%\n\n# Still a heading\n\n`still code`\n')
+test('an unclosed top-level comment fence hides the rest of the document (carve#5012)', () => {
+  const tokens = semanticTokens('%%%\n\n# Hidden heading\n\n`hidden code`\n')
 
   assert.deepEqual(
     tokens.filter((token) => token.type === 'comment').map((token) => token.line),
-    [0],
+    [0, 2, 4],
   )
-  assert.ok(tokens.some((token) => token.line === 2 && token.type === 'type'))
-  assert.ok(tokens.some((token) => token.line === 4 && token.type === 'string'))
+  assert.ok(!tokens.some((token) => token.type === 'type' || token.type === 'string'))
 })
 
 test('classifies table pipes and two-axis alignment runs', () => {
@@ -281,4 +280,9 @@ test('frontmatter with a format token is colored like bare frontmatter', () => {
   assert.deepEqual(lines('--- foo_bar\na: 1\n---\n# H\n'), [0, 1, 2])
   // A thematic break with text after it is no opener.
   assert.deepEqual(lines('--- a b\n\nx\n'), [])
+test('braced table alignment symbols are keywords (carve#5091 D3)', () => {
+  const source = '|={>} Price |={~^} Mid |\n|{<v .x} 1 |{.y} 2 |\n'
+  const keywords = semanticTokens(source).filter((token) => token.type === 'keyword')
+    .map((token) => source.split('\n')[token.line]!.slice(token.character, token.character + token.length))
+  assert.deepEqual(keywords, ['>', '~^', '<v'])
 })

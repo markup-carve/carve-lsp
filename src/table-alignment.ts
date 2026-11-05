@@ -99,7 +99,8 @@ function findTableAlignmentEdits(source: string, firstLine: number, lastLine: nu
     const prefixes = original.map(line => line.text.slice(0, prefixLength))
     if (original.length === 0 || original.some(line => line.text.length < prefixLength)) return false
     const bare = original.map(line => line.text.slice(prefixLength)).join('\n') + '\n'
-    const canonical = carveToCarve(bare)
+    // Alignment pads cells; it does not rewrite a GFM separator row into `|=` cells (CARVE-P11-066).
+    const canonical = carveToCarve(bare, { preserveTableSeparators: true })
     const formatted = carveToHtml(bare) === carveToHtml(canonical) ? alignCanonicalTable(canonical) : bare
     const renderedLines = formatted.replace(/\n$/, '').split('\n')
     if (renderedLines.length !== original.length) return false

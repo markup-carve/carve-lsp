@@ -46,8 +46,8 @@ Use **Align table** to line up pipe table cells. **Convert to pipe table** chang
 | Finding | Quick fix |
 |---|---|
 | `blockquote-marker-without-space` | Insert the space after `>` |
-| `raw-block-syntax` | Rewrite a `raw` fence as a `=format` raw fence |
-| `table-alignment-run-padding` | Insert the space that ends the alignment run |
+| `table-marker-run-padding` | Insert the space that ends a table cell's marker run |
+| `deprecated-cell-alignment` | Rewrite a 0.1.13 alignment prefix in the braced spelling, `\|=>` as `\|={>}` |
 | `colon-fence-length-mismatch` | Resize the colon run, or keep it as literal text |
 | `unresolved-footnote`, `unresolved-reference-link` | Append the missing definition |
 | `continuation-marker-refused` | Escape the `+` as text, offered only when the output stays the same |
