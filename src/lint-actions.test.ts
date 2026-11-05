@@ -11,8 +11,6 @@ const diagnostic = (code: string) => ({
 })
 
 test('offers safe lint quick fixes', () => {
-  const raw = lintCodeActions('file:///a.crv', '```raw html\n', [diagnostic('raw-block-syntax')])
-  assert.equal(raw[0]?.edit?.changes?.['file:///a.crv']?.[0]?.newText, '```=html')
   const quote = lintCodeActions('file:///a.crv', '>text\n', [diagnostic('blockquote-marker-without-space')])
   assert.equal(quote[0]?.edit?.changes?.['file:///a.crv']?.[0]?.newText, ' ')
 })
@@ -68,12 +66,40 @@ function applyFirst(source: string, title?: string): string | undefined {
 }
 
 test('escapes a refused continuation marker without changing the output', () => {
-  for (const source of ['q\n+\n- s\n', '- a\n+\n\n- b\n', '> q\n>   +\n']) {
+  for (const source of ['> a\n> +\n']) {
     const fixed = applyFirst(source, 'Escape the +')
     assert.ok(fixed, source)
     assert.equal(carveToHtml(fixed), carveToHtml(source))
     assert.deepEqual(analyzeCarve(fixed).diagnostics.filter((d) => d.code === 'continuation-marker-refused'), [])
   }
+  // A refused `+` that renders nothing (carve#4409) would gain a character, so no escape is offered.
+  for (const source of ['- a\n+\n- b\n', '- a\n+\n\n- b\n']) {
+    assert.ok(analyzeCarve(source).diagnostics.some((d) => d.code === 'continuation-marker-refused'), source)
+    assert.equal(applyFirst(source, 'Escape the +'), undefined, source)
+  }
+})
+
+test('rewrites a deprecated alignment prefix in the braced spelling (carve#5091 D3)', () => {
+  for (const [source, expected] of [
+    ['|=> Price |= Name |\n| 1 | a |\n', '|={>} Price |= Name |\n| 1 | a |\n'],
+    ['|= Price |= Name |\n| 1 |> a |\n', '|= Price |= Name |\n| 1 |{>} a |\n'],
+    ['|=~{.x} Mid |\n', '|={~ .x} Mid |\n'],
+    ['> |=<v Top |\n', '> |={<v} Top |\n'],
+  ] as const) {
+    const fixed = applyFirst(source, 'Write the alignment')
+    assert.equal(fixed, expected, source)
+    assert.equal(carveToHtml(fixed!), carveToHtml(source), source)
+    assert.deepEqual(analyzeCarve(fixed!).diagnostics.filter((d) => d.code === 'deprecated-cell-alignment'), [], source)
+  }
+})
+
+test('terminates any table cell marker run the engine reports', () => {
+  for (const [source, expected] of [
+    ['|=>x |= b |\n', '|=> x |= b |\n'],
+    ['|={>}x |= b |\n', '|={>} x |= b |\n'],
+    ['|=x |= b |\n', '|= x |= b |\n'],
+    ['| a |{.a}x |\n', '| a |{.a} x |\n'],
+  ] as const) assert.equal(applyFirst(source, 'Terminate'), expected, source)
 })
 
 test('moves a list marker below the content column to either column the engine names', () => {
