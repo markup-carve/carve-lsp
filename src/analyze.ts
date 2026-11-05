@@ -142,7 +142,7 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
     const childName = warning.file === undefined ? undefined : safeChildName(warning.file, options.includes, paths)
     // `start`/`end` are UTF-16 offsets into the source as given; `column` counts codepoints.
     const diagnostic: Diagnostic = {
-      severity: DiagnosticSeverity.Warning,
+      severity: ENGINE_SEVERITY[(warning as typeof warning & { severity?: string }).severity ?? ''] ?? DiagnosticSeverity.Warning,
       range: {
         start: site ? positionAt(source, astOffsetToIndex(source, site.start)) : positionAt(source, warning.start),
         end: site ? positionAt(source, astOffsetToIndex(source, site.end)) : positionAt(source, Math.max(warning.start + 1, warning.end)),
@@ -217,6 +217,9 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
     includedSymbols: includedSymbols(includes.documents, options.includedParseCache, paths),
   }
 }
+
+// `LintWarning.severity`; a finding without one is a warning.
+const ENGINE_SEVERITY: Readonly<Record<string, DiagnosticSeverity>> = { Hint: DiagnosticSeverity.Hint, warning: DiagnosticSeverity.Warning, error: DiagnosticSeverity.Error }
 
 function configuredDiagnostics(
   diagnostics: Diagnostic[],
