@@ -45,8 +45,8 @@ const rows: Array<[string, number, 'indent' | 'outdent', string, number]> = [
   ['1. a\n2. b', 1, 'indent', '1. a\n   1. b', 1],
   ['10. a\n11. b', 1, 'indent', '10. a\n    1. b', 1],
   ['1.  a\n2.  b', 1, 'indent', '1.  a\n    1.  b', 1],
-  ['a. a\nb. b', 1, 'indent', 'a. a\n   a. b', 1],
-  ['i. a\nii. b', 1, 'indent', 'i. a\n   i. b', 1],
+  ['a.  a\nb.  b', 1, 'indent', 'a.  a\n    a.  b', 1],
+  ['i.  a\nii.  b', 1, 'indent', 'i.  a\n    i.  b', 1],
   // Joining a child list takes its next ordinal.
   ['1. a\n   1. x\n2. b', 2, 'indent', '1. a\n   1. x\n   2. b', 1],
   // The item's own lines and children move with it.
@@ -61,7 +61,7 @@ const rows: Array<[string, number, 'indent' | 'outdent', string, number]> = [
   ['> - a\n> - b\n>   more', 1, 'indent', '> - a\n>   - b\n>     more', 1],
   ['> > - a\n> > - ', 1, 'indent', '> > - a\n> >   - ', 1],
   ['- item\n  > - a\n  > - b', 2, 'indent', '- item\n  > - a\n  >   - b', 2],
-  ['[^a]: - a\n  - b\n\nx[^a]', 1, 'indent', '[^a]: - a\n    - b\n\nx[^a]', 1],
+  ['[^a]: - a\n  - b\n\nx[^a]', 1, 'indent', '[^a]: - a\n        - b\n\nx[^a]', 1],
   [':: t\n: - a\n  - b', 2, 'indent', ':: t\n: - a\n    - b', 1],
   ['::: note\n- a\n- b\n:::', 2, 'indent', '::: note\n- a\n  - b\n:::', 1],
   // Outdent.
@@ -74,7 +74,7 @@ const rows: Array<[string, number, 'indent' | 'outdent', string, number]> = [
   ['1. a\n   1. b\n      - c', 1, 'outdent', '1. a\n2. b\n   - c', 0],
   ['1. a\n   - b', 1, 'outdent', '1. a\n- b', 0],
   ['> - a\n>   - b', 1, 'outdent', '> - a\n> - b', 0],
-  ['[^a]: - a\n    - b\n\nx[^a]', 1, 'outdent', '[^a]: - a\n  - b\n\nx[^a]', 0],
+  ['[^a]: - a\n        - b\n\nx[^a]', 1, 'outdent', '[^a]: - a\n      - b\n\nx[^a]', 0],
 ]
 
 test('Tab and Shift+Tab move a list item to the intended depth', () => {
