@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { constants } from 'node:fs'
-import { access, mkdtemp, stat, unlink, writeFile, rm } from 'node:fs/promises'
+import { access, mkdtemp, rename, stat, unlink, writeFile, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -79,6 +79,7 @@ export async function exportPdf(uri: string, source: string, html: () => string,
   const tool = await discoverPdfTool(options)
   if (!tool) throw new Error('PDF export needs crv2pdf (install markup-carve/carve-pdf or set carve.pdf.crv2pdfPath) or a Chromium browser (install Chrome, Chromium, or Edge, or set carve.pdf.browserPath).')
   const temp = path.join(path.dirname(original), `.carve-export-${randomUUID()}.${tool.kind === 'browser' ? 'html' : 'crv'}`)
+  const freshOutput = path.join(path.dirname(original), `.carve-export-${randomUUID()}.pdf`)
   let profile: string | undefined
   try {
     if (tool.kind === 'browser') {
@@ -88,12 +89,14 @@ export async function exportPdf(uri: string, source: string, html: () => string,
       // Use the current buffer, including unsaved edits, beside the document so relative assets resolve.
       await writeFile(temp, source, { flag: 'wx' })
     }
-    await runPdfTool(tool, pdfArguments(tool, temp, output, profile))
-    const result = await stat(output)
+    await runPdfTool(tool, pdfArguments(tool, temp, freshOutput, profile))
+    const result = await stat(freshOutput)
     if (result.size === 0) throw new Error(`${tool.kind} produced an empty PDF`)
+    await rename(freshOutput, output)
     return output
   } finally {
     await unlink(temp).catch(() => {})
+    await unlink(freshOutput).catch(() => {})
     if (profile) await rm(profile, { recursive: true, force: true })
   }
 }

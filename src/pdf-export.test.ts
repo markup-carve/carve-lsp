@@ -85,3 +85,18 @@ test('converter receives the unsaved buffer and sibling output with spaces', asy
     assert.equal(await readFile(output, 'utf8'), '%PDF-unsaved new text')
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
+
+test('a no-op converter cannot pass using a stale sibling PDF', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'carve-pdf-stale-'))
+  try {
+    const executable = path.join(directory, 'noop converter')
+    await writeFile(executable, '#!/bin/sh\nexit 0\n')
+    await chmod(executable, 0o755)
+    const source = path.join(directory, 'note.crv')
+    const output = path.join(directory, 'note.pdf')
+    await writeFile(source, 'new')
+    await writeFile(output, '%PDF-old')
+    await assert.rejects(exportPdf(pathToFileURL(source).href, 'new', () => '', { crv2pdfPath: executable }))
+    assert.equal(await readFile(output, 'utf8'), '%PDF-old')
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
