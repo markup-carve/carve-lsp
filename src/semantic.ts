@@ -95,7 +95,7 @@ function astSemanticTokens(doc: Document, source: string, options: SemanticOptio
 
   // Emit frontmatter tokens. The AST stores the parsed YAML in doc.frontmatter
   // but has no position info for the --- delimiters, so we walk source lines.
-  let inFrontmatter = doc.frontmatter !== undefined && FRONTMATTER_OPEN.test(lines[0] ?? '')
+  let inFrontmatter = doc.frontmatter !== undefined
 
   for (let i = 0; i < lines.length; i++) {
     const text = lines[i]!

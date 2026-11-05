@@ -278,6 +278,7 @@ test('frontmatter with a format token is colored like bare frontmatter', () => {
   assert.deepEqual(lines('---\na: 1\n---\n# H\n'), [0, 1, 2])
   assert.deepEqual(lines('--- toml\na = 1\n---\n# H\n'), [0, 1, 2])
   assert.deepEqual(lines('---yaml\na: 1\n---\n# H\n'), [0, 1, 2])
+  assert.deepEqual(lines('--- foo_bar\na: 1\n---\n# H\n'), [0, 1, 2])
   // A thematic break with text after it is no opener.
   assert.deepEqual(lines('--- a b\n\nx\n'), [])
 })
