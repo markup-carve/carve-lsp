@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { DiagnosticSeverity } from 'vscode-languageserver-types'
 import { analyzeCarve, parseErrorRange, tolerantHeadingSymbols } from './analyze.js'
 import { hoverAt } from './hover.js'
 import { migrationCodeActions, migrationFixes } from './migration-actions.js'
@@ -60,16 +61,23 @@ test('reports carve-breakage migration warnings', () => {
 })
 
 test('does not diagnose djot-shift constructs (valid Carve)', () => {
-  // `_x_` (underline), `~x~` (strikethrough) and `{=x=}` (highlight) are valid
-  // Carve; on a hand-written document they are intentional, not mistakes, so
-  // they raise no diagnostic. See carve lint's default --from-djot gate.
-  for (const src of ['_italic_', 'H~2~O', '{=mark=}']) {
+  // `~x~` (strikethrough) and `{=x=}` (highlight) are valid Carve and raise no
+  // diagnostic. See carve lint's default --from-djot gate.
+  for (const src of ['H~2~O', '{=mark=}']) {
     assert.equal(
       analyzeCarve(src).diagnostics.length,
       0,
       `expected no diagnostic for ${JSON.stringify(src)}`,
     )
   }
+  // `_x_` is underline too, but the authoring lint hints at it (PART 13 `markdown-italic-underline`).
+  assert.deepEqual(analyzeCarve('_italic_').diagnostics.map((d) => d.code), ['markdown-italic-underline'])
+})
+
+test('an engine Hint finding is published as a Hint', () => {
+  const [hint] = analyzeCarve('a\n\n---\n\nb\n').diagnostics.filter((d) => d.code === 'thematic-break-spelling')
+  assert.equal(hint?.severity, DiagnosticSeverity.Hint)
+  assert.equal(analyzeCarve('See [x][r].\n').diagnostics[0]?.severity, DiagnosticSeverity.Warning)
 })
 
 test('surfaces lintCarve silent-failure warnings as diagnostics', () => {
