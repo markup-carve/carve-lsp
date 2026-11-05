@@ -80,6 +80,17 @@ export function exportCodeActions(
   return actions
 }
 
+/** PDF output is binary, so this action asks the server to write it directly. */
+export function pdfCodeAction(uri: string, only?: string[]): CodeAction | null {
+  if (!exportTarget(uri, 'html')) return null
+  if (only && !only.some(kind => EXPORT_KIND === kind || EXPORT_KIND.startsWith(`${kind}.`))) return null
+  return {
+    title: 'Export as PDF',
+    kind: EXPORT_KIND,
+    command: { title: 'Export as PDF', command: 'carve.exportPdf', arguments: [uri] },
+  }
+}
+
 export function isExportAction(data: unknown): data is ExportActionData {
   const candidate = data as Partial<ExportActionData> | null
   return typeof candidate?.uri === 'string'

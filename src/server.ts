@@ -40,7 +40,8 @@ import { TextDocument } from 'vscode-languageserver-textdocument'
 import { carveToCarve } from '@markup-carve/carve'
 import { analyzeCarve, type Analysis } from './analyze.js'
 import { previewHtml, previewMarkdown } from './preview.js'
-import { EXPORT_KIND, exportCodeActions, exportSupport, resolveExportAction, type ExportFormat, type ExportSupport } from './export-actions.js'
+import { EXPORT_KIND, exportCodeActions, exportSupport, pdfCodeAction, resolveExportAction, type ExportFormat, type ExportSupport } from './export-actions.js'
+import { exportPdf, readPdfOptions, type PdfOptions } from './pdf-export.js'
 import {
   DEFAULT_INCLUDE_SETTINGS,
   fsPath,
@@ -105,6 +106,7 @@ let includeSettings: IncludeSettings = DEFAULT_INCLUDE_SETTINGS
 let carveSettings: CarveSettings = DEFAULT_CARVE_SETTINGS
 let workspaceTrusted = false
 let exportClient: ExportSupport = { createFile: false, resolveEdit: false }
+let pdfOptions: PdfOptions = {}
 let workspaceRoots: string[] = []
 // The last `carve` section the client sent; its keys override `.carverc.json` one by one.
 let clientCarveSection: Record<string, unknown> | undefined
@@ -146,6 +148,7 @@ connection.onInitialize((params) => {
   const legacyRoot = params.rootUri != null ? fsPath(params.rootUri) : undefined
   workspaceRoots = [...folders, legacyRoot].filter((root): root is string => root !== undefined)
   clientCarveSection = carveSection(params.initializationOptions)
+  pdfOptions = readPdfOptions(clientCarveSection)
   carveSettings = resolveCarveSettings()
 
   return {
@@ -171,7 +174,7 @@ connection.onInitialize((params) => {
       executeCommandProvider: { commands: [
         'carve.previewHtml', 'carve.showAst', 'carve.workspaceGraph',
         'carve.backlinks', 'carve.generatedNavigation', 'carve.rebuildImpact',
-        'carve.listIndent',
+        'carve.listIndent', 'carve.exportPdf',
       ] },
       referencesProvider: true,
       renameProvider: { prepareProvider: true },
@@ -219,6 +222,7 @@ connection.onDidChangeConfiguration((change) => {
   if (change.settings != null) {
     includeSettings = readIncludeSettings(change.settings, logIncludeSettings)
     clientCarveSection = carveSection(change.settings)
+    pdfOptions = readPdfOptions(clientCarveSection)
   }
   carveSettings = resolveCarveSettings()
   if (semanticTokensRefreshSupported && !sameExtensions(previousExtensions, carveSettings.extensions)) {
@@ -378,6 +382,16 @@ connection.onRequest(LinkedEditingRangeRequest.type, (params) => {
 connection.onRequest(ExecuteCommandRequest.type, async (params) => {
   if (params.command === 'carve.listIndent') return listIndent(params.arguments?.[0])
   const uri = typeof params.arguments?.[0] === 'string' ? params.arguments[0] : undefined
+  if (params.command === 'carve.exportPdf') {
+    const document = uri ? documents.get(uri) : undefined
+    if (!document) return null
+    try {
+      return await exportPdf(uri!, document.getText(), () => renderExport(document, 'html'), pdfOptions)
+    } catch (error) {
+      void connection.window.showErrorMessage(`PDF export failed: ${error instanceof Error ? error.message : String(error)}`)
+      return null
+    }
+  }
   if (params.command === 'carve.workspaceGraph') return workspaceGraph(workspaceIndex)
   if (params.command === 'carve.backlinks') return uri ? backlinks(workspaceIndex, uri) : []
   if (params.command === 'carve.generatedNavigation') return generatedNavigation(workspaceIndex, uri)
@@ -418,6 +432,7 @@ connection.onRequest(CodeActionRequest.type, (params) => {
               ...tableConversionCodeActions(params.textDocument.uri, document.getText(), params.range.start.line)].filter(action => action !== null)
           : []),
         ...(carveSettings.exportActions ? exportCodeActions(params.textDocument.uri, exportClient, params.context.only, (format) => renderExport(document, format), readExportTarget) : []),
+        ...(carveSettings.exportActions ? [pdfCodeAction(params.textDocument.uri, params.context.only)].filter(action => action !== null) : []),
       ]
     : []
 })
