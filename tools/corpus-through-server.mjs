@@ -42,7 +42,7 @@
 // name, tokens, diagnostics - so the two runs can be compared as SETS of rows
 // and the swap above shows up as two changed rows rather than as silence.
 
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { argv, exit, stdout } from 'node:process'
 
@@ -144,7 +144,11 @@ const declaredCorpusSize = () => {
     const path = join(examplesDir, page)
     let source
     try {
-      source = readFileSync(path, 'utf8')
+      // carve#4132 stores each edge-case section in its own file under `edge-cases/`.
+      const dir = path.replace(/\.md$/, '')
+      source = existsSync(dir) && statSync(dir).isDirectory()
+        ? readdirSync(dir).filter((file) => file.endsWith('.md')).map((file) => readFileSync(join(dir, file), 'utf8'))
+        : [readFileSync(path, 'utf8')]
     } catch (error) {
       stdout.write(
         `corpus-through-server: no corpus source page at ${path} ` +
@@ -157,7 +161,7 @@ const declaredCorpusSize = () => {
       )
       exit(1)
     }
-    declared += declaredPairs(source)
+    for (const part of source) declared += declaredPairs(part)
   }
   return declared
 }
