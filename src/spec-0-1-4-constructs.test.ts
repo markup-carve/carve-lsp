@@ -85,7 +85,7 @@ test('a colon followed by only whitespace opens no description (PART 2, carve#18
 test('the continuation marker reaches column 0 and nothing else (PART 9 §17 L3, carve#1817)', () => {
   for (const name of [
     '435-the-continuation-marker-s-column-gate-reaches-every-container',
-    '437-a-leading-continuation-marker-in-a-footnote-body-or-a-quote-is-text',
+    '437-a-first-block-marker-in-a-footnote-body-or-a-quote-attaches-only-at-its-marker-column',
   ]) serverIsQuietAndPreserving(corpusDocument(name), name)
   // A lone `+` is not a bullet, so nothing may continue a line that is only one -
   // in either reading of it. The list item above it continues; the `+` does not.

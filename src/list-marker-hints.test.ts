@@ -30,8 +30,8 @@ test('does not hint outside the edited line or outside a list', () => {
   assert.deepEqual(labels('- first\n-', 1), [])
   // A tab separator and a mixed-case roman numeral never make a list item.
   assert.deepEqual(labels('- first\n-\t', 1), [])
-  assert.deepEqual(labels('iii. first\niV. ', 1), [])
-  assert.deepEqual(labels('iii. first\niv. ', 1), ['list item'])
+  assert.deepEqual(labels('iii.  first\niV.  ', 1), [])
+  assert.deepEqual(labels('iii.  first\niv.  ', 1), ['list item'])
   assert.deepEqual(labels('- first\n+ ', 1), [])
   assert.deepEqual(labels('- first\n(1) ', 1), [])
   assert.deepEqual(labels('1. first\n2. [ ] ', 1), [])

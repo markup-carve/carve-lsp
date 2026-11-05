@@ -8,7 +8,7 @@
  * line ending, and only when the render confirms it changes nothing.
  */
 
-import { carveToHtml, parse } from '@markup-carve/carve'
+import { carveToHtml, lintCarve, parse } from '@markup-carve/carve'
 import { colonFenceStructure, type FenceSite } from './colon-fences.js'
 import { astColumnToCharacter, sourceLines } from './position.js'
 import { walkNodes } from './ast-walk.js'
@@ -442,9 +442,15 @@ export function listIndentEdits(source: string, line: number, direction: ListInd
     const result = shiftItem(completed, item, shape, -removed, marker)
     const after = listTree(result.text)
     const moved = after?.get(line)
-    if (moved && moved.parent?.key === parent.parent?.key && moved.container === parent.container && keepsDescendants(tree!, after!, item)) return result.edits
+    if (moved && moved.parent?.key === parent.parent?.key && moved.container === parent.container && keepsDescendants(tree!, after!, item) &&
+      !markerOffColumn(result.text, line)) return result.edits
   }
   return null
+}
+
+/** A partial outdent can land between two columns, which the engine reads but lints (PART 9 §24). */
+function markerOffColumn(text: string, line: number): boolean {
+  return lintCarve(text).some((warning) => warning.rule === 'list-marker-below-content-column' && warning.line === line + 1)
 }
 
 /** Every item nested in `item` before the move is still nested in it, as deep as before. */
@@ -564,9 +570,11 @@ function nextMarker(written: string, item: ItemSite): string | null {
   const next = increment(ordinal, item.olType)
   if (next === null) return null
   // Keep the content column when the marker changes width (9. -> 10., iii. -> iv.),
-  // but never drop below one space. A tab separator is copied as written.
+  // but never drop below the minimum: two spaces after a letter or roman `.`
+  // marker (carve#4811), one otherwise. A tab separator is copied as written.
   const width = ordinal.length + delim.length + separator.length
-  const gap = /\t/.test(separator) ? separator : ' '.repeat(Math.max(1, width - next.length - delim.length))
+  const minimum = delim === '.' && !/^[0-9]+$/.test(next) ? 2 : 1
+  const gap = /\t/.test(separator) ? separator : ' '.repeat(Math.max(minimum, width - next.length - delim.length))
   return indent + next + delim + gap
 }
 

@@ -7,8 +7,8 @@ const codes = (source: string) => analyzeCarve(source).diagnostics.map((item) =>
 
 test('reports each #1344 table diagnostic once, from the engine or this pass', () => {
   assert.deepEqual(codes('{aligns="left" widths="60,50"}\n|=> Head | Other |\n|>body | x |\n').sort(),
-    ['table-alignment-run-padding', 'table-column-arity', 'table-column-overlap', 'table-width-total'])
-  assert.deepEqual(codes('| x |<c |>d |\n'), ['table-alignment-run-padding', 'table-alignment-run-padding'])
+    ['table-column-arity', 'table-column-overlap', 'table-marker-run-padding', 'table-width-total'])
+  assert.deepEqual(codes('| x |<c |>d |\n'), ['table-marker-run-padding', 'table-marker-run-padding'])
 })
 
 test('flags more positional entries than columns', () => {
