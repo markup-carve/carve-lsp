@@ -65,6 +65,9 @@ function fillBuilder(builder: SemanticTokensBuilder, tokens: Token[]): void {
   }
 }
 
+// PART 2: `---`, an optional space, an optional format token (`--- toml`, `---yaml`).
+const FRONTMATTER_OPEN = /^---(?: ?[\p{L}\p{N}]+)?[ \t]*$/u
+
 export interface SemanticOptions {
   extensions?: readonly string[]
 }
@@ -92,7 +95,7 @@ function astSemanticTokens(doc: Document, source: string, options: SemanticOptio
 
   // Emit frontmatter tokens. The AST stores the parsed YAML in doc.frontmatter
   // but has no position info for the --- delimiters, so we walk source lines.
-  let inFrontmatter = doc.frontmatter !== undefined && lines[0]?.trim() === '---'
+  let inFrontmatter = doc.frontmatter !== undefined
 
   for (let i = 0; i < lines.length; i++) {
     const text = lines[i]!
@@ -598,7 +601,7 @@ function lexicalSemanticTokens(source: string): Token[] {
   const tokens: Token[] = []
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   let inFence: { marker: string; type: 'string' | 'comment' } | undefined
-  let inFrontmatter = lines[0]?.trim() === '---'
+  let inFrontmatter = FRONTMATTER_OPEN.test(lines[0] ?? '')
 
   for (let line = 0; line < lines.length; line++) {
     const text = lines[line]!
