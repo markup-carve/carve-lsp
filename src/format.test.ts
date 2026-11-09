@@ -40,8 +40,8 @@ test('continues structural prefixes', () => {
 
 test('inserts an exact closer after a typed colon-fence opener', () => {
   assert.equal(continuationPrefix(':::: warning\n', 1), '\n::::')
-  // An indented top-level `:::` is literal text (corpus 160), so it gets no closer.
-  assert.equal(continuationPrefix('  ::: note\n', 1), '')
+  // An indented top-level `:::` opens past its column (PART 0 S3), so it gets its closer.
+  assert.equal(continuationPrefix('  ::: note\n', 1), '  \n  :::')
   assert.equal(continuationPrefix(':::\n', 1), '')
 })
 
@@ -92,8 +92,8 @@ test('no closer for a closed fence, a closing fence or a fence line inside code'
   assert.equal(prefixAfter('````\n```js'), '')
   // After a closed block, a bare fence opens a new one.
   assert.equal(prefixAfter('```\nx\n```\n```'), '\n```')
-  // Inline code, and fences in a quote, are left to the other continuations.
-  assert.equal(prefixAfter('a\n```'), '')
+  // A code fence opener interrupts a paragraph (carve#4018); fences in a quote are left to the other continuations.
+  assert.equal(prefixAfter('a\n```'), '\n```')
   assert.equal(prefixAfter('> ```js'), '> ')
   assert.equal(continuationPrefix('```js\nrest', 1), '')
 })

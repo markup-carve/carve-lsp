@@ -12,14 +12,7 @@ export function lintCodeActions(uri: string, source: string, diagnostics: Diagno
     const line = lines[diagnostic.range.start.line] ?? ''
     let edit: TextEdit | null = null
     let title = ''
-    if (code === 'raw-block-syntax') {
-      const match = /^(\s*`{3,})raw(?: +([^\s]+))?/.exec(line)
-      if (match) {
-        const replacement = `${match[1]}=${match[2] ?? 'html'}`
-        edit = replace(diagnostic.range.start.line, match[0].length, replacement)
-        title = 'Convert to a Carve raw fence'
-      }
-    } else if (code === 'blockquote-marker-without-space') {
+    if (code === 'blockquote-marker-without-space') {
       const marker = /^\s*>/.exec(line)
       if (marker) {
         const character = marker[0].length
@@ -45,14 +38,16 @@ export function lintCodeActions(uri: string, source: string, diagnostics: Diagno
     } else if (code === 'consumed-key-near-miss') {
       const fix = nearMissEdit(lines, diagnostic)
       if (fix) ({ edit, title } = fix)
-    } else if (code === 'table-alignment-run-padding') {
-      // The run the diagnostic covers, not the first one on the line.
-      const marker = [...line.matchAll(/\|=?[<>~^v]{1,2}(?=\S)/g)]
-        .find((run) => run.index! <= diagnostic.range.start.character && run.index! + run[0].length >= diagnostic.range.end.character)
-      if (marker) {
-        const character = marker.index! + marker[0].length
-        edit = { range: point(diagnostic.range.start.line, character), newText: ' ' }
-        title = 'Terminate the table alignment run with a space'
+    } else if (code === 'deprecated-cell-alignment') {
+      const fix = bracedAlignmentEdit(line, diagnostic)
+      if (fix) ({ edit, title } = fix)
+    } else if (code === 'table-marker-run-padding' || code === 'table-alignment-run-padding') {
+      // The cell the diagnostic sits in: kind marker, alignment run and attribute block end at a space (§5 T11).
+      const pipe = line.lastIndexOf('|', diagnostic.range.start.character)
+      const run = pipe < 0 ? null : /^=?(?:\{[^}\n]*\}|[<>~^v]{1,2}(?:\{[^}\n]*\})?)?/.exec(line.slice(pipe + 1))
+      if (run && run[0] !== '' && /\S/.test(line[pipe + 1 + run[0].length] ?? '')) {
+        edit = { range: point(diagnostic.range.start.line, pipe + 1 + run[0].length), newText: ' ' }
+        title = 'Terminate the table cell marker run with a space'
       }
     } else if (code === 'unresolved-footnote') {
       const match = /\[\^([^\]]+)\]/.exec(line.slice(diagnostic.range.start.character)) ?? /\[\^([^\]]+)\]/.exec(line)
@@ -156,10 +151,23 @@ function appendBlock(source: string, block: string): TextEdit {
   return { range: point(line, lines[line]?.length ?? 0), newText: eol.repeat(source === '' ? 0 : blanks) + block }
 }
 
-function point(line: number, character: number) {
-  return { start: { line, character }, end: { line, character } }
+/**
+ * The engine's message carries both spellings: the deprecated prefix and the
+ * braced one to write. The prefix must sit right after the cell's pipe.
+ */
+function bracedAlignmentEdit(line: string, diagnostic: Diagnostic): { edit: TextEdit; title: string } | null {
+  const match = /prefix "([^"]+)" is the deprecated .*write "([^"]+)"/.exec(diagnostic.message)
+  if (!match) return null
+  const [, old, braced] = match as unknown as [string, string, string]
+  const pipe = line.lastIndexOf('|', diagnostic.range.start.character)
+  if (pipe < 0 || line.slice(pipe + 1, pipe + 1 + old.length) !== old) return null
+  const lineNo = diagnostic.range.start.line
+  return {
+    edit: { range: { start: { line: lineNo, character: pipe + 1 }, end: { line: lineNo, character: pipe + 1 + old.length } }, newText: braced },
+    title: `Write the alignment as ${braced}`,
+  }
 }
 
-function replace(line: number, end: number, newText: string): TextEdit {
-  return { range: { start: { line, character: 0 }, end: { line, character: end } }, newText }
+function point(line: number, character: number) {
+  return { start: { line, character }, end: { line, character } }
 }

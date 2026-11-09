@@ -27,10 +27,10 @@ test('Enter after a list item writes the next marker', () => {
     ['* item', '* '],
     ['1. item', '2. '],
     ['1) item', '2) '],
-    ['a. item', 'b. '],
+    ['a.  item', 'b.  '],
     ['A) item', 'B) '],
-    ['i. item', 'ii. '],
-    ['I. item', 'II. '],
+    ['i.  item', 'ii.  '],
+    ['I.  item', 'II.  '],
     ['. item', '. '],
     ['- [x] item', '- [ ] '],
     ['- [-] item', '- [ ] '],
@@ -47,11 +47,11 @@ test('Enter after a list item writes the next marker', () => {
 
 test('the next marker follows the list, not the letter', () => {
   // A single roman letter is alpha inside an alpha list and roman inside a roman one.
-  assert.equal(inserted('h. one\ni. two'), 'j. ')
-  assert.equal(inserted('ix. one\nx. two'), 'xi. ')
-  assert.equal(inserted('u. one\nv. two'), 'w. ')
-  assert.equal(inserted('iv. one'), 'v.  ')
-  assert.equal(inserted('z. last'), null)
+  assert.equal(inserted('h.  one\ni.  two'), 'j.  ')
+  assert.equal(inserted('ix.  one\nx.  two'), 'xi.  ')
+  assert.equal(inserted('u.  one\nv.  two'), 'w.  ')
+  assert.equal(inserted('iv.  one'), 'v.   ')
+  assert.equal(inserted('z.  last'), null)
   assert.equal(inserted('007. item'), '008. ')
   assert.equal(inserted('999999999. item'), '1000000000. ')
 })
@@ -60,7 +60,8 @@ test('the content column stays put when the marker changes width', () => {
   assert.equal(inserted('-   item'), '-   ')
   assert.equal(inserted('1.  item'), '2.  ')
   assert.equal(inserted('9.  item'), '10. ')
-  assert.equal(inserted('iii. item'), 'iv.  ')
+  assert.equal(inserted('iii.  item'), 'iv.   ')
+  assert.equal(inserted('A)  item'), 'B)  ')
   // One space is the minimum separator, so a one-space marker widens the column.
   assert.equal(inserted('9. item'), '10. ')
   assert.equal(inserted('99) item'), '100) ')
@@ -81,7 +82,7 @@ test('the marker keeps its indent and replaces the host indent', () => {
 })
 
 test('Enter on a content-less marker removes it and ends the list', () => {
-  for (const bare of ['- ', '* ', '2. ', 'b) ', 'iv. ', '. ', '- [ ] ', '*  [ ]  ']) {
+  for (const bare of ['- ', '* ', '2. ', 'b) ', 'iv.  ', '. ', '- [ ] ', '*  [ ]  ']) {
     const before = `- one\n${bare}`
     const edits = enter(before)
     assert.deepEqual(edits, [{
