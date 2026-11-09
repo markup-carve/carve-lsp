@@ -9,12 +9,10 @@ import { fileURLToPath } from 'node:url'
 /**
  * The publish-time guard must detect a git dependency by what a spec IS NOT.
  *
- * WHY THIS FILE EXISTS. `ci.yml` already runs `tools/no-git-dependencies.mjs` on
- * every pull request - but only against the manifest committed here, which is
- * clean. So that step passes with the guard's logic in ANY state: delete the
- * whole rule and it still exits zero, because there is nothing in this manifest
- * for it to find. Running the script against a MUTATED manifest is what makes
- * the logic load-bearing rather than the manifest.
+ * WHY THIS FILE EXISTS. Only `release.yml` runs `tools/no-git-dependencies.mjs`,
+ * so a broken guard would surface at publish time at the earliest. Running the
+ * script against MUTATED manifests on every pull request is what makes the
+ * logic load-bearing rather than the manifest.
  *
  * WHY THE GUARD WAS WIDENED. The rule was already an inversion, but the "not"
  * was still spelled as a list of protocols plus a slash test, and both miss
@@ -228,42 +226,48 @@ for (const [label, manifest, verdict] of MATRIX) {
   })
 }
 
-test("accepts this repo's own manifest", () => {
-  // The engine is declared as the exact registry version the v0.1.4 draft is
-  // cut from. This row is what keeps that publishable: a widening of the rule
-  // that also rejected the committed manifest would block the release.
-  const run = spawnSync(process.execPath, [guard, manifestPath], { encoding: 'utf8' })
-  assert.equal(
-    run.status,
-    0,
-    `the guard rejects the manifest that is committed here:\n${run.stdout}${run.stderr}`,
+test('the committed manifest gets the verdict publish would give it', () => {
+  // Main may pin a merged carve-js commit between releases; release.yml must
+  // then refuse to publish it. With a registry spec it must publish.
+  const committed = Object.values(baseline.dependencies ?? {}).some((spec) =>
+    /^(github:|git\+|git:)|github\.com/.test(spec),
   )
+  const run = spawnSync(process.execPath, [guard, manifestPath], { encoding: 'utf8' })
+  const out = `${run.stdout}${run.stderr}`
+  if (committed) {
+    assert.notEqual(run.status, 0, `the guard would publish the committed git pin:\n${out}`)
+    return
+  }
+  assert.equal(run.status, 0, `the guard rejects the manifest that is committed here:\n${out}`)
 })
 
 test('devDependencies are left alone', () => {
   // A contributor's git devDependency costs a consumer nothing, and rejecting it
   // would be the same over-reach the npm: alias row guards against.
+  // The engine is set to a registry range, since main may carry a git pin.
   const { status } = runGuard({
-    ...baseline,
+    ...withDep('^0.1.15'),
     devDependencies: { ...baseline.devDependencies, something: 'github:someone/something#abc' },
   })
   assert.equal(status, 0, 'a git devDependency was rejected; only installed fields are in scope')
 })
 
-test('both workflows run this script and not their own copy of the rule', () => {
-  // The guard is worth nothing if a workflow still carries an inline prefix list
-  // beside it, so both halves are pinned for each: the call is there, and no
-  // workflow greps the manifest for a spelling of its own.
-  for (const workflow of ['ci.yml', 'release.yml']) {
-    const text = readFileSync(join(root, '.github', 'workflows', workflow), 'utf8')
-    assert.ok(
-      text.includes('node tools/no-git-dependencies.mjs'),
-      `${workflow} does not call tools/no-git-dependencies.mjs`,
-    )
-    assert.doesNotMatch(
-      text,
-      /github:\|git|\^\(github\|git/,
-      `${workflow} still carries a prefix-list filter beside the script`,
-    )
-  }
+test('release.yml runs this script and ci.yml does not', () => {
+  // The guard belongs to publish time only: a PR or main run that rejected a
+  // git pin of merged upstream would block landing wave work between releases.
+  const release = readFileSync(join(root, '.github', 'workflows', 'release.yml'), 'utf8')
+  assert.ok(
+    release.includes('node tools/no-git-dependencies.mjs'),
+    'release.yml does not call tools/no-git-dependencies.mjs',
+  )
+  assert.doesNotMatch(
+    release,
+    /github:\|git|\^\(github\|git/,
+    'release.yml still carries a prefix-list filter beside the script',
+  )
+  const ci = readFileSync(join(root, '.github', 'workflows', 'ci.yml'), 'utf8')
+  assert.ok(
+    !/^\s*run: node tools\/no-git-dependencies\.mjs/m.test(ci),
+    'ci.yml runs the publish guard, which rejects a git pin of merged upstream on main',
+  )
 })
