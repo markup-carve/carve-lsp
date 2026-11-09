@@ -242,7 +242,7 @@ function scanTableLine(tokens: Token[], line: number, text: string): void {
     push(tokens, line, marker.index! + marker[0].indexOf(run), run.length, 'keyword')
   }
   // The braced spelling leads the cell's attribute block (carve#5091 D3): `|={>}`, `|{<v .x}`.
-  for (const marker of text.matchAll(/\|=?\{([<>~^v]{1,2})(?=[ }])/g)) {
+  for (const marker of text.matchAll(/(?<!\\)\|=?\{([<>~^v]{1,2})(?=[ }])/g)) {
     push(tokens, line, marker.index! + marker[0].length - marker[1]!.length, marker[1]!.length, 'keyword')
   }
   for (const attr of text.matchAll(/\b(aligns|valigns|widths|footer-rows|header-rows|header-cols)=/g)) {

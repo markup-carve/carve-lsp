@@ -289,3 +289,8 @@ test('braced table alignment symbols are keywords (carve#5091 D3)', () => {
     .map((token) => source.split('\n')[token.line]!.slice(token.character, token.character + token.length))
   assert.deepEqual(keywords, ['>', '~^', '<v'])
 })
+
+test('an escaped pipe before braces is text, not braced alignment', () => {
+  const tokens = semanticTokens('| a | \\|{>} text |\n')
+  assert.ok(!tokens.some((token) => token.type === 'keyword'))
+})
