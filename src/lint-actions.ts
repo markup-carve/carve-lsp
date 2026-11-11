@@ -19,7 +19,7 @@ export function lintCodeActions(uri: string, source: string, diagnostics: Diagno
         edit = { range: point(diagnostic.range.start.line, character), newText: ' ' }
         title = 'Insert the block-quote separator'
       }
-    } else if (code === 'continuation-marker-refused') {
+    } else if (code === 'continuation-marker-refused' || code === 'refused-continuation-marker') {
       const lineNo = diagnostic.range.start.line
       const at = diagnostic.range.start.character
       if (line[at] === '+') {

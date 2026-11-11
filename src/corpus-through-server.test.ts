@@ -13,7 +13,7 @@ const repoRoot = fileURLToPath(new URL('../', import.meta.url))
 // than the printed count, because the status is what the step reads.
 const THROW_MARKER = 'TEST_ONLY_THROWING_DOCUMENT'
 
-/** A tree the population guard accepts: N documents and N declared pairs (or the given page). */
+/** A tree the population guard accepts: N documents and N distinct declared inputs (or the given page). */
 function fixture(documentCount: number, throwing: number, page?: string) {
   const root = mkdtempSync(join(tmpdir(), 'corpus-through-server-'))
   const corpus = join(root, 'tests', 'corpus')
@@ -27,8 +27,8 @@ function fixture(documentCount: number, throwing: number, page?: string) {
     const body = i < throwing ? THROW_MARKER : `document ${i}`
     writeFileSync(join(corpus, `doc-${i}.crv`), `${body}\n`)
   }
-  const block = ':::  compare\n```carve\nhello\n```\n```html\n<p>hello</p>\n```\n:::\n'
-  writeFileSync(join(examples, 'core.md'), page ?? block.repeat(documentCount))
+  const block = (i: number) => ':::  compare\n```carve\nhello ' + i + '\n```\n```html\n<p>hello ' + i + '</p>\n```\n:::\n'
+  writeFileSync(join(examples, 'core.md'), page ?? Array.from({ length: documentCount }, (_, i) => block(i)).join(''))
   writeFileSync(join(examples, 'extensions.md'), '')
   writeFileSync(join(examples, 'edge-cases.md'), '')
 
@@ -112,6 +112,20 @@ test('every carve fence in a compare block is a declared pair, a nested one is n
   const pair = (n: number) => '```carve\n' + n + '\n```\n```html\n<p>' + n + '</p>\n```\n'
   const nested = '````carve\n```carve\nnot a pair\n```\n````\n```html\n<p>x</p>\n```\n'
   const page = '::: compare\n' + pair(1) + nested + pair(3) + ':::\n'
+  const { root, corpus } = fixture(3, 0, page)
+  try {
+    const { status, stdout } = runTool(root, corpus)
+    assert.match(stdout, /^documents=3$/m)
+    assert.equal(status, 0)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+// carve#5235: the generator writes one fixture per distinct input, so a repeated input is one document.
+test('a repeated input is one declared document, a modifier makes it another', () => {
+  const pair = (body: string) => '```carve\n' + body + '\n```\n```html\n<p>' + body + '</p>\n```\n'
+  const page = '::: compare\n' + pair('a') + pair('a') + pair('b') + ':::\n' + '::: compare crlf\n' + pair('a') + ':::\n'
   const { root, corpus } = fixture(3, 0, page)
   try {
     const { status, stdout } = runTool(root, corpus)

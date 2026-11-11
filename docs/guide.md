@@ -50,7 +50,7 @@ Use **Align table** to line up pipe table cells. **Convert to pipe table** chang
 | `deprecated-cell-alignment` | Rewrite a 0.1.13 alignment prefix in the braced spelling, `\|=>` as `\|={>}` |
 | `colon-fence-length-mismatch` | Resize the colon run, or keep it as literal text |
 | `unresolved-footnote`, `unresolved-reference-link` | Append the missing definition |
-| `continuation-marker-refused` | Escape the `+` as text, offered only when the output stays the same |
+| `continuation-marker-refused`, `refused-continuation-marker` | Escape the `+` as text, offered only when the output stays the same |
 | `list-marker-below-content-column` | Indent the marker to nest it, or outdent it to the item's own column |
 | `description-separator-below-content-column` | Indent the separator to continue the definition list |
 | `consumed-key-near-miss` | Replace the misspelled key with the one the engine suggests |
