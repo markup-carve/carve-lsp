@@ -107,39 +107,60 @@ const leadingRun = (text, ch) => {
   return n
 }
 
-// One declared pair per `carve` fence inside a `::: compare` block (a block may
-// hold several); nothing inside a fence is markup. Same rule as the spec's
-// scripts/lib/example-pair-census.mjs.
-const declaredPairs = (source) => {
-  let pairs = 0
+// One fixture per distinct `carve` fence input inside a `::: compare` block (a
+// block may hold several); nothing inside a fence is markup. Since carve#5235
+// the generator writes one fixture per input after its modifiers, so two
+// examples with the same input are one document. Same rule as the spec's
+// scripts/generate-corpus.mjs.
+const fixtureInput = (carve, modifiers) => {
+  let out = `${carve}\n`
+  if (modifiers.includes('no-final-newline')) out = out.slice(0, -1)
+  if (modifiers.includes('crlf')) out = out.replace(/\n/g, '\r\n')
+  if (modifiers.includes('cr')) out = out.replace(/\n/g, '\r')
+  if (modifiers.includes('bom')) out = `\ufeff${out}`
+  if (modifiers.includes('nul')) out = out.replace(/\u2400/g, '\u0000')
+  return out
+}
+
+const collectInputs = (source, inputs) => {
   let block = null
+  let modifiers = []
   let fence = null
+  let body = null
   for (const line of source.split('\n')) {
     if (fence !== null) {
-      if (line.startsWith(fence) && line.slice(fence.length).trim() === '') fence = null
+      if (line.startsWith(fence) && line.slice(fence.length).trim() === '') {
+        fence = null
+        if (body !== null) inputs.add(fixtureInput(body.join('\n'), modifiers))
+        body = null
+      } else if (body !== null) {
+        body.push(line)
+      }
       continue
     }
     const ticks = leadingRun(line, '`')
     if (ticks >= 3) {
       fence = line.slice(0, ticks)
-      if (block !== null && line.slice(ticks).trim() === 'carve') pairs++
+      if (block !== null && line.slice(ticks).trim() === 'carve') body = []
       continue
     }
     const trimmed = line.trim()
     const colons = leadingRun(trimmed, ':')
     if (colons < 3) continue
     if (block === null) {
-      if (/^[ \t]+compare(?:[ \t]|$)/.test(trimmed.slice(colons))) block = trimmed.slice(0, colons)
+      if (/^[ \t]+compare(?:[ \t]|$)/.test(trimmed.slice(colons))) {
+        block = trimmed.slice(0, colons)
+        modifiers = trimmed.split(/[ \t]+/).slice(2)
+      }
     } else if (trimmed === block) {
       block = null
     }
   }
-  return pairs
 }
 
 const declaredCorpusSize = () => {
   const examplesDir = join(corpusDir, '..', '..', 'resources', 'examples')
-  let declared = 0
+  const inputs = new Set()
   for (const page of EXAMPLE_PAGES) {
     const path = join(examplesDir, page)
     let source
@@ -161,9 +182,9 @@ const declaredCorpusSize = () => {
       )
       exit(1)
     }
-    for (const part of source) declared += declaredPairs(part)
+    for (const part of source) collectInputs(part, inputs)
   }
-  return declared
+  return inputs.size
 }
 
 const declared = declaredCorpusSize()
@@ -177,8 +198,8 @@ if (declared === 0) {
 if (documents.length !== declared) {
   stdout.write(
     `corpus-through-server: ${corpusDir} holds ${documents.length} documents, ` +
-      `but the spec's example pages declare ${declared}.\n` +
-      '  Every carve fence in a ::: compare block in\n' +
+      `but the spec's example pages declare ${declared} distinct inputs.\n` +
+      '  Every distinct carve fence input in a ::: compare block in\n' +
       '  resources/examples/{core,extensions,edge-cases}.md becomes one corpus pair, so a\n' +
       '  difference means this is not the corpus those pages\n' +
       '  describe: a truncated or stale checkout, a wrong <corpus-dir>, or a corpus that\n' +

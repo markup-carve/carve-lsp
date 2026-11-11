@@ -65,16 +65,19 @@ function applyFirst(source: string, title?: string): string | undefined {
   return lines.join('\n')
 }
 
+// carve#5736: own-line refusals report `refused-continuation-marker`, first-block ones keep the old code.
+const isRefusal = (code: unknown) => code === 'continuation-marker-refused' || code === 'refused-continuation-marker'
+
 test('escapes a refused continuation marker without changing the output', () => {
-  for (const source of ['> a\n> +\n']) {
+  for (const source of ['[^n]: a\n+\n']) {
     const fixed = applyFirst(source, 'Escape the +')
     assert.ok(fixed, source)
     assert.equal(carveToHtml(fixed), carveToHtml(source))
-    assert.deepEqual(analyzeCarve(fixed).diagnostics.filter((d) => d.code === 'continuation-marker-refused'), [])
+    assert.deepEqual(analyzeCarve(fixed).diagnostics.filter((d) => isRefusal(d.code)), [])
   }
   // A refused `+` that renders nothing (carve#4409) would gain a character, so no escape is offered.
-  for (const source of ['- a\n+\n- b\n', '- a\n+\n\n- b\n']) {
-    assert.ok(analyzeCarve(source).diagnostics.some((d) => d.code === 'continuation-marker-refused'), source)
+  for (const source of ['- a\n+\n- b\n', '- a\n+\n\n- b\n', '- +\n  a\n']) {
+    assert.ok(analyzeCarve(source).diagnostics.some((d) => isRefusal(d.code)), source)
     assert.equal(applyFirst(source, 'Escape the +'), undefined, source)
   }
 })
