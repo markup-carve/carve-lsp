@@ -4,6 +4,32 @@ All notable changes to carve-lsp are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.16] - 2026-11-12
+
+The server follows the carve-js 0.1.16 readings: braced table alignment, the renamed lint rules and the new lint severities.
+
+### Breaking
+
+- The `table-alignment-run-padding` quick fix answers `table-marker-run-padding`, its replacement, and the `raw-block-syntax` quick fix is gone with the retired rule (#639).
+
+### Added
+
+- *Export as PDF* source action through `crv2pdf` or Chromium; `carve.pdf.crv2pdfPath` picks the executable (#642).
+- A quick fix rewrites a deprecated 0.1.13 alignment prefix in the braced spelling (`|=>` as `|={>}`), and semantic tokens mark braced alignment as keywords (#639).
+- Engine hint findings, such as `thematic-break-spelling` and `markdown-italic-underline`, are published with LSP severity Hint (#639).
+- The "Escape the `+`" quick fix also answers `refused-continuation-marker` (#643).
+
+### Fixed
+
+- Frontmatter opened with a format token (`--- toml`, `---yaml`) gets its semantic tokens (#638).
+- *Align table* keeps an authored GFM separator row instead of refusing the table (#639).
+- Enter after a letter or roman `.` item writes two spaces after the next marker, and Shift+Tab refuses an outdent that leaves a marker between two columns (#639).
+- An escaped pipe does not open braced alignment tokens, and an unclosed `%%%` fence hides the rest of the document (#639).
+
+### Changed
+
+- Requires `@markup-carve/carve` 0.1.16 (#639, #643, #647).
+
 ## [0.1.15] - 2026-10-25
 
 ### Added
