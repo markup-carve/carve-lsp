@@ -1,10 +1,11 @@
 import { type Location, type Position } from 'vscode-languageserver-types'
-import { resolve, type Document, type InlineNode } from '@markup-carve/carve'
+import { parse, type Document, type InlineNode } from './engine.js'
+import { headingId } from './tree.js'
 import { astColumnToCharacter, sourceLines } from './position.js'
 import { smartPunctuationText } from './inline-text.js'
 import { captionTargetById } from './captions.js'
 import { includeDefinitionAt } from './include-definition.js'
-import { resolveIncludes, type IncludeOptions } from './includes.js'
+import { resolveIncludes, v2IncludeConfig, type IncludeOptions } from './includes.js'
 import { portableIncludePaths } from './include-paths.js'
 import { walkNodes } from './ast-walk.js'
 import { implicitKey, inVerbatim, referenceModel, siteAt, type ReferenceModel } from './reference-sites.js'
@@ -136,13 +137,14 @@ function resolveCrossrefAcrossSeam(
   if (!includes?.resolver) return null
 
   const resolution = resolveIncludes(source, includes)
-  if (!resolution.expanded) return null
+  const config = v2IncludeConfig(includes)
+  if (!config) return null
   // Resolved after the merge, so a heading carries the id the whole document
   // gives it: a slug is generated against the merged content, and an explicit
   // id the merge renamed is already renamed here.
   let merged: Document
   try {
-    merged = resolve(resolution.expanded)
+    merged = parse(source, { includes: config })
   } catch {
     return null
   }
@@ -224,7 +226,7 @@ function findCaptionById(uri: string, doc: Document, targetId: string): Location
   return locationAtLine(uri, target.pos.startLine - 1)
 }
 
-type Heading = import('@markup-carve/carve').Heading
+type Heading = import('./engine.js').Heading
 
 /** The first heading anywhere in the document - list items and footnote bodies included - that matches. */
 function findHeading(doc: Document, matches: (heading: Heading) => boolean): Heading | null {
@@ -237,7 +239,7 @@ function findHeading(doc: Document, matches: (heading: Heading) => boolean): Hea
 }
 
 function findHeadingWithId(doc: Document, targetId: string): Heading | null {
-  return findHeading(doc, (heading) => heading.attrs?.id === targetId)
+  return findHeading(doc, (heading) => headingId(heading) === targetId)
 }
 
 // ---------------------------------------------------------------------------
@@ -289,7 +291,7 @@ function headingPlainText(nodes: InlineNode[]): string {
     } else if (node.type === 'code') out += node.value
     // An inline literal (§27) renders as visible prose, so it must contribute
     // to the heading text a crossref resolves against.
-    else if (node.type === 'literal_inline') out += node.content
+    else if (node.type === 'literal_inline') out += node.value
     else out += smartPunctuationText(node)
   }
   return out.trim()

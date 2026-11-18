@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
-import { parse } from '@markup-carve/carve'
+import { parse } from './engine.js'
 import { listIndentEdits, type ContinuationEdit } from './format.js'
 import { LspStdioClient } from './lsp-stdio-client.js'
 

@@ -37,7 +37,7 @@ import {
   type TextEdit,
 } from 'vscode-languageserver/node.js'
 import { TextDocument } from 'vscode-languageserver-textdocument'
-import { carveToCarve } from '@markup-carve/carve'
+import { encodeTree, format, parse } from './engine.js'
 import { analyzeCarve, type Analysis } from './analyze.js'
 import { previewHtml, previewMarkdown } from './preview.js'
 import { EXPORT_KIND, exportCodeActions, exportSupport, pdfCodeAction, resolveExportAction, type ExportFormat, type ExportSupport } from './export-actions.js'
@@ -400,9 +400,8 @@ connection.onRequest(ExecuteCommandRequest.type, async (params) => {
   if (params.command === 'carve.rebuildImpact') return uri ? rebuildImpact(workspaceIndex, uri) : []
   const document = uri ? documents.get(uri) : undefined
   if (!document) return null
-  const engine = await import('@markup-carve/carve')
   if (params.command === 'carve.previewHtml') return previewHtml(document.getText(), previewIncludeOptions(document))
-  if (params.command === 'carve.showAst') return engine.carveToAstJson(document.getText())
+  if (params.command === 'carve.showAst') return encodeTree(parse(document.getText()))
   return null
 })
 
@@ -476,7 +475,7 @@ connection.onRequest(DocumentFormattingRequest.type, (params) => {
   if (!document) return []
   const text = document.getText()
   const formatted = carveSettings.formatter === 'migration'
-    ? (carveSettings.formatAlignTables ? alignTablesInDocument(carveToCarve(text)) : carveToCarve(text))
+    ? format(text, { alignTables: carveSettings.formatAlignTables === true })
     : formatDocument(carveSettings.formatAlignTables ? alignTablesInDocument(text) : text)
   if (formatted === text) return []
   return [

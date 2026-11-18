@@ -1,10 +1,13 @@
-import { carveToHtml, parse } from '@markup-carve/carve'
+import { render, parse } from './engine.js'
 import { CodeAction, CodeActionKind, Range, TextEdit } from 'vscode-languageserver-types'
 import { walkNodes, type AstNode } from './ast-walk.js'
 import { alignCanonicalTable } from './table-alignment.js'
+import { tableRows } from './tree.js'
 
-type Cell = AstNode & { header?: boolean; children?: AstNode[] }
-type Row = AstNode & { cells?: Cell[]; footer?: boolean }
+const rowsOf = (table: { children?: unknown }): Row[] => tableRows(table) as unknown as Row[]
+
+type Cell = { header?: boolean; children?: AstNode[]; [key: string]: unknown }
+type Row = { cells?: Cell[]; footer?: boolean }
 type Table = AstNode & { rows?: Row[]; sourceFormat?: string }
 export interface ConversionEdit { startOffset: number; endOffset: number; textEdit: TextEdit; newText: string }
 
@@ -12,7 +15,7 @@ function cells(source: string): string[][][] {
   const result: string[][][] = []
   walkNodes(parse(source), node => {
     if (node.type === 'table') {
-      result.push(((node as Table).rows ?? []).map(row => (row.cells ?? []).map(cell =>
+      result.push((rowsOf(node)).map(row => (row.cells ?? []).map(cell =>
         (cell.children ?? []).filter(child => child.type === 'text' || child.type === 'escaped_text').map(child => String(child.value ?? '')).join(''))))
       return false
     }
@@ -22,7 +25,7 @@ function cells(source: string): string[][][] {
 
 export function isLosslessRewrite(oldSource: string, newSource: string): boolean {
   try {
-    return carveToHtml(oldSource) === carveToHtml(newSource) && JSON.stringify(cells(oldSource)) === JSON.stringify(cells(newSource))
+    return render(oldSource) === render(newSource) && JSON.stringify(cells(oldSource)) === JSON.stringify(cells(newSource))
   } catch { return false }
 }
 
@@ -86,7 +89,7 @@ function escapeField(field: string, minimum: number): string {
   for (let tier = minimum; tier < ESCAPE_TIERS.length; tier++) {
     const escaped = field.replace(ESCAPE_TIERS[tier]!, character => '\\' + character)
     if (tier === ESCAPE_TIERS.length - 1) return escaped
-    const cell = ((parse(`| ${escaped} |\n`).children?.[0] as Table | undefined)?.rows?.[0]?.cells ?? [])
+    const cell = (rowsOf((parse(`| ${escaped} |\n`).children?.[0] ?? {}) as { children?: unknown })[0]?.cells ?? [])
     if (cell.length === 1 && isPlainCell(cell[0]!) && value(cell[0]!).trim() === field.trim()) return escaped
   }
   return field
@@ -96,7 +99,7 @@ export function csvTableToPipe(source: string, line: number): ConversionEdit | n
   try {
     const info = selected(source, line, 'csv')
     if (!info) return null
-    const rows = info.table.rows ?? []
+    const rows = rowsOf(info.table)
     if (rows.some(row => (row.cells ?? []).some(cell => /[\r\n]/.test(value(cell))))) return null
     const caption = info.lines[info.last]?.text.startsWith('^ ') ? '\n' + info.lines[info.last]!.text : ''
     const attrs = info.attrs?.slice(1, -1).split(/\s+/).filter(token => token !== '' && token !== 'table').join(' ')
@@ -120,7 +123,7 @@ export function pipeTableToCsv(source: string, line: number): ConversionEdit | n
   try {
     const info = selected(source, line, 'pipe')
     if (!info) return null
-    const rows = info.table.rows ?? []
+    const rows = rowsOf(info.table)
     if (rows.length === 0 || rows.some(row => !row.cells?.length || row.cells.some(cell =>
       !!cell.attrs || !!cell.colspan || !!cell.rowspan || !!cell.colSpan || !!cell.rowSpan ||
       !isPlainCell(cell)))) return null

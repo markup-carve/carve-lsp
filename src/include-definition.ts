@@ -1,8 +1,8 @@
 import { portableIncludePaths } from './include-paths.js'
 import { type Location, type Position, type Range } from 'vscode-languageserver-types'
-import { findDirectiveSites, parse } from '@markup-carve/carve'
+import { findDirectiveSites, parseLegacy as parse } from './engine-legacy.js'
 import { type Directive } from './include-directive.js'
-import { astOffsetToIndex } from './position.js'
+import { codepointOffsetToIndex } from './position.js'
 import { lineCount, regionLines, sectionRange } from './include-selection.js'
 import type { IncludeOptions } from './includes.js'
 
@@ -71,7 +71,7 @@ function lineStart(oneBased: number): Range {
 function directiveAt(source: string, offset: number): Omit<Directive, 'start' | 'end'> | null {
   try {
     for (const site of findDirectiveSites(parse(source, { positions: true }))) {
-      if (offset >= astOffsetToIndex(source, site.start) && offset < astOffsetToIndex(source, site.end)) return site.directive
+      if (offset >= codepointOffsetToIndex(source, site.start) && offset < codepointOffsetToIndex(source, site.end)) return site.directive
     }
   } catch {
     // A document that does not parse has no directives to follow.

@@ -1,4 +1,4 @@
-import { parse, type Position } from '@markup-carve/carve'
+import { parse, type Position } from './engine.js'
 import { codepointColumnToUtf16, sourceLines } from './position.js'
 
 export interface ItemSite {

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { parse } from '@markup-carve/carve'
+import { parse } from './engine.js'
 import { colonFenceHighlights, colonFenceOpeners, colonFenceStructure } from './colon-fences.js'
 
 /**

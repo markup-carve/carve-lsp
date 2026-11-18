@@ -1,12 +1,11 @@
 import { MarkupKind, type Hover, type Position } from 'vscode-languageserver-types'
 import {
   parse,
-  resolve,
   type BlockNode,
   type Document,
   type InlineNode,
   type Position as SourcePosition,
-} from '@markup-carve/carve'
+} from './engine.js'
 import { astColumnToCharacter, characterToAstColumn, sourceLines } from './position.js'
 import { captionTargetById, type CaptionTarget } from './captions.js'
 import { colonFenceHover } from './colon-fences.js'
@@ -84,7 +83,7 @@ export function hoverAt(source: string, position: Position): Hover | null {
 
   let rules = lexicalRules
   try {
-    const hover = astHoverAt(resolve(parse(source)), position, lines)
+    const hover = astHoverAt(parse(source), position, lines)
     if (hover) return hover
   } catch {
     // Guess at markup only for documents that do not parse.
@@ -216,7 +215,7 @@ function inlineContents(node: InlineNode, resolveRef: RefResolver): string | nul
       return '**Tag**\n\nTags use `#name`.'
     case 'span':
       return '**Span**\n\nInline spans use `[text]{attrs}`.'
-    case 'heading_ref':
+    case 'xref':
       return crossrefContents(node, resolveRef)
     default:
       return null
@@ -237,7 +236,7 @@ type RefResolver = (id: string) => CaptionTarget | null
 function crossrefContents(node: InlineNode, resolveRef: RefResolver): string {
   const generic =
     '**Cross-reference**\n\nA `</#id>` reference links to the heading or captioned host carrying that id.'
-  const id = (node as { target?: unknown }).target
+  const id = (node as { key?: unknown }).key
   if (typeof id !== 'string') return generic
   const target = resolveRef(id)
   if (!target) return generic

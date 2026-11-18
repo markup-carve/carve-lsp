@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { carveToHtml } from '@markup-carve/carve'
+import { render } from './engine.js'
 import { analyzeCarve } from './analyze.js'
 import { continuationPrefix, formatDocument, listContinuationEdits } from './format.js'
 
@@ -36,14 +36,14 @@ function corpusDocument(name: string): string {
 function serverIsQuietAndPreserving(source: string, label: string, engineRaises: Array<[string, number]> = []): void {
   assert.deepEqual(analyzeCarve(source, {}).diagnostics.map((d) => [d.code, d.range.start.line + 1]), engineRaises, label)
   assert.equal(formatDocument(source), source, `${label}: the formatter rewrote a document that already ends in a newline`)
-  assert.equal(carveToHtml(formatDocument(source)), carveToHtml(source), `${label}: formatting changed the rendered document`)
+  assert.equal(render(formatDocument(source)), render(source), `${label}: formatting changed the rendered document`)
 }
 
 test('the {empty} description sentinel is accepted, not diagnosed (PART 11 §7d, carve#1827)', () => {
   const source = corpusDocument('438-an-empty-description-body-is-written-with-the-empty-sentinel')
   assert.match(source, /^: \{empty\}$/m, 'corpus 438 no longer spells the sentinel')
   serverIsQuietAndPreserving(source, '{empty} sentinel')
-  assert.match(carveToHtml(source), /<dd><\/dd>/, 'the sentinel should reach an empty description body')
+  assert.match(render(source), /<dd><\/dd>/, 'the sentinel should reach an empty description body')
   // The sentinel is content, so the marker did open a description: Enter
   // starts the next definition, as after any other one. The prefix fallback
   // still lands at the body column (`: {empty}` then `  x` renders <dd>x</dd>).
@@ -101,9 +101,9 @@ test('a block image keeps its caption slot (PART 11 §1c, carve#1823)', () => {
   serverIsQuietAndPreserving(source, 'block image carve-out', [['unresolved-reference-link', 1]])
   // The promotion the clause is about is visible to the server only as a
   // `figure` in the tree, which is what the caption and crossref features read.
-  assert.match(carveToHtml('![alt](a.png)\n^ Caption\n'), /<figure>[\s\S]*<figcaption>Caption<\/figcaption>/)
+  assert.match(render('![alt](a.png)\n^ Caption\n'), /<figure>[\s\S]*<figcaption>Caption<\/figcaption>/)
   // An image that shares its paragraph is not a block image, so no figure.
-  assert.doesNotMatch(carveToHtml('text ![alt](a.png)\n'), /<figure>/)
+  assert.doesNotMatch(render('text ![alt](a.png)\n'), /<figure>/)
 })
 
 test('a fenced block quote is continued as the container it is (carve#1718)', () => {

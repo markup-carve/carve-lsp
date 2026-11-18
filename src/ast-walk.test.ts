@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { parse } from '@markup-carve/carve'
+import { parse } from './engine.js'
 import { walkNodes, type AstNode } from './ast-walk.js'
 
 const headings = (source: string) => {

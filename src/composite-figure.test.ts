@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { parse, resolve } from '@markup-carve/carve'
+import { parse } from './engine.js'
 import { completionAt } from './completion.js'
 import { foldingRanges } from './folding.js'
 import { hoverAt } from './hover.js'
@@ -29,7 +29,7 @@ const TITLED = '::: figure "A titled figure div"\n![one](a.png)\n^ (a) One\n:::\
 const LABELLED = '::: figure [g]\nBody.\n:::\n'
 
 const topLevelTypes = (source: string): string[] =>
-  resolve(parse(source, { positions: true })).children.map((node) => node.type)
+  parse(source).children.map((node) => node.type)
 
 test('the pinned engine normalizes a bare figure fence to a figure_group', () => {
   assert.deepEqual(topLevelTypes(GROUP), ['figure_group'])

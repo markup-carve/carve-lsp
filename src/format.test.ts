@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { carveToHtml } from '@markup-carve/carve'
+import { render } from './engine.js'
 import { continuationEdits, continuationPrefix, formatDocument, formatRange, listContinuationEdits } from './format.js'
 
 test('adds a missing final line ending', () => {
@@ -77,7 +77,7 @@ test('inserts a matching closer after a code fence opener', () => {
     ['- a\n\n  ```js', '\n  ```'],
   ] as const) assert.equal(prefixAfter(before), closer, before)
   // The closer lands as the block's own closing fence.
-  const html = carveToHtml('```js\nx' + prefixAfter('```js') + '\n')
+  const html = render('```js\nx' + prefixAfter('```js') + '\n')
   assert.equal(html, '<pre><code class="language-js">x\n</code></pre>')
 })
 
@@ -127,7 +127,7 @@ test('a colon fence opened in a container writes the lead before the cursor and 
     assert.equal(prefixAfter(before), expected, before)
     // The body typed at the cursor lands inside the container.
     const [lead, closer] = expected.split('\n')
-    const html = carveToHtml(`x[^1]\n\n${before}\n${lead}body\n${closer}\n`)
+    const html = render(`x[^1]\n\n${before}\n${lead}body\n${closer}\n`)
     assert.match(html, /<aside[^>]*>\s*<p>body<\/p>\s*<\/aside>/, before)
   }
   // Already closed: only the lead.
@@ -149,7 +149,7 @@ test('formatting stays render-equivalent when a corpus document loses its final 
   const dir = new URL('../tests/spec/tests/corpus/', import.meta.url)
   for (const name of readdirSync(dir).filter((entry) => entry.endsWith('.crv'))) {
     const source = readFileSync(new URL(name, dir), 'utf8').replace(/\r?\n$/, '')
-    assert.equal(carveToHtml(formatDocument(source)), carveToHtml(source), name)
+    assert.equal(render(formatDocument(source)), render(source), name)
   }
 })
 

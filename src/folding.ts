@@ -1,11 +1,12 @@
 import { type FoldingRange } from 'vscode-languageserver-types'
-import { type BlockNode, type Document, type Heading } from '@markup-carve/carve'
+import { type BlockNode, type Document, type Heading } from './engine.js'
+import { footnoteEntries } from './tree.js'
 import { walkNodes, type AstNode } from './ast-walk.js'
 import { resolvedDocument } from './parse-cache.js'
 import { sourceLines } from './position.js'
 
 /** Block kinds worth offering as a collapsible region when multi-line. */
-const FOLDABLE = new Set<BlockNode['type']>([
+const FOLDABLE = new Set<string>([
   'code_block',
   'raw_block',
   'comment',
@@ -45,7 +46,7 @@ export function foldingRanges(source: string): FoldingRange[] {
     if (FOLDABLE.has(node.type as BlockNode['type'])) fold(node.pos)
     return !INLINE_HOSTS.has(node.type!)
   })
-  for (const [label, body] of Object.entries(doc.footnoteDefs ?? {})) {
+  for (const [label, body] of footnoteEntries(doc)) {
     fold(footnotePos(doc, label))
     walkNodes(body, (node) => {
       if (FOLDABLE.has(node.type as BlockNode['type'])) fold(node.pos)
@@ -93,7 +94,7 @@ export function headingSections(doc: Document, lines: readonly string[]): Headin
     })
   }
   collect(doc.children, [])
-  for (const [label, body] of Object.entries(doc.footnoteDefs ?? {})) {
+  for (const [label, body] of footnoteEntries(doc)) {
     collect(body, [{ type: 'footnote_definition', pos: footnotePos(doc, label) }])
   }
   found.sort((a, b) => a.heading.pos!.startLine - b.heading.pos!.startLine)
@@ -142,7 +143,7 @@ function isColonFenced(node: AstNode): boolean {
 }
 
 function footnotePos(doc: Document, label: string): AstNode['pos'] {
-  return (doc as { footnoteDefPos?: Record<string, AstNode['pos']> }).footnoteDefPos?.[label]
+  return doc.children.find((node) => node.type === 'footnote' && node.key === label)?.pos
 }
 
 export function lexicalFolds(source: string): FoldingRange[] {

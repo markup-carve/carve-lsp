@@ -8,9 +8,9 @@
  * line ending, and only when the render confirms it changes nothing.
  */
 
-import { carveToHtml, lintCarve, parse } from '@markup-carve/carve'
+import { render, lint, parse } from './engine.js'
 import { colonFenceStructure, type FenceSite } from './colon-fences.js'
-import { astColumnToCharacter, sourceLines } from './position.js'
+import { astColumnToCharacter, astOffsetToIndex, sourceLines } from './position.js'
 import { walkNodes } from './ast-walk.js'
 import { bareMarkerItem, completedItem, listItems, listTree, type ItemSite, type TreeItem } from './list-items.js'
 
@@ -19,7 +19,7 @@ export function formatDocument(source: string): string {
   const formatted = source + (source.includes('\r\n') ? '\r\n' : '\n')
   // An unclosed code block at the end takes the line ending into its content.
   try {
-    return carveToHtml(formatted) === carveToHtml(source) ? formatted : source
+    return render(formatted) === render(source) ? formatted : source
   } catch {
     return source
   }
@@ -450,7 +450,8 @@ export function listIndentEdits(source: string, line: number, direction: ListInd
 
 /** A partial outdent can land between two columns, which the engine reads but lints (PART 9 §24). */
 function markerOffColumn(text: string, line: number): boolean {
-  return lintCarve(text).some((warning) => warning.rule === 'list-marker-below-content-column' && warning.line === line + 1)
+  return lint(text).some((entry) => entry.code === 'list-marker-below-content-column' && entry.range !== undefined &&
+    lineOfIndex(text, astOffsetToIndex(text, entry.range.startOffset)) === line)
 }
 
 /** Every item nested in `item` before the move is still nested in it, as deep as before. */
@@ -621,4 +622,10 @@ function columns(run: string): number {
   let width = 0
   for (const char of run) width = char === '\t' ? width + 4 - (width % 4) : width + 1
   return width
+}
+
+function lineOfIndex(text: string, index: number): number {
+  let line = 0
+  for (let at = 0; at < index && at < text.length; at++) if (text[at] === '\n') line++
+  return line
 }

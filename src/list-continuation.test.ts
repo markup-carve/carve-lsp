@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
-import { carveToHtml } from '@markup-carve/carve'
+import { render } from './engine.js'
 import { BARE_CONTINUATION_MARKER, listContinuationEdits } from './format.js'
 import { listDelim } from './list-items.js'
 import { LspStdioClient } from './lsp-stdio-client.js'
@@ -251,7 +251,7 @@ test('an item with attributes continues with a plain marker', () => {
     ['- a\n-{.c} b', '- '],
   ] as const) assert.equal(inserted(before), next, before)
   // The plain marker joins the attributed item's list.
-  assert.equal(carveToHtml(`${applied('1.{.c} a')}b\n`), '<ol>\n  <li class="c">a</li>\n  <li>b</li>\n</ol>')
+  assert.equal(render(`${applied('1.{.c} a')}b\n`), '<ol>\n  <li class="c">a</li>\n  <li>b</li>\n</ol>')
 })
 
 test('a description term or definition continues with a definition marker', () => {
@@ -266,7 +266,7 @@ test('a description term or definition continues with a definition marker', () =
     ['- a\n\n  :: t\n  : d', '  : '],
   ] as const) assert.equal(inserted(before), next, before)
   for (const before of [':: term', ':: t\n: def', '> :: t\n> : d']) {
-    const html = carveToHtml(`${applied(before)}more\n`)
+    const html = render(`${applied(before)}more\n`)
     assert.match(html, /<dd>more<\/dd>/, before)
   }
 })
@@ -306,7 +306,7 @@ test('Enter on a content-less quote line drops one quote level', () => {
     { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } }, newText: '>' },
     { range: { start: { line: 1, character: 0 }, end: { line: 1, character: 0 } }, newText: '> ' },
   ])
-  assert.equal(carveToHtml(`${applied('> > q\n> > ')}x\n`), '<blockquote>\n  <blockquote><p>q</p></blockquote>\n  <p>x</p>\n</blockquote>')
+  assert.equal(render(`${applied('> > q\n> > ')}x\n`), '<blockquote>\n  <blockquote><p>q</p></blockquote>\n  <p>x</p>\n</blockquote>')
 })
 
 test('quote lines with content, or a bare `>`, are not ended', () => {

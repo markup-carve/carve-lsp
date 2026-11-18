@@ -1,6 +1,7 @@
 import { DiagnosticSeverity, type Diagnostic } from 'vscode-languageserver-types'
-import { parse } from '@markup-carve/carve'
+import { parse } from './engine.js'
 import { walkNodes, type AstNode } from './ast-walk.js'
+import { tableRows } from './tree.js'
 
 /**
  * The draft #1344 table check the engine lint does not run: a positional
@@ -18,10 +19,10 @@ export function tableDiagnostics(source: string): Diagnostic[] {
   const diagnostics: Diagnostic[] = []
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   walkNodes(document, (node) => {
-    if (node.type !== 'table' || !node.pos?.startLine || !Array.isArray(node.rows)) return
+    if (node.type !== 'table' || !node.pos?.startLine) return
     const attrLine = node.pos.startLine - 2
     if (attrLine < 0) return
-    const rows = node.rows as Array<{ cells?: unknown[] }>
+    const rows = tableRows(node)
     const columns = Math.max(0, ...rows.map((row) => row.cells?.length ?? 0))
     for (const attr of positionalAttributes(lines[attrLine] ?? '').filter((entry) => keyed(node, entry.name))) {
       if (attr.values.length > columns) {

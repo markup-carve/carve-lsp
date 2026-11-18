@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { carveToHtml } from '@markup-carve/carve'
+import { render } from './engine.js'
 import { analyzeCarve } from './analyze.js'
 import { lintCodeActions } from './lint-actions.js'
 
@@ -72,7 +72,7 @@ test('escapes a refused continuation marker without changing the output', () => 
   for (const source of ['[^n]: a\n+\n']) {
     const fixed = applyFirst(source, 'Escape the +')
     assert.ok(fixed, source)
-    assert.equal(carveToHtml(fixed), carveToHtml(source))
+    assert.equal(render(fixed), render(source))
     assert.deepEqual(analyzeCarve(fixed).diagnostics.filter((d) => isRefusal(d.code)), [])
   }
   // A refused `+` that renders nothing (carve#4409) would gain a character, so no escape is offered.
@@ -91,7 +91,7 @@ test('rewrites a deprecated alignment prefix in the braced spelling (carve#5091 
   ] as const) {
     const fixed = applyFirst(source, 'Write the alignment')
     assert.equal(fixed, expected, source)
-    assert.equal(carveToHtml(fixed!), carveToHtml(source), source)
+    assert.equal(render(fixed!), render(source), source)
     assert.deepEqual(analyzeCarve(fixed!).diagnostics.filter((d) => d.code === 'deprecated-cell-alignment'), [], source)
   }
 })

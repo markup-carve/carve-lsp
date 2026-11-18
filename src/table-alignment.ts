@@ -1,4 +1,4 @@
-import { carveToCarve, carveToHtml, parse } from '@markup-carve/carve'
+import { format, render, parse } from './engine.js'
 import { CodeAction, CodeActionKind, Range, TextEdit } from 'vscode-languageserver-types'
 import { walkNodes } from './ast-walk.js'
 import { tableDisplayWidth } from './table-display-width.js'
@@ -59,7 +59,7 @@ export function alignCanonicalTable(source: string): string {
     return row ? row.marker + row.cells.map((cell, column) =>
       cell + ' '.repeat(widths[column]! - tableDisplayWidth(cell))).join('|') + '|' + row.attrs : line
   }).join('\n') + '\n'
-  return carveToHtml(source) === carveToHtml(aligned) ? aligned : source
+  return render(source) === render(aligned) ? aligned : source
 }
 
 export interface TableAlignmentEdit {
@@ -100,8 +100,8 @@ function findTableAlignmentEdits(source: string, firstLine: number, lastLine: nu
     if (original.length === 0 || original.some(line => line.text.length < prefixLength)) return false
     const bare = original.map(line => line.text.slice(prefixLength)).join('\n') + '\n'
     // Alignment pads cells; it does not rewrite a GFM separator row into `|=` cells (CARVE-P11-066).
-    const canonical = carveToCarve(bare, { preserveTableSeparators: true })
-    const formatted = carveToHtml(bare) === carveToHtml(canonical) ? alignCanonicalTable(canonical) : bare
+    const canonical = format(bare)
+    const formatted = render(bare) === render(canonical) ? alignCanonicalTable(canonical) : bare
     const renderedLines = formatted.replace(/\n$/, '').split('\n')
     if (renderedLines.length !== original.length) return false
     const replaced = renderedLines.map((line, index) => prefixes[index] + line +

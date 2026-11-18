@@ -16,7 +16,7 @@ export function documentLinks(uri: string, source: string): DocumentLink[] {
     const end = astOffsetToIndex(text, pos.endOffset)
     if (node.type === 'autolink' && typeof node.href === 'string') {
       add(links, model, uri, node.href, start + 1, end - 1)
-    } else if ((node.type === 'link' || node.type === 'image') && node.rawRef === undefined) {
+    } else if ((node.type === 'link' || node.type === 'image') && node.key === undefined) {
       const destination = node.type === 'link' ? node.href : node.src
       if (typeof destination === 'string' && destination !== '') locate(links, model, uri, destination, start, end)
     } else if (node.type === 'link_reference_definition' && typeof node.href === 'string' && node.href !== '') {

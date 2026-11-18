@@ -1,5 +1,6 @@
 import { type Location, type Position, type ReferenceContext } from 'vscode-languageserver-types'
-import { type Document, type InlineNode } from '@markup-carve/carve'
+import { type Document, type InlineNode } from './engine.js'
+import { headingId } from './tree.js'
 import { smartPunctuationText } from './inline-text.js'
 import { captionTargetById, captionTargets } from './captions.js'
 import { walkNodes } from './ast-walk.js'
@@ -158,7 +159,7 @@ function findDeclarationById(
 ): Declaration | null {
   const doc = model.doc
   if (!doc) return null
-  const heading = findHeading(doc, (candidate) => candidate.attrs?.id === targetId)
+  const heading = findHeading(doc, (candidate) => headingId(candidate) === targetId)
   if (heading?.pos) {
     return {
       line: heading.pos.startLine - 1,
@@ -171,7 +172,7 @@ function findDeclarationById(
   return null
 }
 
-type Heading = import('@markup-carve/carve').Heading
+type Heading = import('./engine.js').Heading
 
 /** The first heading anywhere in the document - list items and footnote bodies included - that matches. */
 function findHeading(doc: Document, matches: (heading: Heading) => boolean): Heading | null {
@@ -397,7 +398,7 @@ function headingPlainText(nodes: InlineNode[]): string {
     } else if (node.type === 'code') out += node.value
     // An inline literal (§27) renders as visible prose, so it must contribute
     // to the heading text used for cross-reference and rename matching.
-    else if (node.type === 'literal_inline') out += node.content
+    else if (node.type === 'literal_inline') out += node.value
     else out += smartPunctuationText(node)
   }
   return out.trim()

@@ -1,4 +1,4 @@
-import { carveToHtml } from '@markup-carve/carve'
+import { render } from './engine.js'
 import { CodeActionKind, type CodeAction, type Diagnostic, type TextEdit } from 'vscode-languageserver-types'
 
 /** Safe, local rewrites for diagnostics emitted by lintCarve. */
@@ -6,7 +6,7 @@ export function lintCodeActions(uri: string, source: string, diagnostics: Diagno
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   const actions: CodeAction[] = []
   let rendered: string | undefined
-  const original = () => (rendered ??= carveToHtml(lines.join('\n')))
+  const original = () => (rendered ??= render(lines.join('\n')))
   for (const diagnostic of diagnostics) {
     const code = String(diagnostic.code ?? '')
     const line = lines[diagnostic.range.start.line] ?? ''
@@ -26,7 +26,7 @@ export function lintCodeActions(uri: string, source: string, diagnostics: Diagno
         const escaped = [...lines]
         escaped[lineNo] = `${line.slice(0, at)}\\${line.slice(at)}`
         // The refused marker already reads as text; the escape only states that.
-        if (original() === carveToHtml(escaped.join('\n'))) {
+        if (original() === render(escaped.join('\n'))) {
           edit = { range: point(lineNo, at), newText: '\\' }
           title = 'Escape the + as literal text'
         }

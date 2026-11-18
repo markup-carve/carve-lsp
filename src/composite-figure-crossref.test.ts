@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { carveToHtml, lintCarve, parse, resolve } from '@markup-carve/carve'
+import { render, lint, parse } from './engine.js'
 import { analyzeCarve } from './analyze.js'
 import { captionTargets, panelLetter } from './captions.js'
 import { completionAt } from './completion.js'
@@ -20,7 +20,7 @@ import { referencesAt } from './references.js'
  * cases, so a fix that only taught the walk about `figure_group` fails it.
  *
  * WHERE THE EXPECTED TEXT COMES FROM. The engine, not this file's reading of
- * §4c. `carveToHtml` writes the resolved text into the anchor for each id, and
+ * §4c. `render` writes the resolved text into the anchor for each id, and
  * the assertions below compare the server's answer against THAT rather than
  * against a literal - so a letter scheme or a numbering rule that changes
  * upstream fails here instead of diverging quietly in an editor.
@@ -59,12 +59,12 @@ const refColumn = (id: string): number => DOC.split('\n')[REF_LINE]!.indexOf(`</
 
 /** The text the ENGINE renders for `</#id>`, read off the anchor it writes. */
 const engineRefText = (source: string, id: string): string | null => {
-  const match = new RegExp(`<a href="#${id}">([^<]*)</a>`).exec(carveToHtml(source))
+  const match = new RegExp(`<a href="#${id}">([^<]*)</a>`).exec(render(source))
   return match ? match[1]! : null
 }
 
 const targetFor = (source: string, id: string) =>
-  captionTargets(resolve(parse(source, { positions: true }))).find((t) => t.id === id)
+  captionTargets(parse(source)).find((t) => t.id === id)
 
 test('every caption id resolves to the text the engine renders for it', () => {
   for (const id of ['fig', 'g', 'one', 'two']) {
@@ -309,7 +309,7 @@ const LINT_CASES: Array<[string, string]> = [
 for (const [code, source] of LINT_CASES) {
   test(`${code} reaches the server's diagnostics`, () => {
     assert.ok(
-      lintCarve(source).some((warning) => warning.rule === code),
+      lint(source).some((entry) => entry.code === code),
       `the pinned engine no longer emits ${code}`,
     )
     assert.ok(

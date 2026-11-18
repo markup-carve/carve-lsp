@@ -1,11 +1,13 @@
 import {
   type BlockNode,
+  type CaptionNode,
   type Document,
   type InlineNode,
   type Position as SourcePosition,
-} from '@markup-carve/carve'
+} from './engine.js'
 import { smartPunctuationText } from './inline-text.js'
 import { walkNodes } from './ast-walk.js'
+import { captionInlines, isFigure } from './tree.js'
 
 /**
  * The captioned hosts a `</#id>` can name, and the text each one resolves to.
@@ -25,7 +27,7 @@ import { walkNodes } from './ast-walk.js'
  *
  * The PANEL LETTER is the one thing derived here, because no engine API exposes
  * it: panel order among the panels only, a..z then aa, ab (PART 9 §4c). The
- * tests pin it against the anchor text `carveToHtml` writes for the same id, so
+ * tests pin it against the anchor text `render` writes for the same id, so
  * the derivation is measured against the engine rather than against a reading
  * of the clause.
  */
@@ -55,13 +57,13 @@ export function captionTargets(doc: Document): CaptionTarget[] {
     const block = node as unknown as BlockNode
     if (panels.has(node)) return
     if (block.type === 'figure_group') {
-      const groupText = captionRefText(block.caption)
+      const groupText = captionRefText(captionInlines(block.caption))
       pushTarget(targets, block, 'composite figure', groupText)
       collectPanels(block, groupText, targets, panels)
-    } else if (block.type === 'figure') {
-      pushTarget(targets, block, 'figure', captionRefText(block.caption))
+    } else if (isFigure(block)) {
+      pushTarget(targets, block, 'figure', captionRefText(captionInlines((block as { caption?: CaptionNode }).caption)))
     } else if (block.type === 'table') {
-      pushTarget(targets, block, 'table', captionRefText(block.caption))
+      pushTarget(targets, block, 'table', captionRefText(captionInlines(block.caption)))
     }
   })
   return targets
@@ -102,7 +104,7 @@ function collectPanels(
 ): void {
   let panelIndex = 0
   for (const child of group.children) {
-    if (child.type !== 'figure' && child.type !== 'table') continue
+    if (!isFigure(child) && child.type !== 'table') continue
     panels.add(child)
     pushTarget(
       targets,
@@ -152,7 +154,7 @@ function plainText(nodes: readonly InlineNode[]): string {
     else if ('children' in node && Array.isArray(node.children)) {
       out += plainText(node.children as InlineNode[])
     } else if (node.type === 'code') out += node.value
-    else if (node.type === 'literal_inline') out += node.content
+    else if (node.type === 'literal_inline') out += node.value
     else out += smartPunctuationText(node)
   }
   return out
