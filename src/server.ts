@@ -107,6 +107,7 @@ let carveSettings: CarveSettings = DEFAULT_CARVE_SETTINGS
 let workspaceTrusted = false
 let exportClient: ExportSupport = { createFile: false, resolveEdit: false }
 let pdfOptions: PdfOptions = {}
+let pdfExportCommand = false
 let workspaceRoots: string[] = []
 // The last `carve` section the client sent; its keys override `.carverc.json` one by one.
 let clientCarveSection: Record<string, unknown> | undefined
@@ -149,6 +150,7 @@ connection.onInitialize((params) => {
   workspaceRoots = [...folders, legacyRoot].filter((root): root is string => root !== undefined)
   clientCarveSection = carveSection(params.initializationOptions)
   pdfOptions = readPdfOptions(clientCarveSection)
+  pdfExportCommand = clientCarveSection?.pdfExportCommand === true
   carveSettings = resolveCarveSettings()
 
   return {
@@ -174,7 +176,7 @@ connection.onInitialize((params) => {
       executeCommandProvider: { commands: [
         'carve.previewHtml', 'carve.showAst', 'carve.workspaceGraph',
         'carve.backlinks', 'carve.generatedNavigation', 'carve.rebuildImpact',
-        'carve.listIndent', 'carve.exportPdf',
+        'carve.listIndent', ...(pdfExportCommand ? ['carve.exportPdf'] : []),
       ] },
       referencesProvider: true,
       renameProvider: { prepareProvider: true },
@@ -432,7 +434,7 @@ connection.onRequest(CodeActionRequest.type, (params) => {
               ...tableConversionCodeActions(params.textDocument.uri, document.getText(), params.range.start.line)].filter(action => action !== null)
           : []),
         ...(carveSettings.exportActions ? exportCodeActions(params.textDocument.uri, exportClient, params.context.only, (format) => renderExport(document, format), readExportTarget) : []),
-        ...(carveSettings.exportActions ? [pdfCodeAction(params.textDocument.uri, params.context.only)].filter(action => action !== null) : []),
+        ...(carveSettings.exportActions && pdfExportCommand ? [pdfCodeAction(params.textDocument.uri, params.context.only)].filter(action => action !== null) : []),
       ]
     : []
 })

@@ -157,7 +157,7 @@ client severity for one code keeps the project severities for the others.
 | `platforms` | `[]` | Extra platform lint profiles. Currently supports `"github"`. |
 | `extensions` | `[]` | Enabled extension names. `"semantic-span"` colors `samp`, `var`, `cite`, and `dfn` as keywords in span attributes. |
 | `inlayHints` | `true` | Show inlay hints: generated heading identifiers, colon-fence closers, and the bare list marker hint. `false` turns all of them off; an object such as `{ "bareListMarkers": false }` keeps the others and turns that one off. |
-| `exportActions` | `true` | Offer the *Export as Markdown*, *Export as HTML*, and *Export as PDF* source actions. Editors with their own export commands can turn this off. |
+| `exportActions` | `true` | Offer the *Export as Markdown* and *Export as HTML* source actions, plus *Export as PDF* when the client opts in to its server command. Editors with their own export commands can turn this off. |
 | `formatter` | `"conservative"` | Use whitespace-only conservative formatting; `"migration"` opts into canonical whole-document conversion. |
 | `format.alignTables` | `false` | Align table cells in document, range, and on-type formatting. The *Align table* action works without this setting. |
 | `severities` | `{}` | Override a diagnostic code with `"error"`, `"warning"`, `"information"`, `"hint"`, or `"off"`. |
@@ -280,13 +280,21 @@ same limits as diagnostics, so a refused or over-budget directive stays literal
 in the preview. Without `includeRoot` the preview renders the source as
 written, with every directive literal.
 
-The source actions *Export as Markdown*, *Export as HTML*, and *Export as PDF*
-(kind `source.export`) write next to the source: `notes.crv` becomes `notes.md`,
+The source actions *Export as Markdown* and *Export as HTML*, plus *Export as PDF*
+when enabled by the client, write next to the source (kind `source.export`):
+`notes.crv` becomes `notes.md`,
 `notes.html`, or `notes.pdf`. The text exports expand includes on the same terms as
 the preview. A missing target is created, an existing one is replaced as a
 whole. The text actions are offered only to clients that support creating files
 in a workspace edit. All three can be turned off with the `exportActions`
 setting. Most editors apply text edits to a buffer and leave saving to the user.
+
+The PDF command id `carve.exportPdf` may also be registered by an editor
+extension. To avoid registering it twice, the server does not advertise the
+command or offer its PDF action by default. A client that can safely route the
+server command can set `initializationOptions.carve.pdfExportCommand` to `true`.
+This option is read at initialization, not from `.carverc.json` or a later
+configuration change.
 
 *Export as PDF* runs `crv2pdf` from `PATH` first, using the current document
 buffer, or the executable set in the `carve.pdf.crv2pdfPath` initialization
@@ -296,7 +304,7 @@ installed Chrome, Chromium, or Edge browser in headless mode. Set
 under `carve` in LSP initialization options, for example:
 
 ```json
-{ "carve": { "pdf": { "crv2pdfPath": "/path/to/crv2pdf", "browserPath": "/path/to/chromium" } } }
+{ "carve": { "pdfExportCommand": true, "pdf": { "crv2pdfPath": "/path/to/crv2pdf", "browserPath": "/path/to/chromium" } } }
 ```
 
 The PDF action runs as a server command, so it works even when the client does
