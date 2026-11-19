@@ -32,9 +32,8 @@ user notices:
 
 Include expansion goes through the engine's `includes` option, region
 selection through `includeRegion`. The migration quick fixes and *Fix all Carve
-migration collisions* apply the rewrites of `carve lint --fix`; the server
-carries a copy of that pass until carve-js exports it
-(markup-carve/carve-js#5086).
+migration collisions* apply the rewrites of `carve lint --fix` through the
+engine's `fixEdits` and `fix`.
 
 ## Install
 

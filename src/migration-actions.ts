@@ -5,7 +5,7 @@ import {
   TextEdit,
   type Diagnostic,
 } from 'vscode-languageserver-types'
-import { fixCandidates, fixSource } from './migration-fix.js'
+import { fix, fixableRules, fixEdits, lint, type LintOptions } from './engine.js'
 import { astOffsetToIndex } from './position.js'
 
 export interface MigrationFix {
@@ -27,32 +27,36 @@ function normalize(source: string): string {
   return source.replace(/\r\n?/g, '\n')
 }
 
+const FIXABLE_ON = Object.fromEntries(fixableRules.map((id) => [id, 'on'])) as LintOptions['rules']
+
 function locatedFixes(source: string): LocatedFix[] {
   const norm = normalize(source)
   const at = (byte: number) => positionAt(norm, astOffsetToIndex(norm, byte))
   const bytes = new TextEncoder().encode(norm)
   const decoder = new TextDecoder()
-  return fixCandidates(norm).map((candidate) => {
-    const [only] = candidate.edits
-    if (candidate.edits.length === 1 && only) {
-      return { rule: candidate.rule, range: Range.create(at(only.start), at(only.end)), suggestion: only.text, at: at(candidate.range.startOffset) }
+  const fixes: LocatedFix[] = []
+  for (const finding of lint(norm, { rules: FIXABLE_ON })) {
+    if (finding.channel !== 'lint' || finding.file !== undefined || finding.range === undefined) continue
+    const edits = fixEdits(norm, finding)
+    if (edits === null || edits.length === 0) continue
+    const range = finding.range
+    const [only] = edits
+    if (edits.length === 1 && only) {
+      fixes.push({ rule: finding.code, range: Range.create(at(only.startOffset), at(only.endOffset)), suggestion: only.text, at: at(range.startOffset) })
+      continue
     }
-    const start = Math.min(candidate.range.startOffset, ...candidate.edits.map((edit) => edit.start))
-    const end = Math.max(candidate.range.endOffset, ...candidate.edits.map((edit) => edit.end))
+    const start = Math.min(range.startOffset, ...edits.map((edit) => edit.startOffset))
+    const end = Math.max(range.endOffset, ...edits.map((edit) => edit.endOffset))
     let suggestion = ''
     let cursor = start
-    for (const edit of [...candidate.edits].sort((a, b) => a.start - b.start)) {
-      suggestion += decoder.decode(bytes.subarray(cursor, edit.start)) + edit.text
-      cursor = edit.end
+    for (const edit of [...edits].sort((a, b) => a.startOffset - b.startOffset)) {
+      suggestion += decoder.decode(bytes.subarray(cursor, edit.startOffset)) + edit.text
+      cursor = edit.endOffset
     }
     suggestion += decoder.decode(bytes.subarray(cursor, end))
-    return {
-      rule: candidate.rule,
-      range: Range.create(at(start), at(end)),
-      suggestion,
-      at: at(candidate.range.startOffset),
-    }
-  })
+    fixes.push({ rule: finding.code, range: Range.create(at(start), at(end)), suggestion, at: at(range.startOffset) })
+  }
+  return fixes
 }
 
 /** The fix of each finding of a fixable lint rule, every such rule on (as `carve lint --fix` runs them). */
@@ -107,7 +111,7 @@ export function migrationFixAllAction(
   uri: string,
   source: string,
 ): CodeAction | null {
-  const { output, applied } = fixSource(normalize(source))
+  const { output, applied } = fix(normalize(source))
   if (applied.size === 0) return null
 
   // The whole-document range. Computed on the normalized text, whose
