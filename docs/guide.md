@@ -30,10 +30,11 @@ user notices:
   the engine's `semanticSpan` extension, so `samp`, `var`, `cite` and `dfn`
   outside a span report `semantic-attribute-outside-span`.
 
-Include expansion, region selection and the Djot migration fixes still use 0.1
-helpers from the published 0.1.17 package, installed under the `carve-legacy`
-alias, until carve-js exposes them
-(markup-carve/carve-js#5056, #5059 and #5054).
+Include expansion goes through the engine's `includes` option, region
+selection through `includeRegion`. The migration quick fixes and *Fix all Carve
+migration collisions* apply the rewrites of `carve lint --fix`; the server
+carries a copy of that pass until carve-js exports it
+(markup-carve/carve-js#5086).
 
 ## Install
 
@@ -271,8 +272,9 @@ ordinary layout. Remote URLs are never fetched. Recursion depth and total
 expanded bytes are both bounded, so a file that includes another many times
 cannot amplify without limit.
 
-A target that is simply missing produces an `include-unresolved` diagnostic on
-the directive. A target that was REFUSED produces `include-denied` instead, and
+A target that is simply missing produces an `include-not-found` diagnostic on
+the directive, and a resolver that fails produces `include-unreadable`. A
+target that was REFUSED produces `include-denied` instead, and
 says which policy refused it - outside the include root, an absolute path, or a
 remote URL - because being told a file "could not be resolved" when it is
 sitting right there sends an author looking for a typo that is not there. A

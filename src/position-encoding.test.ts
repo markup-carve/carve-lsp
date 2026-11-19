@@ -18,6 +18,8 @@ import { pathToFileURL } from 'node:url'
 import type { IncludeResolved, IncludeResolver } from './include-path.js'
 import type { Hover } from 'vscode-languageserver/node.js'
 
+// 0.2 C2-N-013: a target the resolver does not find reports `include-not-found` (0.1 `include-unresolved`).
+
 function hoverText(hover: Hover): string {
   const contents = hover.contents as { value?: string }
   return contents.value ?? String(hover.contents)
@@ -206,7 +208,7 @@ const childResolver: IncludeResolver = (includePath): IncludeResolved => {
 
 function includeDiagnostic(source: string, resolver: IncludeResolver) {
   return analyzeCarve(source, { includes: { resolver } }).diagnostics.find(
-    (entry) => entry.code === 'include-unresolved',
+    (entry) => entry.code === 'include-not-found',
   )
 }
 
@@ -232,12 +234,11 @@ test("a warning's own line and column stay in the parser's unit", () => {
   // The range above is UTF-16, because a client indexes that way. These are
   // the parser's numbers, and converting them here would leave the two halves
   // of the same warning measured differently.
+  // 0.2 C2-N-002: there is no inline include, so a directive after an emoji on
+  // its own line is text and reports nothing.
   const line = '\u{1F600} {{ missing.crv }}\n'
-  const warning = resolveIncludes(line, { resolver: refusing, sourcePath: '/book/main.crv' })
-    .warnings[0]
-  assert.equal(warning?.line, 1)
-  assert.equal(warning?.column, [...line.slice(0, line.indexOf('{{'))].length + 1)
-  assert.equal(includeDiagnostic(line, refusing)?.range.start.character, line.indexOf('{{'))
+  assert.equal(resolveIncludes(line, { resolver: refusing, sourcePath: '/book/main.crv' }).warnings[0], undefined)
+  assert.equal(includeDiagnostic(line, refusing), undefined)
 
   // An emoji on an EARLIER line moves the line number rather than the column,
   // so the line table has to be counted in the offsets' own unit too.

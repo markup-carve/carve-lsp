@@ -5,6 +5,8 @@ import { analyzeCarve } from './analyze.js'
 import { resolveIncludes } from './includes.js'
 import type { IncludeResolved, IncludeResolver } from './include-path.js'
 
+// 0.2 C2-N-013: a target the resolver does not find reports `include-not-found` (0.1 `include-unresolved`).
+
 /**
  * Mapping a warning back across an include seam.
  *
@@ -158,7 +160,7 @@ test('a child written once sliced and once whole reports the file line for both'
 
 test('the location of a sliced child is the line the author has to open', () => {
   const diagnostic = analyzeCarve('{{ padded.crv @lines:9-9 }}\n', { includes: { resolver } })
-    .diagnostics.find((entry) => entry.code === 'include-unresolved')
+    .diagnostics.find((entry) => entry.code === 'include-not-found')
   assert.deepEqual(diagnostic?.relatedInformation?.[0]?.location.range, {
     start: { line: 8, character: 0 },
     end: { line: 8, character: 17 },
@@ -167,7 +169,7 @@ test('the location of a sliced child is the line the author has to open', () => 
 
 test('the published diagnostic stays on the top-level directive', () => {
   const diagnostic = analyzeCarve(ROOT, { includes: { resolver } }).diagnostics
-    .find((entry) => entry.code === 'include-unresolved')
+    .find((entry) => entry.code === 'include-not-found')
   assert.deepEqual(diagnostic?.range, {
     start: { line: 2, character: 0 },
     end: { line: 2, character: 15 },
@@ -176,7 +178,7 @@ test('the published diagnostic stays on the top-level directive', () => {
 
 test('the published diagnostic locates the child file it actually came from', () => {
   const diagnostic = analyzeCarve(ROOT, { includes: { resolver } }).diagnostics
-    .find((entry) => entry.code === 'include-unresolved')
+    .find((entry) => entry.code === 'include-not-found')
   assert.deepEqual(diagnostic?.relatedInformation?.[0]?.location, {
     uri: pathToFileURL('/book/child.crv').toString(),
     range: { start: { line: 4, character: 0 }, end: { line: 4, character: 17 } },
@@ -185,13 +187,13 @@ test('the published diagnostic locates the child file it actually came from', ()
 
 test('the message still names the child, for a client that renders no locations', () => {
   const diagnostic = analyzeCarve(ROOT, { includes: { resolver, includeRoot: '/book' } })
-    .diagnostics.find((entry) => entry.code === 'include-unresolved')
+    .diagnostics.find((entry) => entry.code === 'include-not-found')
   assert.match(diagnostic?.message ?? '', /\(in child\.crv\)$/)
 })
 
 test('a warning from the open document gets no related information', () => {
   const diagnostic = analyzeCarve('{{ missing.crv }}\n', { includes: { resolver } })
-    .diagnostics.find((entry) => entry.code === 'include-unresolved')
+    .diagnostics.find((entry) => entry.code === 'include-not-found')
   assert.equal(diagnostic?.relatedInformation, undefined)
 })
 
@@ -213,7 +215,7 @@ test('an id that merely LOOKS like a path produces no location', () => {
         }
   }
   const diagnostic = analyzeCarve(ROOT, { includes: { resolver: virtual } }).diagnostics
-    .find((entry) => entry.code === 'include-unresolved')
+    .find((entry) => entry.code === 'include-not-found')
   assert.ok(diagnostic, 'the warning itself must still be published')
   assert.equal(diagnostic.relatedInformation, undefined)
 })
@@ -230,7 +232,7 @@ test('a child written with carriage-return endings still reports a real line', (
 
 test('the location of a carriage-return child is a range a client can open', () => {
   const diagnostic = analyzeCarve('{{ classic.crv }}\n', { includes: { resolver } })
-    .diagnostics.find((entry) => entry.code === 'include-unresolved')
+    .diagnostics.find((entry) => entry.code === 'include-not-found')
   assert.deepEqual(diagnostic?.relatedInformation?.[0]?.location.range, {
     start: { line: 4, character: 0 },
     end: { line: 4, character: 17 },

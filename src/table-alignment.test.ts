@@ -7,7 +7,8 @@ import { format, render } from './engine.js'
 const canonical = '|= Name |= Score |\n| 山田太郎 | 10 |\n'
 const aligned = '|= Name    |= Score |\n| 山田太郎 | 10     |\n'
 
-const specFixtures = JSON.parse(readFileSync(new URL('../tests/spec/resources/spec/table-alignment-fixtures.json', import.meta.url), 'utf8')) as
+// The 0.1 spec fixtures (carve 51c5631 `resources/spec/table-alignment-fixtures.json`); carve `next2` no longer carries them.
+const specFixtures = JSON.parse(readFileSync(new URL('../tests/fixtures/table-alignment-fixtures.json', import.meta.url), 'utf8')) as
   { name: string, canonical: string, aligned: string }[]
 
 // 0.1 spec fixtures whose canonical form the 0.2 writer changes; each still matches 0.2 `format` with `alignTables` below.

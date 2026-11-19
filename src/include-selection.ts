@@ -12,8 +12,7 @@
  * generates perfectly well, and a false diagnostic on a working document is
  * worse than a missing one.
  */
-import { parse, type BlockNode } from './engine.js'
-import { selectIncludeRegion } from './engine-legacy.js'
+import { includeRegion, parse, type BlockNode } from './engine.js'
 import { headingId, ownStartLine } from './tree.js'
 import type { Range } from 'vscode-languageserver-types'
 
@@ -59,7 +58,7 @@ export function sectionRange(source: string, id: string): Range | undefined {
  * a Carve include knows `%% #region`, a `@code` include also source comments.
  */
 export function regionLines(source: string, selected: string, code = false): { start: number; end: number } | null {
-  const result = selectIncludeRegion(source, selected, code ? 'code' : 'carve')
+  const result = includeRegion(source, selected, { code })
   return result.ok ? { start: result.start, end: result.end } : null
 }
 
@@ -69,7 +68,7 @@ export function regionLines(source: string, selected: string, code = false): { s
  * `@code` include also the source-comment forms. Empty when any marker is
  * malformed, unpaired or duplicated, since the engine then rejects every name.
  *
- * Follows the marker rules of `selectIncludeRegion`, which answers one name but
+ * Follows the marker rules of `includeRegion`, which answers one name but
  * does not list them.
  */
 export function regionNames(source: string, code: boolean): string[] {
