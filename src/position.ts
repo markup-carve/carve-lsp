@@ -188,8 +188,7 @@ function utf8LengthOf(source: string): number {
 }
 
 /**
- * A CODEPOINT offset, as the 0.1 include helpers in `engine-legacy.ts` report
- * it, to a string index.
+ * A CODEPOINT offset, as `IncludeWarning` reports it, to a string index.
  */
 export function codepointOffsetToIndex(source: string, offset: number): number {
   let index = 0

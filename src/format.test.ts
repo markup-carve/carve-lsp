@@ -145,11 +145,10 @@ test('keeps a missing final line ending missing when adding it changes the rende
   assert.equal(formatDocument('```\nx\n```'), '```\nx\n```\n')
 })
 
-test('formatting stays render-equivalent when a corpus document loses its final newline', async () => {
-  const { readdirSync, readFileSync } = await import('node:fs')
-  const dir = new URL('../tests/spec/tests/corpus/', import.meta.url)
-  for (const name of readdirSync(dir).filter((entry) => entry.endsWith('.crv'))) {
-    const source = readFileSync(new URL(name, dir), 'utf8').replace(/\r?\n$/, '')
+test('formatting stays render-equivalent when a spec example loses its final newline', async () => {
+  const { specDocuments } = await import('./spec-examples.js')
+  for (const { name, source: whole } of specDocuments()) {
+    const source = whole.replace(/\r?\n$/, '')
     assert.equal(render(formatDocument(source)), render(source), name)
   }
 })

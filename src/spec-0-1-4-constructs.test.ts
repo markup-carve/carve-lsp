@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
 import { render } from './engine.js'
 import { analyzeCarve } from './analyze.js'
 import { continuationPrefix, formatDocument, listContinuationEdits } from './format.js'
@@ -12,9 +10,9 @@ import { continuationPrefix, formatDocument, listContinuationEdits } from './for
  *
  * WHY BY CORPUS DOCUMENT. The server reads structure out of the engine, so most
  * of a new rule arrives with the engine bump and nothing here has to change -
- * which is exactly why a regression here would be silent. Reading the ruling
- * document off disk means these cases move when the spec pin moves, instead of
- * freezing a copy of the source that was right on the day it was typed.
+ * which is exactly why a regression here would be silent. The 0.1 corpus that
+ * held the ruling documents is gone from carve `next2`, so the documents are kept
+ * below as they stood at the last 0.1 pin.
  *
  * WHAT EACH CASE ASSERTS. That the server does not invent a diagnostic on markup
  * the engine accepts, that the formatter is byte-preserving and render-equivalent
@@ -23,13 +21,23 @@ import { continuationPrefix, formatDocument, listContinuationEdits } from './for
  * case says so rather than dressing up the engine's work as coverage.
  */
 
-const corpusDir = fileURLToPath(new URL('../tests/spec/tests/corpus/', import.meta.url))
+/**
+ * The 0.1 corpus documents these cases were cut from. carve `next2` dropped the
+ * 0.1 corpus (carve#6092), so their source is kept here as it stood at the last
+ * 0.1 pin (carve 51c5631).
+ */
+const CORPUS_0_1: Record<string, string> = {
+  '434-an-unresolved-image-gives-its-whole-caption-slot-back-at-any-depth': '![a][r]\n^ cap one\ncontinued\n',
+  '435-the-continuation-marker-s-column-gate-reaches-every-container': '[^a]: intro\n%% c\n more\n\nsee[^a]\n',
+  '437-a-first-block-marker-in-a-footnote-body-or-a-quote-attaches-only-at-its-marker-column': '[^a]: +\nflush\n\nsee[^a]\n',
+  '438-an-empty-description-body-is-written-with-the-empty-sentinel': ':: t\n: {empty}\n\nflush\n',
+  '439-a-colon-followed-by-only-whitespace-is-not-a-description': ':: t\n: \n\nflush\n',
+}
 
-/** The `.crv` a corpus document was cut from, read through the pinned spec. */
 function corpusDocument(name: string): string {
-  const path = `${corpusDir}${name}.crv`
-  assert.ok(existsSync(path), `corpus document ${name} is not in the pinned spec - has the ruling moved?`)
-  return readFileSync(path, 'utf8')
+  const source = CORPUS_0_1[name]
+  assert.ok(source !== undefined, `corpus document ${name} is not kept here`)
+  return source
 }
 
 /** Neither a diagnostic the engine did not raise, nor a byte the formatter moved. */

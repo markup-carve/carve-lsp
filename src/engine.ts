@@ -14,6 +14,7 @@ export {
   formatWithDiagnostics,
   lint,
   includeDependencies,
+  includeRegion,
   encodeTree,
   createWriterRegistry,
   stringOffsetOfByte,

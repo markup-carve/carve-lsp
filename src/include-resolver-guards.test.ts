@@ -159,14 +159,14 @@ test('every directive after a spent budget is refused without a read', () => {
 
 test('a budget consumed exactly to the limit admits that directive and refuses the next', () => {
   // The boundary: a budget of N bytes admits N bytes, so the charge that lands
-  // ON the limit is the last one that expands. The one after it overruns and
-  // latches, and everything past that degrades without a read.
+  // ON the limit is the last one that expands. 0.2 C2-N-062 (`size_spent`): once
+  // the texts have reached the budget, every later directive degrades without a read.
   const reads: string[] = []
   const result = resolveIncludes('{{ a }}\n\n{{ a }}\n\n{{ a }}', {
     resolver: virtualResolver({ a: 'xxxxx' }, reads),
     maxBytes: 5,
   })
-  assert.deepEqual(reads, ['a', 'a'])
+  assert.deepEqual(reads, ['a'])
   assert.deepEqual(
     result.warnings.map((warning) => warning.rule),
     ['include-budget', 'include-budget'],

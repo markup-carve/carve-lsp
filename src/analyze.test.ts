@@ -6,6 +6,8 @@ import { hoverAt } from './hover.js'
 import { migrationCodeActions, migrationFixes } from './migration-actions.js'
 import { semanticTokens } from './semantic.js'
 
+// 0.2 C2-N-013: a target the resolver does not find reports `include-not-found` (0.1 `include-unresolved`).
+
 test('returns heading document symbols', () => {
   const result = analyzeCarve('# One\n\n## Two\n')
   assert.equal(result.symbols.length, 1)
@@ -106,9 +108,10 @@ test('returns quick fixes for migration warnings', () => {
 
   const fixAll = actions.find((action) => action.title.startsWith('Fix all'))
   assert.ok(fixAll)
+  // 0.2 U-066: a bare strike needs braces, so the fix writes `{~strike~}`.
   assert.equal(
     fixAll.edit?.changes?.['file:///demo.crv']?.[0]?.newText,
-    '*bold* and ~strike~',
+    '*bold* and {~strike~}',
   )
 })
 
@@ -120,10 +123,11 @@ test('migration quick fixes use canonical single-char Carve delimiters', () => {
   // bare comma or caret is always literal text), so the only spelling is the
   // brace-forced `{,x,}` / `{^x^}`. Suggestions are therefore `{=x=}` and
   // `{,x,}`, never a bare or doubled delimiter form.
+  // Djot highlight `{=x=}` is also valid Carve highlight. 0.2 lint has no
+  // `djot-highlight-braces` identity rule, so nothing is offered for it, and in
+  // particular never a doubled `==x==` (which is literal).
+  assert.deepEqual(migrationFixes('{=mark=}'), [])
   const cases: Array<{ source: string; code: string; newText: string }> = [
-    // Djot highlight `{=x=}` is also valid Carve highlight: kept as the
-    // identity brace form, NOT reduced to a doubled `==x==` (which is literal).
-    { source: '{=mark=}', code: 'djot-highlight-braces', newText: '{=mark=}' },
     // Djot subscript `~x~` would render as Carve strikethrough; the gated
     // `djot-subscript-tilde` rule rewrites it to the brace-forced subscript.
     { source: 'H~2~O', code: 'djot-subscript-tilde', newText: '{,2,}' },
@@ -408,15 +412,15 @@ test('an enabled include publishes its warning as a diagnostic on the directive 
       sourcePath: '/doc.crv',
     },
   })
-  const diagnostic = result.diagnostics.find((d) => d.code === 'include-unresolved')
-  assert.ok(diagnostic, 'expected an include-unresolved diagnostic')
+  const diagnostic = result.diagnostics.find((d) => d.code === 'include-not-found')
+  assert.ok(diagnostic, 'expected an include-not-found diagnostic')
   assert.deepEqual(diagnostic.range, {
     start: { line: 2, character: 0 },
     end: { line: 2, character: 16 },
   })
   assert.equal(diagnostic.source, 'carve')
   assert.deepEqual(result.dependencies, [{ id: 'absent.crv', resolved: false }])
-  assert.equal(result.diagnostics.filter((d) => d.code === 'include-unresolved').length, 1)
+  assert.equal(result.diagnostics.filter((d) => d.code === 'include-not-found').length, 1)
 })
 
 test('lints a CSV code include at its directive', () => {
@@ -496,7 +500,7 @@ test('a nested warning names the child relative to the include root, not absolut
       includeRoot: '/ws',
     },
   })
-  const diagnostic = result.diagnostics.find((d) => d.code === 'include-unresolved')
+  const diagnostic = result.diagnostics.find((d) => d.code === 'include-not-found')
   assert.ok(diagnostic)
   assert.ok(diagnostic.message.includes('(in a.crv)'), diagnostic.message)
   assert.ok(!diagnostic.message.includes('/ws/a.crv'))

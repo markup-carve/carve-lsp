@@ -28,17 +28,15 @@
  */
 import type { IncludePaths } from './include-paths.js'
 import {
-  expandIncludes,
-  findDirectiveSites,
-  parseLegacy as parse,
-  type DirectiveSite,
-  type LegacyDocument as Document,
-  type IncludeContext as EngineContext,
-  type IncludeResolved as EngineResolved,
-  type IncludeUnresolved as EngineUnresolved,
-  type IncludeWarning as EngineWarning,
-} from './engine-legacy.js'
-import { utf8Length, type IncludeConfig, type IncludeResolver as V2IncludeResolver } from './engine.js'
+  includeDependencies,
+  parseWithDiagnostics,
+  utf8Length,
+  type Document,
+  type EngineDiagnostic,
+  type IncludeConfig,
+  type IncludeResolver as V2IncludeResolver,
+} from './engine.js'
+import { astOffsetToIndex } from './position.js'
 import { includeDenialMessage } from './include-denial.js'
 
 import type { IncludeDenial, IncludeResolver } from './include-path.js'
@@ -215,38 +213,106 @@ interface Seam {
   /** Watchable filesystem candidate, by the identity the engine reports. */
   watch: Map<string, string>
   /**
-   * Refusal class, keyed by the file the directive was written in and the path
-   * it wrote. That pair is what a warning carries - `file` plus the quoted
-   * path in its message - and it is stable where the resolved identity is not:
-   * a refusal has no canonical id to key on, and the same spelling below two
-   * directories is two different refusals.
+   * A refused request, keyed by the file the directive was written in and the
+   * path it wrote: what a diagnostic and a dependency both carry. The same
+   * spelling below two directories is two different refusals.
    */
-  denial: Map<string, IncludeDenial>
+  refused: Map<string, { id: string; denial?: IncludeDenial; detail?: string; callLimit?: boolean; budget?: boolean }>
   /** Child source as read, line endings normalized, by identity. */
   documents: Map<string, { source: string; version?: string; watch?: string }>
+  /** UTF-8 bytes charged: every text the resolver returned, the one that overran the budget included. */
+  bytes: number
+  /** The budget was overrun; every later directive is refused without a read. */
+  spent: boolean
 }
 
+const DEFAULT_MAX_RESOLVER_CALLS = 1000
+const DEFAULT_MAX_WARNINGS = 100
+const ENGINE_MAX_DEPTH = 16
+// What the engine refuses as non-text (C2-N-011): a NUL or a lone surrogate. It is charged nothing.
+const NON_TEXT = /\0|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+
 /**
- * Root span for a warning the engine anchored somewhere else.
- *
- * A warning from a CHILD carries that child's offsets, which name nothing in
- * the open document. `includedBy` is the engine's report of how that child was
- * reached, root first, so its first entry is the top-level directive and is
- * already the token rather than the node around it.
- *
- * A warning from the root document carries no reach, and already carries root
- * offsets - but over the enclosing inline node rather than the token: the
- * engine anchors on the `Text` a directive starts in, which for
- * `See {{ a.crv }} here.` is the whole sentence. Narrowing to the one
- * directive site inside that span restores the token. Where two sites share a
- * node the span stays as the engine drew it - coarse, never wrong.
+ * The server's contained resolver as the `includes` option of the 0.2 engine.
+ * A refusal maps to the 0.2 error cause (C2-N-013); the denial class stays with
+ * the server's own include pass. A config is spent by one engine call.
  */
-function rootSpan(warning: EngineWarning, sites: DirectiveSite[]): { start: number; end: number } {
-  const top = warning.includedBy?.[0]
-  if (top !== undefined) return { start: top.start, end: top.end }
-  const inside = sites.filter((site) => site.start >= warning.start && site.end <= warning.end)
-  const only = inside.length === 1 ? inside[0]! : undefined
-  return only ? { start: only.start, end: only.end } : { start: warning.start, end: warning.end }
+export function v2IncludeConfig(options: IncludeOptions, seam?: Seam): IncludeConfig | undefined {
+  const resolver = options.resolver
+  if (!resolver) return undefined
+  // The 0.2 option has no resolver-call bound, so the resolver enforces the server's own; a call past it reads as unreadable.
+  const maxCalls = options.maxResolverCalls ?? DEFAULT_MAX_RESOLVER_CALLS
+  let calls = 0
+  // The engine names only the including file; the server's resolver wants the
+  // chain, root first, to resolve a nested path against its actual parent.
+  const parents = new Map<string, string | undefined>()
+  const chain = (id: string | undefined): string[] => {
+    const stack: string[] = []
+    for (let at = id, guard = 0; at !== undefined && guard <= ENGINE_MAX_DEPTH; at = parents.get(at), guard += 1) stack.unshift(at)
+    return options.sourcePath === undefined ? stack : [options.sourcePath, ...stack]
+  }
+  const v2: V2IncludeResolver = (request) => {
+    const from = request.from === undefined || request.from === options.sourcePath ? undefined : request.from
+    const key = refusalKey(from, request.path)
+    const stack = chain(from)
+    // The engine charges only texts it accepts (C2-N-065), so a document of many
+    // over-budget directives would read every one; the server stops reading at
+    // the first overrun.
+    if (seam?.spent) {
+      seam.refused.set(key, { id: request.path, budget: true })
+      return { error: 'unreadable' }
+    }
+    calls += 1
+    if (calls > maxCalls) {
+      seam?.refused.set(key, { id: request.path, callLimit: true })
+      return { error: 'unreadable' }
+    }
+    let result
+    try {
+      result = resolver(request.path, {
+        stack,
+        depth: stack.length - (options.sourcePath === undefined ? 0 : 1),
+        ...(options.sourcePath !== undefined ? { sourcePath: options.sourcePath } : {}),
+      })
+    } catch (error) {
+      seam?.refused.set(key, { id: request.path, detail: error instanceof Error ? error.message : String(error) })
+      return { error: 'unreadable' }
+    }
+    if (!result.ok) {
+      // A target that did not resolve is named by where it WOULD appear, so two
+      // files below different directories that both name `missing.crv` stay
+      // distinct watchers (§19 I11).
+      const id = result.watch ?? result.id
+      seam?.refused.set(key, { id, denial: result.denial })
+      if (result.watch !== undefined) seam?.watch.set(id, result.watch)
+      const outside = result.denial === 'outside-root' || result.denial === 'absolute-denied' || result.denial === 'remote-not-allowed'
+      return { error: outside ? 'outside_root' : result.denial === 'not-a-file' ? 'unreadable' : 'not_found' }
+    }
+    // A LONE carriage return is a line break to a client and to nothing else
+    // here; substituting it is one code unit for one, so the byte budget still
+    // bounds the size of the file that was read.
+    const text = result.source.replace(/\r(?!\n)/g, '\n')
+    if (!parents.has(result.id) && result.id !== options.sourcePath) parents.set(result.id, from)
+    if (seam) {
+      if (!NON_TEXT.test(text)) seam.bytes += utf8Length(text)
+      if (options.maxBytes !== undefined && seam.bytes > options.maxBytes) seam.spent = true
+      if (result.watch !== undefined) seam.watch.set(result.id, result.watch)
+      if (!seam.documents.has(result.id)) {
+        seam.documents.set(result.id, {
+          source: text,
+          ...(result.version === undefined ? {} : { version: result.version }),
+          ...(result.watch === undefined ? {} : { watch: result.watch }),
+        })
+      }
+    }
+    return { text, id: result.id }
+  }
+  return {
+    resolver: v2,
+    ...(options.sourcePath !== undefined ? { file: options.sourcePath } : {}),
+    ...(options.maxDepth !== undefined ? { depth: Math.min(options.maxDepth, ENGINE_MAX_DEPTH) } : {}),
+    ...(options.maxBytes !== undefined ? { bytes: options.maxBytes } : {}),
+  }
 }
 
 /**
@@ -258,55 +324,6 @@ function rootSpan(warning: EngineWarning, sites: DirectiveSite[]): { start: numb
  * this layer - the capability does not exist until a host hands over a
  * resolver, so no caller can reach the filesystem by forgetting a flag.
  */
-/** This server's resolver in the engine's shape, for lint, which expands on its own. */
-export function engineIncludeResolver(options: IncludeOptions): ((written: string, ctx: EngineContext) => EngineResolved | EngineUnresolved) | undefined {
-  const resolver = options.resolver
-  if (!resolver) return undefined
-  return (written, ctx) => {
-    const result = resolver(written, {
-      stack: [...ctx.stack],
-      depth: ctx.depth,
-      ...(options.sourcePath !== undefined ? { sourcePath: options.sourcePath } : {}),
-    })
-    if (!result.ok) return { source: null, id: result.watch ?? result.id }
-    return { source: result.source.replace(/\r(?!\n)/g, '\n'), id: result.id }
-  }
-}
-
-/**
- * The server's contained resolver as the `includes` option of the 0.2 engine.
- * A refusal maps to the 0.2 error cause; the denial class stays with the
- * server's own include pass.
- */
-export function v2IncludeConfig(options: IncludeOptions): IncludeConfig | undefined {
-  const resolver = options.resolver
-  if (!resolver) return undefined
-  // The 0.2 option has no resolver-call or total-byte budget, so the resolver enforces the server's own;
-  // a call past either reads as unreadable. A config is spent by one engine call.
-  let calls = 0
-  let bytes = 0
-  const v2: V2IncludeResolver = (request) => {
-    calls += 1
-    if (options.maxResolverCalls !== undefined && calls > options.maxResolverCalls) return { error: 'unreadable' }
-    const result = resolver(request.path, {
-      stack: request.from === undefined ? [] : [request.from],
-      depth: 0,
-      ...(options.sourcePath !== undefined ? { sourcePath: options.sourcePath } : {}),
-    })
-    if (result.ok) {
-      bytes += utf8Length(result.source)
-      if (options.maxBytes !== undefined && bytes > options.maxBytes) return { error: 'unreadable' }
-      return { text: result.source.replace(/\r(?!\n)/g, '\n'), id: result.id }
-    }
-    return { error: result.denial === 'outside-root' || result.denial === 'absolute-denied' || result.denial === 'remote-not-allowed' ? 'outside_root' : 'not_found' }
-  }
-  return {
-    resolver: v2,
-    ...(options.sourcePath !== undefined ? { file: options.sourcePath } : {}),
-    ...(options.maxDepth !== undefined ? { depth: Math.min(options.maxDepth, 16) } : {}),
-  }
-}
-
 export function resolveIncludes(source: string, options: IncludeOptions = {}): IncludeResolution {
   const inert: IncludeResolution = {
     warnings: [],
@@ -315,151 +332,143 @@ export function resolveIncludes(source: string, options: IncludeOptions = {}): I
     bytes: 0,
     documents: [],
   }
-  const resolver = options.resolver
-  if (!resolver) return inert
+  if (!options.resolver) return inert
 
   const normalized = source.replace(/\r\n?/g, '\n')
-  const seam: Seam = {
-    watch: new Map(),
-    denial: new Map(),
-    documents: new Map(),
-  }
-
-  const resolve = (
-    written: string,
-    ctx: EngineContext,
-  ): EngineResolved | EngineUnresolved | null => {
-    const result = resolver(written, {
-      stack: [...ctx.stack],
-      depth: ctx.depth,
-      ...(options.sourcePath !== undefined ? { sourcePath: options.sourcePath } : {}),
-    })
-    if (!result.ok) {
-      // §19 I11: a target that did not resolve is named by where it WOULD
-      // appear, so two files below different directories that both name
-      // `missing.crv` stay distinct. The resolver reports the raw spelling as
-      // its id for a miss, and de-duplicating on that would collapse them into
-      // one watcher - which is exactly the case includes exist for, since
-      // creating either file has to invalidate.
-      const id = result.watch ?? result.id
-      seam.denial.set(refusalKey(ctx.stack[ctx.stack.length - 1], written), result.denial)
-      if (result.watch !== undefined) seam.watch.set(id, result.watch)
-      return { source: null, id }
-    }
-    if (result.watch !== undefined) seam.watch.set(result.id, result.watch)
-    // A LONE carriage return is a line break to a client, to the engine's line
-    // counting and to nothing else here: `positionAt` scans for `\n`, so a
-    // child written with classic-Mac endings would place every warning in it on
-    // line 1. Substituting it is one code unit for one, so the UTF-8 length the
-    // engine charges against the byte budget stays the length of the file that
-    // was read - which collapsing `\r\n` as well would not, and the budget
-    // bounds a size rather than a shape. `\r\n` needs nothing: both the engine
-    // and `positionAt` already count it as one break.
-    const childSource = result.source.replace(/\r(?!\n)/g, '\n')
-    if (!seam.documents.has(result.id)) {
-      seam.documents.set(result.id, {
-        source: childSource,
-        ...(result.version === undefined ? {} : { version: result.version }),
-        ...(result.watch === undefined ? {} : { watch: result.watch }),
-      })
-    }
-    return { source: childSource, id: result.id }
-  }
-
-  let doc
+  const seam: Seam = { watch: new Map(), refused: new Map(), documents: new Map(), bytes: 0, spent: false }
+  let parsed
   try {
-    doc = parse(normalized, { positions: true })
+    parsed = parseWithDiagnostics(normalized, { positions: true, includes: v2IncludeConfig(options, seam)! })
   } catch {
     // A document that does not parse has no directive sites to expand. The
     // parse error itself is already published by the caller.
     return inert
   }
-  const sites = findDirectiveSites(doc)
-  const result = expandIncludes(doc, normalized, {
-    resolve,
-    ...(options.sourcePath === undefined ? {} : { sourcePath: options.sourcePath }),
-    ...(options.maxDepth === undefined ? {} : { maxDepth: options.maxDepth }),
-    ...(options.maxBytes === undefined ? {} : { maxBytes: options.maxBytes }),
-    ...(options.maxResolverCalls === undefined ? {} : { maxResolverCalls: options.maxResolverCalls }),
-    ...(options.maxWarnings === undefined ? {} : { maxWarnings: options.maxWarnings }),
-  })
+  const tree = parsed.document
 
-  // A target is recorded at the RESOLVER seam, which is before the engine has
-  // decided whether what came back becomes part of the document: a target is
-  // read and only then refused for a cycle, a spent budget, a line range past
-  // the end, a section it does not declare, or content that is not text. Those
-  // targets must not reach the outline or a seam location as if their content
-  // were in the document.
-  //
-  // The expanded AST is the signal. §19 source mapping stamps every node of a
-  // merged child with the file it came from, so the set of stamps IS the set
-  // of children whose content survived - which no dependency flag can say,
-  // since a dependency is resolved as soon as it is read.
-  const merged = mergedFiles(result.doc)
+  // A target is recorded at the RESOLVER seam, before the engine decides
+  // whether it becomes part of the document (a cycle, a spent budget, a
+  // missing section refuse it after the read). C2-N-019 stamps every node of a
+  // merged child with its file, so the stamps are the children that survived.
+  const merged = mergedFiles(tree)
 
   const starts = lineStarts(normalized)
-  const warnings: IncludeWarning[] = []
-  for (const warning of result.warnings) {
-    const span = rootSpan(warning, sites)
-    // A reach is what the engine reports for a warning raised while expanding
-    // a child, and only for one, so it decides both halves: where the warning
-    // anchors in the open document, and whether it needs a `within` at all.
-    const inChild = warning.includedBy !== undefined
-    const mapped: IncludeWarning = {
-      ...locateIn(starts, span.start),
-      rule: warning.rule,
-      message: warning.message,
-      start: span.start,
-      end: span.end,
-    }
-    if (warning.file !== undefined) mapped.file = warning.file
-    if (inChild) {
-      mapped.within = {
-        line: warning.line,
-        column: warning.column,
-        start: warning.start,
-        end: warning.end,
-      }
-    }
-    if (warning.detail !== undefined) mapped.detail = warning.detail
-    // The engine reports every refusal as `include-unresolved`, because its
-    // resolver contract cannot spell anything else. The class the server's own
-    // resolver computed is joined back here, by the identity the engine used.
-    if (warning.rule === 'include-unresolved') {
-      const written = /"([^"]+)"/.exec(warning.message)?.[1]
-      const denial =
-        written === undefined ? undefined : seam.denial.get(refusalKey(warning.file, written))
-      if (denial !== undefined) {
-        mapped.denial = denial
-        // The engine spells every refusal "could not be resolved", because its
-        // resolver contract cannot tell a refusal from a miss. This server's
-        // resolver can, and telling an author whose include was DENIED to go
-        // looking for a typo is the failure `include-denial.ts` exists for.
-        mapped.message = includeDenialMessage(denial, written!) ?? warning.message
-      }
-    }
-    warnings.push(mapped)
+  const all: IncludeWarning[] = []
+  for (const entry of parsed.diagnostics) {
+    if (entry.channel !== 'parse' || !entry.code.startsWith('include-') || entry.range === undefined) continue
+    all.push(toWarning(entry, tree, normalized, starts, seam, options))
+  }
+  const { kept, suppressed } = capWarnings(all, options.maxWarnings ?? DEFAULT_MAX_WARNINGS)
+
+  const dependencies: IncludeDependency[] = []
+  const seen = new Set<string>()
+  for (const dependency of includeDependencies(tree)) {
+    const refusal = dependency.read ? undefined : seam.refused.get(refusalKey(dependency.from, dependency.path))
+    const id = dependency.file ?? refusal?.id ?? dependency.path
+    if (seen.has(id)) continue
+    seen.add(id)
+    const watch = seam.watch.get(id)
+    dependencies.push({ id, resolved: dependency.read, ...(watch === undefined ? {} : { watch }) })
   }
 
-  const dependencies = result.dependencies.map((dependency) => {
-    const watch = seam.watch.get(dependency.id)
-    return {
-      id: dependency.id,
-      resolved: dependency.resolved,
-      ...(watch === undefined ? {} : { watch }),
-    }
-  })
-
   return {
-    warnings,
-    suppressedWarnings: result.suppressedWarnings,
+    warnings: kept,
+    suppressedWarnings: suppressed,
     dependencies,
-    bytes: result.chargedBytes,
-    expanded: result.doc,
+    bytes: seam.bytes,
+    expanded: tree,
     documents: [...seam.documents]
       .filter(([id]) => merged.has(id))
       .map(([id, child]) => ({ id, ...child })),
   }
+}
+
+function toWarning(
+  entry: EngineDiagnostic,
+  tree: Document,
+  root: string,
+  starts: number[],
+  seam: Seam,
+  options: IncludeOptions,
+): IncludeWarning {
+  const range = entry.range!
+  // A finding in a CHILD carries that child's offsets, which name nothing in
+  // the open document. The outermost include node on its pointer is the
+  // top-level directive, whose range is in the root.
+  const top = entry.file === undefined ? undefined : outermostInclude(tree, entry.path)
+  const span = top?.pos ?? range
+  const start = codepoints(root, span.startOffset)
+  const end = codepoints(root, span.endOffset)
+  const written = /"([^"]+)"/.exec(entry.message)?.[1]
+  const refusal = written === undefined ? undefined : seam.refused.get(refusalKey(entry.file, written))
+  const warning: IncludeWarning = {
+    ...locateIn(starts, start),
+    rule: refusal?.callLimit ? 'include-call-limit' : refusal?.budget ? 'include-budget' : entry.code,
+    message: refusal?.callLimit && written !== undefined
+      ? `Include "${written}" was not expanded: the resolver call limit is spent.`
+      : refusal?.budget && written !== undefined
+        ? `Include "${written}" was not expanded: the include byte budget is spent.`
+        : entry.message,
+    start,
+    end,
+  }
+  const file = entry.file ?? options.sourcePath
+  if (file !== undefined) warning.file = file
+  if (entry.file !== undefined) {
+    const child = seam.documents.get(entry.file)?.source ?? ''
+    const childStart = codepoints(child, range.startOffset)
+    const childStarts = lineStarts(child)
+    warning.within = { ...locateIn(childStarts, childStart), start: childStart, end: codepoints(child, range.endOffset) }
+  }
+  if (refusal?.detail !== undefined) warning.detail = refusal.detail
+  if (refusal?.denial !== undefined) {
+    warning.denial = refusal.denial
+    // Telling an author whose include was DENIED to go looking for a typo is
+    // the failure `include-denial.ts` exists for.
+    warning.message = includeDenialMessage(refusal.denial, written!) ?? warning.message
+  }
+  return warning
+}
+
+/** At most `limit` warnings, keeping the first of each rule so no failure class is hidden. */
+function capWarnings(all: IncludeWarning[], limit: number): { kept: IncludeWarning[]; suppressed: number } {
+  if (all.length <= limit) return { kept: all, suppressed: 0 }
+  const firsts = new Set<IncludeWarning>()
+  const rules = new Set<string>()
+  for (const warning of all) {
+    if (rules.has(warning.rule)) continue
+    rules.add(warning.rule)
+    firsts.add(warning)
+  }
+  let room = Math.max(0, limit - firsts.size)
+  const kept = all.filter((warning) => {
+    if (firsts.has(warning)) return true
+    if (room === 0) return false
+    room -= 1
+    return true
+  })
+  return { kept, suppressed: all.length - kept.length }
+}
+
+/** The include node nearest the document on the RFC 6901 pointer `path`. */
+function outermostInclude(tree: Document, path: string | undefined): { pos?: { startOffset: number; endOffset: number } } | undefined {
+  if (!path) return undefined
+  let node: unknown = tree
+  for (const step of path.split('/').slice(1)) {
+    if (node === null || typeof node !== 'object') return undefined
+    node = (node as Record<string, unknown>)[step.replace(/~1/g, '/').replace(/~0/g, '~')]
+    if (node && typeof node === 'object' && (node as { type?: unknown }).type === 'include') {
+      return node as { pos?: { startOffset: number; endOffset: number } }
+    }
+  }
+  return undefined
+}
+
+/** A UTF-8 byte offset of `source` as a code point offset. */
+function codepoints(source: string, byte: number): number {
+  const index = astOffsetToIndex(source, byte)
+  if (index > source.length) return [...source].length + (index - source.length)
+  return [...source.slice(0, index)].length
 }
 
 /** Every file identity stamped on a node of the expanded document. */
@@ -478,7 +487,6 @@ function mergedFiles(doc: Document): Set<string> {
     }
   }
   visit(doc.children)
-  if (doc.footnoteDefs) visit(Object.values(doc.footnoteDefs))
   return files
 }
 

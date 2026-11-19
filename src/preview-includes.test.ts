@@ -12,6 +12,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { render } from './engine.js'
 import { LspStdioClient } from './lsp-stdio-client.js'
 
+// 0.2 C2-N-013: a target the resolver does not find reports `include-not-found` (0.1 `include-unresolved`).
+
 const serverPath = fileURLToPath(new URL('./server.js', import.meta.url))
 
 const DOCS = {
@@ -193,7 +195,7 @@ test('editing an open child republishes diagnostics for its parent', async () =>
     client.notify('textDocument/didOpen', { textDocument: { uri: parent, languageId: 'carve', version: 1, text: DOCS.expand } })
     client.notify('textDocument/didOpen', { textDocument: { uri: child, languageId: 'carve', version: 1, text: '{{ missing.crv }}\n' } })
     const before = await client.request('textDocument/diagnostic', { textDocument: { uri: parent } }) as { items: Array<{ code?: string }> }
-    assert.ok(before.items.some((item) => item.code === 'include-unresolved'))
+    assert.ok(before.items.some((item) => item.code === 'include-not-found'))
     const notificationsBefore = client.notifications.length
     client.notify('textDocument/didChange', {
       textDocument: { uri: child, version: 2 }, contentChanges: [{ text: 'Clean body.\n' }],
@@ -204,7 +206,7 @@ test('editing an open child republishes diagnostics for its parent', async () =>
       republished = client.notifications.slice(notificationsBefore).some((entry) => {
         if (entry.method !== 'textDocument/publishDiagnostics') return false
         const params = entry.params as { uri?: string; diagnostics?: Array<{ code?: string }> }
-        return params.uri === parent && !params.diagnostics?.some((item) => item.code === 'include-unresolved')
+        return params.uri === parent && !params.diagnostics?.some((item) => item.code === 'include-not-found')
       })
       if (!republished) await new Promise((resolve) => setTimeout(resolve, 25))
     }
