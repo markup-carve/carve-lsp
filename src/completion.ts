@@ -1,4 +1,4 @@
-import { footnoteEntries } from './tree.js'
+import { footnoteEntries, headingId } from './tree.js'
 import { SEMANTIC_SPAN_EXTENSION_NAMES } from './semantic-span-names.js'
 import {
   CompletionItemKind,
@@ -233,8 +233,8 @@ function headingIds(source: string): string[] {
   const ids: string[] = []
   try {
     walkNodes(parse(source), (node) => {
-      const id = (node.attrs as { id?: string } | undefined)?.id
-      if (node.type === 'heading' && id) ids.push(id)
+      const id = node.type === 'heading' ? headingId(node as { attrs?: { id?: string }; generatedId?: string }) : undefined
+      if (id) ids.push(id)
     })
   } catch {
     // Parsing may fail mid-edit; offer no ids rather than throwing.

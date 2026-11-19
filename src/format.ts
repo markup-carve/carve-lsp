@@ -144,7 +144,7 @@ function verbatimColumn(source: string, lines: string[], line: number): number |
   walkAst(source, (node) => {
     const { startLine, endLine, startColumn } = node.pos ?? {}
     // A `%%` line comment is inline: the text before it is ordinary.
-    if (!VERBATIM_TYPES.has(node.type ?? '') || node.block === false || startLine === undefined || endLine === undefined || startColumn === undefined) return
+    if (!VERBATIM_TYPES.has(node.type ?? '') || (node.type === 'comment' && node.form !== 'block') || startLine === undefined || endLine === undefined || startColumn === undefined) return
     if (line + 1 < startLine || line + 1 > endLine) return
     const at = astColumnToCharacter(lines[startLine - 1] ?? '', startColumn)
     column = column === null ? at : Math.min(column, at)
@@ -157,7 +157,7 @@ function inVerbatim(source: string, line: number): boolean {
   let found = false
   walkAst(source, (node) => {
     const { startLine, endLine } = node.pos ?? {}
-    if (VERBATIM_TYPES.has(node.type ?? '') && startLine !== undefined && endLine !== undefined && line + 1 >= startLine && line + 1 <= endLine) found = true
+    if (VERBATIM_TYPES.has(node.type ?? '') && !(node.type === 'comment' && node.form !== 'block') && startLine !== undefined && endLine !== undefined && line + 1 >= startLine && line + 1 <= endLine) found = true
   })
   return found
 }

@@ -1,12 +1,9 @@
-import { render } from './engine.js'
 import { CodeActionKind, type CodeAction, type Diagnostic, type TextEdit } from 'vscode-languageserver-types'
 
 /** Safe, local rewrites for diagnostics emitted by lintCarve. */
 export function lintCodeActions(uri: string, source: string, diagnostics: Diagnostic[]): CodeAction[] {
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   const actions: CodeAction[] = []
-  let rendered: string | undefined
-  const original = () => (rendered ??= render(lines.join('\n')))
   for (const diagnostic of diagnostics) {
     const code = String(diagnostic.code ?? '')
     const line = lines[diagnostic.range.start.line] ?? ''
@@ -19,18 +16,6 @@ export function lintCodeActions(uri: string, source: string, diagnostics: Diagno
         edit = { range: point(diagnostic.range.start.line, character), newText: ' ' }
         title = 'Insert the block-quote separator'
       }
-    } else if (code === 'continuation-marker-refused' || code === 'refused-continuation-marker') {
-      const lineNo = diagnostic.range.start.line
-      const at = diagnostic.range.start.character
-      if (line[at] === '+') {
-        const escaped = [...lines]
-        escaped[lineNo] = `${line.slice(0, at)}\\${line.slice(at)}`
-        // The refused marker already reads as text; the escape only states that.
-        if (original() === render(escaped.join('\n'))) {
-          edit = { range: point(lineNo, at), newText: '\\' }
-          title = 'Escape the + as literal text'
-        }
-      }
     } else if (code === 'list-marker-below-content-column') {
       actions.push(...markerColumnActions(uri, line, diagnostic, 'marker'))
     } else if (code === 'description-separator-below-content-column') {
@@ -41,7 +26,7 @@ export function lintCodeActions(uri: string, source: string, diagnostics: Diagno
     } else if (code === 'deprecated-cell-alignment') {
       const fix = bracedAlignmentEdit(line, diagnostic)
       if (fix) ({ edit, title } = fix)
-    } else if (code === 'table-marker-run-padding' || code === 'table-alignment-run-padding') {
+    } else if (code === 'table-marker-run-padding') {
       // The cell the diagnostic sits in: kind marker, alignment run and attribute block end at a space (§5 T11).
       const pipe = line.lastIndexOf('|', diagnostic.range.start.character)
       const run = pipe < 0 ? null : /^=?(?:\{[^}\n]*\}|[<>~^v]{1,2}(?:\{[^}\n]*\})?)?/.exec(line.slice(pipe + 1))
@@ -97,10 +82,13 @@ export function lintCodeActions(uri: string, source: string, diagnostics: Diagno
  * so a reworded message offers nothing rather than a guess.
  */
 function markerColumnActions(uri: string, line: string, diagnostic: Diagnostic, what: 'marker' | 'separator'): CodeAction[] {
-  const nest = /Indent it to column (\d+)/.exec(diagnostic.message)
-  const level = /start it at column (\d+)/.exec(diagnostic.message)
+  // 0.2 messages count columns from 1, inside the container: the line's own column is the anchor.
+  const nest = /(?:Indent it to|Start it at) column (\d+)/.exec(diagnostic.message)
+  const level = /or at column (\d+) to put it in the outer list/.exec(diagnostic.message)
+  const own = /starts at column (\d+)/.exec(diagnostic.message)
   const at = diagnostic.range.start.character
-  if (!nest || line.slice(0, at).includes('\t')) return []
+  if (!nest || !own || line.slice(0, at).includes('\t')) return []
+  const base = at - Number(own[1])
   const lineNo = diagnostic.range.start.line
   const actions: CodeAction[] = []
   const move = (title: string, column: number, isPreferred: boolean) => {
@@ -111,9 +99,9 @@ function markerColumnActions(uri: string, line: string, diagnostic: Diagnostic, 
     }
     if (edit) actions.push({ title, kind: CodeActionKind.QuickFix, diagnostics: [diagnostic], isPreferred, edit: { changes: { [uri]: [edit] } } })
   }
-  if (what === 'separator') move(`Indent the separator to column ${nest[1]} to continue the list`, Number(nest[1]), true)
-  else move(`Indent the marker to column ${nest[1]} to nest it`, Number(nest[1]), true)
-  if (level) move(`Outdent the marker to column ${level[1]} to end the nesting`, Number(level[1]), false)
+  if (what === 'separator') move(`Indent the separator to column ${nest[1]} to continue the list`, base + Number(nest[1]), true)
+  else move(`Indent the marker to column ${nest[1]} to nest it`, base + Number(nest[1]), true)
+  if (level) move(`Outdent the marker to column ${level[1]} to end the nesting`, base + Number(level[1]), false)
   return actions
 }
 
@@ -160,10 +148,11 @@ function bracedAlignmentEdit(line: string, diagnostic: Diagnostic): { edit: Text
   if (!match) return null
   const [, old, braced] = match as unknown as [string, string, string]
   const pipe = line.lastIndexOf('|', diagnostic.range.start.character)
-  if (pipe < 0 || line.slice(pipe + 1, pipe + 1 + old.length) !== old) return null
+  const start = pipe + 1 + (line[pipe + 1] === '=' ? 1 : 0)
+  if (pipe < 0 || line.slice(start, start + old.length) !== old) return null
   const lineNo = diagnostic.range.start.line
   return {
-    edit: { range: { start: { line: lineNo, character: pipe + 1 }, end: { line: lineNo, character: pipe + 1 + old.length } }, newText: braced },
+    edit: { range: { start: { line: lineNo, character: start }, end: { line: lineNo, character: start + old.length } }, newText: braced },
     title: `Write the alignment as ${braced}`,
   }
 }

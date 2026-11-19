@@ -37,11 +37,11 @@ const at = (code: string, line: number, start: number, end: number) => ({
   code, message: code, range: { start: { line, character: start }, end: { line, character: end } },
 })
 
-test('pads the alignment run the diagnostic points at', () => {
-  const source = '| x |<c |>d |\n'
-  const edits = [at('table-alignment-run-padding', 0, 5, 6), at('table-alignment-run-padding', 0, 9, 10)]
+test('pads the marker run the diagnostic points at', () => {
+  const source = '| x |{.a}<c |{.b}>d |\n'
+  const edits = [at('table-marker-run-padding', 0, 5, 10), at('table-marker-run-padding', 0, 13, 18)]
     .map((item) => lintCodeActions('file:///a.crv', source, [item])[0]?.edit?.changes?.['file:///a.crv']?.[0]?.range.start.character)
-  assert.deepEqual(edits, [6, 10])
+  assert.deepEqual(edits, [9, 17])
 })
 
 test('a created definition is separated from a trailing paragraph', () => {
@@ -65,19 +65,9 @@ function applyFirst(source: string, title?: string): string | undefined {
   return lines.join('\n')
 }
 
-// carve#5736: own-line refusals report `refused-continuation-marker`, first-block ones keep the old code.
-const isRefusal = (code: unknown) => code === 'continuation-marker-refused' || code === 'refused-continuation-marker'
-
-test('escapes a refused continuation marker without changing the output', () => {
-  for (const source of ['[^n]: a\n+\n']) {
-    const fixed = applyFirst(source, 'Escape the +')
-    assert.ok(fixed, source)
-    assert.equal(render(fixed), render(source))
-    assert.deepEqual(analyzeCarve(fixed).diagnostics.filter((d) => isRefusal(d.code)), [])
-  }
-  // A refused `+` that renders nothing (carve#4409) would gain a character, so no escape is offered.
-  for (const source of ['- a\n+\n- b\n', '- a\n+\n\n- b\n', '- +\n  a\n']) {
-    assert.ok(analyzeCarve(source).diagnostics.some((d) => isRefusal(d.code)), source)
+test('offers no escape for a removed + continuation marker, which is text in 0.2', () => {
+  for (const source of ['[^n]: a\n+\n', '- a\n+\n- b\n']) {
+    assert.ok(analyzeCarve(source).diagnostics.some((d) => d.code === 'deprecated-continuation-marker'), source)
     assert.equal(applyFirst(source, 'Escape the +'), undefined, source)
   }
 })
@@ -86,40 +76,39 @@ test('rewrites a deprecated alignment prefix in the braced spelling (carve#5091 
   for (const [source, expected] of [
     ['|=> Price |= Name |\n| 1 | a |\n', '|={>} Price |= Name |\n| 1 | a |\n'],
     ['|= Price |= Name |\n| 1 |> a |\n', '|= Price |= Name |\n| 1 |{>} a |\n'],
-    ['|=~{.x} Mid |\n', '|={~ .x} Mid |\n'],
     ['> |=<v Top |\n', '> |={<v} Top |\n'],
   ] as const) {
     const fixed = applyFirst(source, 'Write the alignment')
     assert.equal(fixed, expected, source)
-    assert.equal(render(fixed!), render(source), source)
+    // In 0.2 the old prefix is cell text, so the rewrite is what restores the alignment.
+    assert.match(render(fixed!), /text-align/, source)
     assert.deepEqual(analyzeCarve(fixed!).diagnostics.filter((d) => d.code === 'deprecated-cell-alignment'), [], source)
   }
 })
 
 test('terminates any table cell marker run the engine reports', () => {
   for (const [source, expected] of [
-    ['|=>x |= b |\n', '|=> x |= b |\n'],
-    ['|={>}x |= b |\n', '|={>} x |= b |\n'],
-    ['|=x |= b |\n', '|= x |= b |\n'],
-    ['| a |{.a}x |\n', '| a |{.a} x |\n'],
+    ['| a |{.a}>x |\n', '| a |{.a} >x |\n'],
+    ['| a |{.b}<x |\n', '| a |{.b} <x |\n'],
   ] as const) assert.equal(applyFirst(source, 'Terminate'), expected, source)
 })
 
 test('moves a list marker below the content column to either column the engine names', () => {
-  assert.equal(applyFirst('- a\n\n - b\n', 'Indent'), '- a\n\n  - b\n')
-  assert.equal(applyFirst('- a\n\n - b\n', 'Outdent'), '- a\n\n- b\n')
-  assert.equal(applyFirst('> - a\n>\n>  - b\n', 'Indent'), '> - a\n>\n>   - b\n')
-  assert.equal(applyFirst('> - a\n>\n>  - b\n', 'Outdent'), '> - a\n>\n> - b\n')
-  assert.equal(applyFirst('10. a\n\n  - b\n', 'Indent'), '10. a\n\n    - b\n')
-  for (const fixed of ['- a\n\n  - b\n', '- a\n\n- b\n', '> - a\n>\n>   - b\n', '> - a\n>\n> - b\n']) {
+  // 0.2 reports a marker between two open lists, so each case has a nested list above it.
+  assert.equal(applyFirst('- a\n  - b\n - c\n', 'Indent'), '- a\n  - b\n  - c\n')
+  assert.equal(applyFirst('- a\n  - b\n - c\n', 'Outdent'), '- a\n  - b\n- c\n')
+  assert.equal(applyFirst('> - a\n>   - b\n>  - c\n', 'Indent'), '> - a\n>   - b\n>   - c\n')
+  assert.equal(applyFirst('> - a\n>   - b\n>  - c\n', 'Outdent'), '> - a\n>   - b\n> - c\n')
+  for (const fixed of ['- a\n  - b\n  - c\n', '- a\n  - b\n- c\n', '> - a\n>   - b\n>   - c\n', '> - a\n>   - b\n> - c\n']) {
     assert.deepEqual(analyzeCarve(fixed).diagnostics.filter((d) => d.code === 'list-marker-below-content-column'), [], fixed)
   }
 })
 
 test('indents a description separator below its list to the column the engine names', () => {
-  assert.equal(applyFirst('- a\n  :: term\n : detail\n', 'Indent'), '- a\n  :: term\n  : detail\n')
-  assert.equal(applyFirst('- a\n  :: term\n: detail\n', 'Indent'), '- a\n  :: term\n  : detail\n')
-  assert.deepEqual(analyzeCarve('- a\n  :: term\n  : detail\n').diagnostics.filter((d) => d.code === 'description-separator-below-content-column'), [])
+  // A term under list text needs a blank line in 0.2 (U-009).
+  assert.equal(applyFirst('- a\n\n  :: term\n : detail\n', 'Indent'), '- a\n\n  :: term\n  : detail\n')
+  assert.equal(applyFirst('- a\n\n  :: term\n: detail\n', 'Indent'), '- a\n\n  :: term\n  : detail\n')
+  assert.deepEqual(analyzeCarve('- a\n\n  :: term\n  : detail\n').diagnostics.filter((d) => d.code === 'description-separator-below-content-column'), [])
 })
 
 test('replaces a near-miss consumed key with the key the engine suggests', () => {

@@ -37,7 +37,7 @@ import {
   type TextEdit,
 } from 'vscode-languageserver/node.js'
 import { TextDocument } from 'vscode-languageserver-textdocument'
-import { encodeTree, format, parse } from './engine.js'
+import { encodeTree, format, parse, parseTree } from './engine.js'
 import { analyzeCarve, type Analysis } from './analyze.js'
 import { previewHtml, previewMarkdown } from './preview.js'
 import { EXPORT_KIND, exportCodeActions, exportSupport, pdfCodeAction, resolveExportAction, type ExportFormat, type ExportSupport } from './export-actions.js'
@@ -401,7 +401,7 @@ connection.onRequest(ExecuteCommandRequest.type, async (params) => {
   const document = uri ? documents.get(uri) : undefined
   if (!document) return null
   if (params.command === 'carve.previewHtml') return previewHtml(document.getText(), previewIncludeOptions(document))
-  if (params.command === 'carve.showAst') return encodeTree(parse(document.getText()))
+  if (params.command === 'carve.showAst') return encodeTree(parseTree(document.getText()))
   return null
 })
 

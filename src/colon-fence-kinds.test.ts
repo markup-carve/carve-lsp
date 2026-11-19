@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
-import { readdirSync, readFileSync } from 'node:fs'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
 import { parse } from './engine.js'
+import { corpusDocuments } from './spec-corpus.js'
 import { colonFenceHighlights, colonFenceOpeners, colonFenceStructure } from './colon-fences.js'
 
 /**
@@ -20,7 +19,6 @@ import { colonFenceHighlights, colonFenceOpeners, colonFenceStructure } from './
  * and a seventh kind fails it on arrival instead of being skipped.
  */
 
-const corpusDir = fileURLToPath(new URL('../tests/spec/tests/corpus/', import.meta.url))
 
 /**
  * Types that can legitimately START on a `:::` run without being a fence: prose
@@ -56,14 +54,13 @@ function fenceLinesInAst(source: string): number[] {
 }
 
 test('every colon fence in the corpus is a container the server recognizes', () => {
-  const documents = readdirSync(corpusDir).filter((name) => name.endsWith('.crv')).sort()
+  const documents = corpusDocuments()
   assert.ok(documents.length > 0, 'the colon-fence gate found no corpus documents')
 
   const missed: string[] = []
   const kinds = new Set<string>()
   let checked = 0
-  for (const name of documents) {
-    const source = readFileSync(`${corpusDir}/${name}`, 'utf8')
+  for (const { name, source } of documents) {
     const expected = fenceLinesInAst(source)
     if (expected.length === 0) continue
     const sites = new Map(colonFenceOpeners(source).map((site) => [site.range.start.line, site]))

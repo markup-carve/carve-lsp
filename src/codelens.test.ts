@@ -19,8 +19,14 @@ test('emits no lenses without footnote definitions', () => {
   assert.deepEqual(codeLenses('just prose with [^ref] but no def line that matches? [^ref]'), [])
 })
 
-test('counts heading, citation, and link-reference usages', () => {
-  const source = '{#h}\n# H\n\nSee </#h> and [x][r] [@c].\n\n[r]: /u\n[@c]: Entry\n'
+test('counts heading and link-reference usages', () => {
+  const source = '{#h}\n# H\n\nSee </#h> and [x][r].\n\n[r]: /u\n'
   const titles = codeLenses(source).map((lens) => lens.command?.title)
-  assert.deepEqual(titles, ['1 reference', '1 reference', '1 reference'])
+  assert.deepEqual(titles, ['1 reference', '1 reference'])
+})
+
+// Citations are a Tier 2 extension in 0.2 (C2-I-101) and carve-js registers none yet.
+test('counts citation usages', { skip: 'no citation extension in the Carve 0.2 engine yet' }, () => {
+  const titles = codeLenses('See [@c].\n\n[@c]: Entry\n').map((lens) => lens.command?.title)
+  assert.deepEqual(titles, ['1 reference'])
 })

@@ -90,9 +90,10 @@ function astSemanticTokens(doc: Document, source: string, options: SemanticOptio
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   for (const node of doc.children) {
     if (node.type === 'footnote') for (const child of node.children) collectBlock(tokens, lines, child, keywords, spanNames)
+    else if (node.type === 'abbreviation_def') pushPosition(tokens, lines, node.pos, 'property')
     else collectBlock(tokens, lines, node as BlockNode, keywords, spanNames)
   }
-  const codeBlock = codeBlockLines(doc)
+  const codeBlock = codeBlockLines(doc, lines)
 
   // Emit frontmatter tokens. The AST stores the parsed YAML in doc.frontmatter
   // but has no position info for the --- delimiters, so we walk source lines.
@@ -127,7 +128,7 @@ function astSemanticTokens(doc: Document, source: string, options: SemanticOptio
 
 function collectBlock(tokens: Token[], lines: string[], node: BlockNode, keywords: Token[], spanNames: string[]): void {
   const names = node.type === 'table'
-    ? ('sourceFormat' in node && node.sourceFormat ? ['table'] : ['header-rows', 'footer-rows', 'header-cols', 'aligns', 'valigns', 'widths'])
+    ? (delimitedTable(node, lines) ? ['table'] : ['header-rows', 'footer-rows', 'header-cols', 'aligns', 'valigns', 'widths'])
     : node.type === 'list' || node.type === 'definition_list' ? ['loose'] : []
   if (names.length && node.pos?.startLine !== undefined) {
     for (let line = node.pos.startLine - 2; line >= 0; line--) {
@@ -203,7 +204,7 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode, keyword
       collectInline(tokens, lines, captionInlines(node.caption), keywords, spanNames)
       break
     case 'table':
-      if (node.pos && /^\s*:{3,}\s*table\b/.test(lines[node.pos.startLine - 1] ?? '')) {
+      if (delimitedTable(node, lines)) {
         pushFenceLines(tokens, lines, node.pos)
         collectInline(tokens, lines, captionInlines(node.caption), keywords, spanNames)
         break
@@ -234,6 +235,11 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode, keyword
   if ((node as { caption?: CaptionNode }).caption && (node.type === 'paragraph' || node.type === 'code_block' || node.type === 'block_quote')) {
     collectInline(tokens, lines, captionInlines((node as { caption?: CaptionNode }).caption), keywords, spanNames)
   }
+}
+
+// A 0.2 tree keeps no source format: a CSV or TSV table is the one whose first line is a fence.
+function delimitedTable(node: { pos?: Position }, lines: string[]): boolean {
+  return node.pos !== undefined && /^\s*(?:`{3,}|:{3,})\s*(?:csv|tsv|table)\b/.test(lines[node.pos.startLine - 1] ?? '')
 }
 
 function scanTableLine(tokens: Token[], line: number, text: string): void {
@@ -395,7 +401,7 @@ function pushFenceLines(tokens: Token[], lines: string[], pos: Position | undefi
 
 // Zero-based lines of fenced blocks, fences included, at any nesting depth.
 // pushFenceLines owns their tokens; the generic scanners must not add to them.
-function codeBlockLines(doc: Document): Set<number> {
+function codeBlockLines(doc: Document, lines: string[]): Set<number> {
   const body = new Set<number>()
   const visit = (value: unknown): void => {
     if (Array.isArray(value)) {
@@ -404,7 +410,7 @@ function codeBlockLines(doc: Document): Set<number> {
     }
     if (value === null || typeof value !== 'object') return
     const node = value as { type?: unknown; pos?: Position }
-    if ((node.type === 'code_block' || node.type === 'raw_block' || (node.type === 'table' && 'sourceFormat' in node && node.sourceFormat)) && node.pos?.startLine !== undefined && node.pos.endLine !== undefined) {
+    if ((node.type === 'code_block' || node.type === 'raw_block' || (node.type === 'table' && delimitedTable(node, lines))) && node.pos?.startLine !== undefined && node.pos.endLine !== undefined) {
       for (let line = node.pos.startLine - 1; line < node.pos.endLine; line++) body.add(line)
       return
     }

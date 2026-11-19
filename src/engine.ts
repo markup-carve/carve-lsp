@@ -5,9 +5,23 @@
  * Tree offsets and diagnostic ranges count UTF-8 bytes; `byteToIndex` turns
  * them into the string index an LSP position is computed from.
  */
+import { parse as parseTree, parseWithDiagnostics as parseTreeWithDiagnostics, type DocumentNode, type ParseOptions } from '@markup-carve/carve/v2'
+import { trimAttributeLines } from './block-positions.js'
+
+/** `parse` with each block position starting at the block's own line, not its attribute lines. */
+export function parse(source: string, options?: ParseOptions): DocumentNode {
+  return trimAttributeLines(parseTree(source, options), source)
+}
+
+export function parseWithDiagnostics(source: string, options?: ParseOptions): ReturnType<typeof parseTreeWithDiagnostics> {
+  const result = parseTreeWithDiagnostics(source, options)
+  trimAttributeLines(result.document, source)
+  return result
+}
+
+export { parseTree }
+
 export {
-  parse,
-  parseWithDiagnostics,
   render,
   renderWithDiagnostics,
   format,

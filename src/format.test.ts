@@ -68,9 +68,8 @@ test('inserts a matching closer after a code fence opener', () => {
   for (const [before, closer] of [
     ['```js', '\n```'],
     ['```', '\n```'],
-    ['~~~', '\n~~~'],
     ['````js', '\n````'],
-    ['~~~~ py "title" [lbl]', '\n~~~~'],
+    ['```` py "title" [lbl]', '\n````'],
     ['```js "t"', '\n```'],
     ['``` =html', '\n```'],
     ['::: note\n```js', '\n```'],
@@ -140,15 +139,15 @@ test('list continuation leaves a colon fence on a marker line to the fence conti
 })
 
 test('keeps a missing final line ending missing when adding it changes the render', () => {
-  assert.equal(formatDocument('```\nx'), '```\nx')
+  // In 0.2 an unclosed fence renders the same with or without the final line ending.
+  assert.equal(formatDocument('```\nx'), '```\nx\n')
   assert.equal(formatDocument('```\nx\n```'), '```\nx\n```\n')
 })
 
 test('formatting stays render-equivalent when a corpus document loses its final newline', async () => {
-  const { readdirSync, readFileSync } = await import('node:fs')
-  const dir = new URL('../tests/spec/tests/corpus/', import.meta.url)
-  for (const name of readdirSync(dir).filter((entry) => entry.endsWith('.crv'))) {
-    const source = readFileSync(new URL(name, dir), 'utf8').replace(/\r?\n$/, '')
+  const { corpusDocuments } = await import('./spec-corpus.js')
+  for (const { name, source: document } of corpusDocuments()) {
+    const source = document.replace(/\r?\n$/, '')
     assert.equal(render(formatDocument(source)), render(source), name)
   }
 })

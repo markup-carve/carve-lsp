@@ -96,6 +96,7 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
   try {
     lintDiagnostics = lint(source, {
       ...(options.lint?.platforms?.length ? { platforms: options.lint.platforms } : {}),
+      ...(options.lint?.severities ? { rules: lintRules(options.lint.severities) } : {}),
       ...(includeConfig ? { includes: includeConfig } : {}),
     })
   } catch (error) {
@@ -118,7 +119,7 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
       range,
       source: 'carve',
       code: entry.code,
-      message: childName ? `${entry.message} (in ${childName})` : entry.message,
+      message: childName ? `${entry.message} (in ${childName}${childLine(child?.source, entry.range?.startOffset)})` : entry.message,
     }
     if (child?.watch !== undefined && entry.range) diagnostic.relatedInformation = [{
       location: { uri: paths.toUri(child.watch), range: byteRange(child.source, entry.range.startOffset, entry.range.endOffset) },
@@ -180,8 +181,40 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
   }
 }
 
+// A severity set for a rule that is off by default (the Djot rules) turns it on.
+// A rule id the catalog does not know (a 0.1 id left in settings) is dropped, since lint refuses it.
+function lintRules(severities: Readonly<Record<string, string>>): Record<string, 'on' | 'off'> {
+  const rules: Record<string, 'on' | 'off'> = {}
+  for (const [rule, severity] of Object.entries(severities)) {
+    if (knownRule(rule)) rules[rule] = severity === 'off' ? 'off' : 'on'
+  }
+  return rules
+}
+
+const ruleKnown = new Map<string, boolean>()
+function knownRule(rule: string): boolean {
+  let known = ruleKnown.get(rule)
+  if (known === undefined) {
+    try {
+      lint('', { rules: { [rule]: 'off' } as never })
+      known = true
+    } catch (error) {
+      if (!(error instanceof CarveOptionError)) throw error
+      known = false
+    }
+    ruleKnown.set(rule, known)
+  }
+  return known
+}
+
 // `LintWarning.severity`; a finding without one is a warning.
 const ENGINE_SEVERITY: Readonly<Record<string, DiagnosticSeverity>> = { hint: DiagnosticSeverity.Hint, warning: DiagnosticSeverity.Warning, error: DiagnosticSeverity.Error }
+
+// `:line` after a child name, counted in the child's own source.
+function childLine(source: string | undefined, offset: number | undefined): string {
+  if (source === undefined || offset === undefined) return ''
+  return `:${source.slice(0, astOffsetToIndex(source, offset)).split(/\r\n?|\n/).length}`
+}
 
 function byteRange(source: string, start: number, end: number): Range {
   const from = astOffsetToIndex(source, start)
@@ -253,7 +286,7 @@ export function tolerantHeadingSymbols(source: string): DocumentSymbol[] {
 }
 
 function firstDuplicateDeclaration(source: string, rule: string, message: string, repeatedLine: number): Range | null {
-  const headingKey = rule === 'duplicate-heading-id' ? /heading id "([^"]+)"/.exec(message)?.[1] : undefined
+  const headingKey = rule === 'duplicate-id' ? /id "([^"]+)"/.exec(message)?.[1] : undefined
   const footnoteKey = rule === 'duplicate-footnote-definition' ? /\[\^([^\]]+)\]/.exec(message)?.[1] : undefined
   const key = headingKey ?? footnoteKey
   if (!key) return null

@@ -39,8 +39,9 @@ test('a title or a label leaves it a generic container', () => {
   // The control for every case below. These two differ from GROUP only in the
   // tail of one line, so a reading that fires on the kind word alone would
   // report them as groups and nothing else here would notice.
-  assert.deepEqual(topLevelTypes(TITLED), ['admonition'])
-  assert.deepEqual(topLevelTypes(LABELLED), ['admonition'])
+  // `figure` is no admonition kind in 0.2, so the titled or labelled fence is a div.
+  assert.deepEqual(topLevelTypes(TITLED), ['div'])
+  assert.deepEqual(topLevelTypes(LABELLED), ['div'])
 })
 
 test('a composite figure folds', () => {
@@ -76,10 +77,10 @@ test('hovering a composite figure describes the group, not an admonition', () =>
   assert.match(text, /Composite Figure/)
 })
 
-test('a titled figure opener still hovers as an admonition', () => {
+test('a titled figure opener still hovers as a div', () => {
   const hover = hoverAt(TITLED, { line: 0, character: 4 })
   const text = typeof hover?.contents === 'object' && 'value' in hover.contents ? hover.contents.value : ''
-  assert.match(text, /Admonition/)
+  assert.match(text, /Div/)
 })
 
 test('a colon fence offers figure, and not as a ninth admonition kind', () => {

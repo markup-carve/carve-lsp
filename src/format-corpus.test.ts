@@ -1,18 +1,14 @@
 import assert from 'node:assert/strict'
-import { readdirSync, readFileSync } from 'node:fs'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
 import { render } from './engine.js'
 import { formatDocument } from './format.js'
-
-const corpusDir = fileURLToPath(new URL('../tests/spec/tests/corpus/', import.meta.url))
+import { corpusDocuments } from './spec-corpus.js'
 
 test('formatting preserves rendered HTML for every corpus document', () => {
-  const documents = readdirSync(corpusDir).filter((name) => name.endsWith('.crv')).sort()
+  const documents = corpusDocuments()
   assert.ok(documents.length > 0, 'the formatter gate found no corpus documents')
 
-  for (const name of documents) {
-    const source = readFileSync(`${corpusDir}/${name}`, 'utf8')
+  for (const { name, source } of documents) {
     assert.equal(render(formatDocument(source)), render(source), name)
   }
 })
