@@ -248,15 +248,14 @@ test("a warning's own line and column stay in the parser's unit", () => {
   assert.equal(later?.line, DIRECTIVE_LINE + 1)
 })
 
-test('both parser readings map the same offset to the same string index', () => {
-  // `LINE` opens with one emoji: two code units, one codepoint. Only one branch
-  // is live with the installed engine, so the other is driven explicitly.
+// 0.2 C2-A-141: tree offsets count UTF-8 bytes, so the column unit no longer changes them.
+test('a byte offset maps to the same string index under either column reading', () => {
+  // `LINE` opens with one emoji: four UTF-8 bytes, two code units.
   try {
     setEngineColumnUnit('codepoint')
-    assert.equal(astOffsetToIndex(LINE, 1), 2)
-
+    assert.equal(astOffsetToIndex(LINE, 4), 2)
     setEngineColumnUnit('utf16')
-    assert.equal(astOffsetToIndex(LINE, 1), 1)
+    assert.equal(astOffsetToIndex(LINE, 4), 2)
   } finally {
     setEngineColumnUnit(undefined)
   }
@@ -270,8 +269,10 @@ test('the line table is counted in the same unit as the offsets looked up in it'
     setEngineColumnUnit('codepoint')
     assert.deepEqual(lineStarts(source), [0, [...LINE].length + 1])
 
+    // The include warnings still come from the 0.1 helpers (markup-carve/carve-js#5056), which count
+    // codepoints whatever the tree's column unit, so the table does too.
     setEngineColumnUnit('utf16')
-    assert.deepEqual(lineStarts(source), [0, LINE.length + 1])
+    assert.deepEqual(lineStarts(source), [0, [...LINE].length + 1])
   } finally {
     setEngineColumnUnit(undefined)
   }
@@ -280,5 +281,6 @@ test('the line table is counted in the same unit as the offsets looked up in it'
 test('an offset past the end keeps its distance instead of collapsing', () => {
   // An end offset is exclusive, so a construct ending the document reports one
   // past the last character. Clamping it would invert the range.
-  assert.equal(astOffsetToIndex(LINE, [...LINE].length + 1), LINE.length + 1)
+  // 0.2 C2-A-141: the offset counts UTF-8 bytes.
+  assert.equal(astOffsetToIndex(LINE, Buffer.byteLength(LINE) + 1), LINE.length + 1)
 })

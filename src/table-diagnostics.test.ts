@@ -6,9 +6,11 @@ import { tableDiagnostics } from './table-diagnostics.js'
 const codes = (source: string) => analyzeCarve(source).diagnostics.map((item) => item.code).filter((code) => String(code).startsWith('table-'))
 
 test('reports each #1344 table diagnostic once, from the engine or this pass', () => {
-  assert.deepEqual(codes('{aligns="left" widths="60,50"}\n|=> Head | Other |\n|>body | x |\n').sort(),
+  // 0.2 C2-B-171, C2-B-182: the 0.1.13 `|=>` and `|>` prefixes are cell text, so the shapes use the braced
+  // marks, and padding is a block glued to a mark (lint-rules.json `table-marker-run-padding`).
+  assert.deepEqual(codes('{aligns="left" widths="60,50"}\n|={>} Head |= Other |\n|{.c}>body | x |\n').sort(),
     ['table-column-arity', 'table-column-overlap', 'table-marker-run-padding', 'table-width-total'])
-  assert.deepEqual(codes('| x |<c |>d |\n'), ['table-marker-run-padding', 'table-marker-run-padding'])
+  assert.deepEqual(codes('| x |{.a}<c |{.b}>d |\n'), ['table-marker-run-padding', 'table-marker-run-padding'])
 })
 
 test('flags more positional entries than columns', () => {

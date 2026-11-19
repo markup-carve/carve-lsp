@@ -2,13 +2,13 @@ import { render, parse } from './engine.js'
 import { CodeAction, CodeActionKind, Range, TextEdit } from 'vscode-languageserver-types'
 import { walkNodes, type AstNode } from './ast-walk.js'
 import { alignCanonicalTable } from './table-alignment.js'
-import { tableRows } from './tree.js'
+import { delimitedTableFormat, ownStartLine, tableRows } from './tree.js'
 
 const rowsOf = (table: { children?: unknown }): Row[] => tableRows(table) as unknown as Row[]
 
 type Cell = { header?: boolean; children?: AstNode[]; [key: string]: unknown }
 type Row = { cells?: Cell[]; footer?: boolean }
-type Table = AstNode & { rows?: Row[]; sourceFormat?: string }
+type Table = AstNode & { rows?: Row[] }
 export interface ConversionEdit { startOffset: number; endOffset: number; textEdit: TextEdit; newText: string }
 
 function cells(source: string): string[][][] {
@@ -49,8 +49,11 @@ function selected(source: string, line: number, format: 'csv' | 'pipe'): { table
   walkNodes(parse(source, { positions: true }), node => {
     if (node.type !== 'table' || !node.pos?.startLine || !node.pos.endLine) return
     const table = node as Table
-    if (format === 'csv' ? !['csv', 'tsv'].includes(table.sourceFormat ?? '') : !!table.sourceFormat) return false
-    const start = node.pos.startLine - 1, last = node.pos.endLine - 1
+    const texts = lines.map((item) => item.text)
+    const delimited = delimitedTableFormat(node, texts)
+    if (format === 'csv' ? delimited === undefined : delimited !== undefined) return false
+    // A 0.2 span starts at the attribute line the table took (C2-A-148); `start` is the table's own first line.
+    const start = ownStartLine(node.pos, texts), last = node.pos.endLine - 1
     const previous = lines[start - 1]?.text ?? ''
     const hasAttrs = format === 'csv' ? TABLE_FLAG.test(previous) : /^\{[^{}]*\}$/.test(previous) && !TABLE_FLAG.test(previous)
     const first = hasAttrs ? start - 1 : start
@@ -125,7 +128,7 @@ export function pipeTableToCsv(source: string, line: number): ConversionEdit | n
     if (!info) return null
     const rows = rowsOf(info.table)
     if (rows.length === 0 || rows.some(row => !row.cells?.length || row.cells.some(cell =>
-      !!cell.attrs || !!cell.colspan || !!cell.rowspan || !!cell.colSpan || !!cell.rowSpan ||
+      !!cell.attrs || !!cell.align || !!cell.valign || !!cell.colspan || !!cell.rowspan || !!cell.colSpan || !!cell.rowSpan ||
       !isPlainCell(cell)))) return null
     const headers = rows.filter(row => row.cells!.every(cell => cell.header)).length
     if (rows.some((row, index) => row.cells!.some(cell => !!cell.header !== (index < headers)))) return null

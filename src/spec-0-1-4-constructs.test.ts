@@ -43,7 +43,8 @@ test('the {empty} description sentinel is accepted, not diagnosed (PART 11 §7d,
   const source = corpusDocument('438-an-empty-description-body-is-written-with-the-empty-sentinel')
   assert.match(source, /^: \{empty\}$/m, 'corpus 438 no longer spells the sentinel')
   serverIsQuietAndPreserving(source, '{empty} sentinel')
-  assert.match(render(source), /<dd><\/dd>/, 'the sentinel should reach an empty description body')
+  // 0.2 U-142: `{empty}` is no sentinel any more; it is printed as the description's text.
+  assert.match(render(source), /<dd>\{empty\}<\/dd>/, 'the 0.2 description body holds the literal text')
   // The sentinel is content, so the marker did open a description: Enter
   // starts the next definition, as after any other one. The prefix fallback
   // still lands at the body column (`: {empty}` then `  x` renders <dd>x</dd>).
@@ -53,7 +54,8 @@ test('the {empty} description sentinel is accepted, not diagnosed (PART 11 §7d,
 
 test('a colon followed by only whitespace opens no description (PART 2, carve#1830)', () => {
   const source = corpusDocument('439-a-colon-followed-by-only-whitespace-is-not-a-description')
-  serverIsQuietAndPreserving(source, 'colon with no content')
+  // 0.2 lint-rules.json `description-term-multi-line` (C2-B-069, new in 0.2) reports the term the bare colon joins.
+  serverIsQuietAndPreserving(source, 'colon with no content', [['description-term-multi-line', 2]])
   // The server's own rule about this construct: on-type continuation. A marker
   // that opened nothing has nothing to continue, and a tab separator is not a
   // marker at all.

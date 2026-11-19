@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { alignTableCodeAction, alignTablesInDocument, tableAlignmentEdits } from './table-alignment.js'
-import { render } from './engine.js'
+import { format, render } from './engine.js'
 
 const canonical = '|= Name |= Score |\n| 山田太郎 | 10 |\n'
 const aligned = '|= Name    |= Score |\n| 山田太郎 | 10     |\n'
@@ -10,8 +10,19 @@ const aligned = '|= Name    |= Score |\n| 山田太郎 | 10     |\n'
 const specFixtures = JSON.parse(readFileSync(new URL('../tests/spec/resources/spec/table-alignment-fixtures.json', import.meta.url), 'utf8')) as
   { name: string, canonical: string, aligned: string }[]
 
+// 0.1 spec fixtures whose canonical form the 0.2 writer changes; each still matches 0.2 `format` with `alignTables` below.
+const CHANGED_IN_0_2: Record<string, string> = {
+  'attributes spans and empty cells': '0.2 C2-B-171, C2-B-182: the writer escapes a cell that starts with `<`',
+  'authored separator': '0.2 U-055: a GFM separator row is an ordinary row and pads like one',
+  'separator colons': '0.2 U-055: a GFM separator row is an ordinary row and pads like one',
+  'rowspan continuation': '0.2 C2-B-173, C2-B-184: a continuation fragment under a span mark joins the spanning cell',
+}
+
 for (const fixture of specFixtures) {
-  test(`matches the spec fixture: ${fixture.name}`, () => {
+  test(`aligns the spec fixture like 0.2 format: ${fixture.name}`, () => {
+    assert.equal(alignTablesInDocument(fixture.canonical), format(fixture.canonical, { alignTables: true }))
+  })
+  test(`matches the spec fixture: ${fixture.name}`, { skip: CHANGED_IN_0_2[fixture.name] ?? false }, () => {
     assert.equal(alignTablesInDocument(fixture.canonical), fixture.aligned)
     assert.equal(alignTablesInDocument(fixture.aligned), fixture.aligned)
     assert.equal(render(fixture.aligned), render(fixture.canonical))
@@ -46,8 +57,9 @@ test('matches the Unicode width rule across continuation and separator rows', ()
   assert.equal(render(alignTablesInDocument(source)), render(source))
   assert.equal(alignTablesInDocument(expected), expected)
 
+  // 0.2 U-055: a GFM separator row is an ordinary row and pads like one.
   const separator = '| A | B |\n|---|---|\n| x | yy |\n'
-  assert.equal(alignTablesInDocument(separator), '| A | B  |\n|---|--- |\n| x | yy |\n')
+  assert.equal(alignTablesInDocument(separator), '| A   | B   |\n| --- | --- |\n| x   | yy  |\n')
 })
 
 test('keeps escaped pipes, row attributes, and captions in their own slots', () => {

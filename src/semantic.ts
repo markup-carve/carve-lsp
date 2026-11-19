@@ -798,7 +798,8 @@ function findTrailingComment(text: string): number {
       let end = i + 1
       while (text[end] === '`') end++
       const width = end - i
-      if (codeWidth === 0) codeWidth = width
+      // 0.2 C2-I-017: a run with no closing run of its length later on the line opens nothing.
+      if (codeWidth === 0) codeWidth = hasClosingRun(text, end, width) ? width : 0
       else if (codeWidth === width) codeWidth = 0
       i = end - 1
       continue
@@ -816,6 +817,17 @@ function findTrailingComment(text: string): number {
     }
   }
   return -1
+}
+
+function hasClosingRun(text: string, from: number, width: number): boolean {
+  for (let i = from; i < text.length; i++) {
+    if (text[i] !== '`') continue
+    let end = i + 1
+    while (text[end] === '`') end++
+    if (end - i === width) return true
+    i = end - 1
+  }
+  return false
 }
 
 function escapeRegExp(value: string): string {
