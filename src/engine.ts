@@ -33,6 +33,7 @@ export type {
   IncludeRequest,
   IncludeAnswer,
   IncludeConfig,
+  IncludeOptions,
   LintOptions,
   ParseOptions,
   RenderOptions,

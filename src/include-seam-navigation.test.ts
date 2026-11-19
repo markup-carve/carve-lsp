@@ -121,14 +121,10 @@ test('the section that WAS selected still resolves', () => {
   assert.equal(location?.range.start.line, 0)
 })
 
-test('a child id the parent had already claimed resolves under its renamed id', () => {
-  // The merge renames the child's `intro` to `intro-2` (§19 I5). An author
-  // reading the assembled document writes the renamed id, and it has to reach
-  // the heading that actually carries it.
+// 0.2 C2-N-058: an id in two files is a duplicate, not renamed, and a reference reaches the first one.
+test('a child id the parent had already claimed is not renamed', () => {
   const source = '{#intro}\n# Book\n\n{{ claimed.crv }}\n\nSee [](#intro-2).\n'
-  const location = jump(source, 'intro-2', includes)
-  assert.equal(location?.uri, pathToFileURL('/book/claimed.crv').toString())
-  assert.equal(location?.range.start.line, 1)
+  assert.equal(jump(source, 'intro-2', includes), null)
 })
 
 test('an id that merely LOOKS like a path produces no jump', () => {

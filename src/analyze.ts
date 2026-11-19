@@ -114,7 +114,7 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
   }
   // Include findings are published from the include pass below, anchored on the root.
   const included = includeConfig && lintDiagnostics.some((entry) => entry.file !== undefined)
-    ? safeParse(source, includeConfig)
+    ? safeParse(source, v2IncludeConfig(options.includes ?? {})!)
     : undefined
   for (const entry of lintDiagnostics) {
     if (entry.code.startsWith('include-')) continue

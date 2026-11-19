@@ -91,6 +91,7 @@ test('a directive inside verbatim content is not a directive (control)', () => {
 
 test('a CRLF document resolves the same offsets as LF', () => {
   const { root, doc, child } = workspace()
-  const at = includeDefinitionAt('a\r\nb\r\n{{ chapter-1.crv }}\r\n', { line: 2, character: 5 }, optionsFor(root, doc))
+  // 0.2 U-011: a directive directly under text is paragraph text, so a blank line stands before it.
+  const at = includeDefinitionAt('a\r\n\r\n{{ chapter-1.crv }}\r\n', { line: 2, character: 5 }, optionsFor(root, doc))
   assert.equal(at?.uri, pathToFileURL(child).toString())
 })

@@ -1,18 +1,18 @@
 /**
- * 0.1 helpers that Carve 0.2 has no public call for yet. Only source-level
- * helpers live here, never a tree: include directive sites and expansion
- * warnings, and the Djot migration hints. Each export is a gap tracked on the
- * engine; nothing new may be added.
+ * 0.1 helpers that Carve 0.2 has no public call for yet, from the same pinned
+ * package. Each export names the engine issue that replaces it; nothing new
+ * may be added.
  */
+// Include expansion with its warnings tied to the including directive: markup-carve/carve-js#5056.
 export {
-  applyMigrationFixes,
-  djotMigrationWarnings,
   expandIncludes,
   findDirectiveSites,
-  selectIncludeRegion,
   parse as parseLegacy,
-  resolve as resolveLegacy,
 } from '@markup-carve/carve'
+// The lines an include region selects: markup-carve/carve-js#5059.
+export { selectIncludeRegion } from '@markup-carve/carve'
+// Djot migration hints and their fixes; the 0.1 to 0.2 upgrade as a call: markup-carve/carve-js#5054.
+export { applyMigrationFixes, djotMigrationWarnings } from '@markup-carve/carve'
 export type {
   DirectiveSite,
   Document as LegacyDocument,

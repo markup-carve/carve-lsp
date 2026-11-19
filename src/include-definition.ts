@@ -1,10 +1,11 @@
 import { portableIncludePaths } from './include-paths.js'
 import { type Location, type Position, type Range } from 'vscode-languageserver-types'
-import { findDirectiveSites, parseLegacy as parse } from './engine-legacy.js'
-import { type Directive } from './include-directive.js'
-import { codepointOffsetToIndex } from './position.js'
+import { parse } from './engine.js'
+import { astOffsetToIndex } from './position.js'
 import { lineCount, regionLines, sectionRange } from './include-selection.js'
-import type { IncludeOptions } from './includes.js'
+import type { IncludeOptions as ServerIncludeOptions } from './includes.js'
+import type { IncludeOptions } from './engine.js'
+import { walkNodes } from './ast-walk.js'
 
 const FILE_START: Range = {
   start: { line: 0, character: 0 },
@@ -14,7 +15,7 @@ const FILE_START: Range = {
 export function includeDefinitionAt(
   source: string,
   position: Position,
-  options: IncludeOptions | undefined,
+  options: ServerIncludeOptions | undefined,
 ): Location | null {
   if (!options?.resolver) return null
   const normalized = source.replace(/\r\n?/g, '\n')
@@ -44,7 +45,7 @@ export function includeDefinitionAt(
  * the jump: the file itself resolved, and `include-section` already reports
  * the bad selection as a diagnostic.
  */
-function selectionRange(directive: Omit<Directive, 'start' | 'end'>, source: string): Range {
+function selectionRange(directive: Selection, source: string): Range {
   if (directive.section !== undefined) {
     return sectionRange(source, directive.section) ?? FILE_START
   }
@@ -67,16 +68,44 @@ function lineStart(oneBased: number): Range {
   return { start: { line, character: 0 }, end: { line, character: 0 } }
 }
 
-/** The directive the engine recognizes at `offset`; one in code, a comment or other verbatim text is not one. */
-function directiveAt(source: string, offset: number): Omit<Directive, 'start' | 'end'> | null {
+/** What a jump needs from a directive: the file and the place it selects. */
+interface Selection {
+  path: string
+  section?: string
+  lines?: { start: number; end: number }
+  region?: string
+  code?: boolean
+}
+
+/**
+ * The directive the engine recognizes at `offset`; one in code, a comment or
+ * other verbatim text is not one. The 0.2 tree keeps every directive as an
+ * `include` node with its path, section and options (C2-A-181).
+ */
+function directiveAt(source: string, offset: number): Selection | null {
+  let found: Selection | null = null
   try {
-    for (const site of findDirectiveSites(parse(source, { positions: true }))) {
-      if (offset >= codepointOffsetToIndex(source, site.start) && offset < codepointOffsetToIndex(source, site.end)) return site.directive
-    }
+    walkNodes(parse(source), (node) => {
+      if (found) return false
+      if (node.type !== 'include' || !node.pos) return
+      const start = astOffsetToIndex(source, node.pos.startOffset ?? 0)
+      const end = astOffsetToIndex(source, node.pos.endOffset ?? 0)
+      if (offset < start || offset >= end) return false
+      const include = node as unknown as { path: string; section?: string; options?: IncludeOptions }
+      const lines = /^(\d+)(?:-(\d+))?$/.exec(include.options?.lines ?? '')
+      found = {
+        path: include.path,
+        ...(include.section === undefined ? {} : { section: include.section }),
+        ...(lines ? { lines: { start: Number(lines[1]), end: Number(lines[2] ?? lines[1]) } } : {}),
+        ...(include.options?.region === undefined ? {} : { region: include.options.region }),
+        ...(include.options?.code === undefined ? {} : { code: true }),
+      }
+      return false
+    })
   } catch {
     // A document that does not parse has no directives to follow.
   }
-  return null
+  return found
 }
 
 function offsetAt(source: string, position: Position): number {

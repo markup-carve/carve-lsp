@@ -38,7 +38,7 @@ import {
   type IncludeUnresolved as EngineUnresolved,
   type IncludeWarning as EngineWarning,
 } from './engine-legacy.js'
-import type { IncludeConfig, IncludeResolver as V2IncludeResolver } from './engine.js'
+import { utf8Length, type IncludeConfig, type IncludeResolver as V2IncludeResolver } from './engine.js'
 import { includeDenialMessage } from './include-denial.js'
 
 import type { IncludeDenial, IncludeResolver } from './include-path.js'
@@ -281,13 +281,23 @@ export function engineIncludeResolver(options: IncludeOptions): ((written: strin
 export function v2IncludeConfig(options: IncludeOptions): IncludeConfig | undefined {
   const resolver = options.resolver
   if (!resolver) return undefined
+  // The 0.2 option has no resolver-call or total-byte budget, so the resolver enforces the server's own;
+  // a call past either reads as unreadable. A config is spent by one engine call.
+  let calls = 0
+  let bytes = 0
   const v2: V2IncludeResolver = (request) => {
+    calls += 1
+    if (options.maxResolverCalls !== undefined && calls > options.maxResolverCalls) return { error: 'unreadable' }
     const result = resolver(request.path, {
       stack: request.from === undefined ? [] : [request.from],
       depth: 0,
       ...(options.sourcePath !== undefined ? { sourcePath: options.sourcePath } : {}),
     })
-    if (result.ok) return { text: result.source.replace(/\r(?!\n)/g, '\n'), id: result.id }
+    if (result.ok) {
+      bytes += utf8Length(result.source)
+      if (options.maxBytes !== undefined && bytes > options.maxBytes) return { error: 'unreadable' }
+      return { text: result.source.replace(/\r(?!\n)/g, '\n'), id: result.id }
+    }
     return { error: result.denial === 'outside-root' || result.denial === 'absolute-denied' || result.denial === 'remote-not-allowed' ? 'outside_root' : 'not_found' }
   }
   return {
