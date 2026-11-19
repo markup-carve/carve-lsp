@@ -14,7 +14,7 @@
  */
 import { parse, type BlockNode } from './engine.js'
 import { selectIncludeRegion } from './engine-legacy.js'
-import { headingId } from './tree.js'
+import { headingId, ownStartLine } from './tree.js'
 import type { Range } from 'vscode-languageserver-types'
 
 export interface Section {
@@ -37,7 +37,7 @@ export function sections(source: string): Section[] {
   walk(document.children as BlockNode[], (node) => {
     const id = node.type === 'heading' ? headingId(node) : undefined
     if (!id || !node.pos) return
-    const line = node.pos.startLine - 1
+    const line = ownStartLine(node.pos, lines)
     const text = lines[line] ?? ''
     const character = Math.min(text.length, HEADING_MARKER_RE.exec(text)?.[0].length ?? 0)
     found.push({

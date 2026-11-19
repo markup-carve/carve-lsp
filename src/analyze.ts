@@ -103,14 +103,6 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
     lintDiagnostics = lint(source, rules ? { ...lintOptions, rules: rules as LintOptions['rules'] } : lintOptions)
   } catch (error) {
     if (!(error instanceof CarveOptionError)) throw error
-    // A severity naming no 0.2 rule must not cost the other findings.
-    if (rules) {
-      try {
-        lintDiagnostics = lint(source, lintOptions)
-      } catch (retry) {
-        if (!(retry instanceof CarveOptionError)) throw retry
-      }
-    }
   }
   // Include findings are published from the include pass below, anchored on the root.
   const included = includeConfig && lintDiagnostics.some((entry) => entry.file !== undefined)
@@ -561,8 +553,27 @@ function rangeAt(source: string, index: number, length: number): Range {
 function lintRules(severities: NonNullable<AnalyzeOptions['lint']>['severities']): Record<string, 'on' | 'off'> | undefined {
   if (!severities) return undefined
   const entries = Object.entries(severities)
-  if (entries.length === 0) return undefined
-  return Object.fromEntries(entries.map(([id, severity]) => [id, severity === 'off' ? 'off' : 'on']))
+  // A severity for a code that is no 0.2 rule (an include or table finding of the server) is not passed on.
+  const known = entries.filter(([id]) => isLintRule(id))
+  if (known.length === 0) return undefined
+  return Object.fromEntries(known.map(([id, severity]) => [id, severity === 'off' ? 'off' : 'on']))
+}
+
+const lintRuleIds = new Map<string, boolean>()
+
+function isLintRule(id: string): boolean {
+  let known = lintRuleIds.get(id)
+  if (known === undefined) {
+    try {
+      lint('', { rules: { [id]: 'on' } as LintOptions['rules'] })
+      known = true
+    } catch (error) {
+      if (!(error instanceof CarveOptionError)) throw error
+      known = false
+    }
+    lintRuleIds.set(id, known)
+  }
+  return known
 }
 
 /** `:line` of a byte offset in an included file, 1-based, when the file was read. */

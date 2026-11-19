@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { analyzeCarve } from './analyze.js'
 import { previewMarkdown, WriterNotAvailableError } from './preview.js'
+import { sections } from './include-selection.js'
 
 // Features the 0.2 engine cannot serve yet. Each skip names the engine issue that brings it back.
 
@@ -17,4 +18,15 @@ test('Markdown export writes Markdown through the writer registry', { skip: 'car
 test('the semantic-span lint extension covers samp, var, cite and dfn', { skip: 'a v2 lint extension cannot add semantic span keys (markup-carve/carve-js#5060)' }, () => {
   const codes = analyzeCarve('{samp}\nOutput text.\n', { lint: { extensions: ['semantic-span'] } }).diagnostics.map((d) => d.code)
   assert.ok(codes.includes('semantic-attribute-outside-span'))
+})
+
+// Ported calls: the 0.2 shapes the server reads.
+
+test('a severity for an unknown rule keeps the valid opt-in rules beside it', () => {
+  const codes = analyzeCarve('+ item\n', { lint: { severities: { 'djot-plus-bullet': 'warning', bogus: 'off' } } }).diagnostics.map((d) => d.code)
+  assert.deepEqual(codes, ['djot-plus-bullet'])
+})
+
+test('a section heading with an attribute line is found on its own line (C2-A-148)', () => {
+  assert.deepEqual(sections('Lead.\n\n{#x}\n# Hello\n').map((section) => [section.id, section.range.start.line]), [['x', 3]])
 })
