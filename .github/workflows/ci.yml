@@ -39,16 +39,28 @@ jobs:
         run: git config --global url."https://github.com/".insteadOf ssh://git@github.com/
       # npm cannot prepare carve-js next2 from git since 125128f4: its build reads
       # scripts/, which .gitattributes export-ignores (markup-carve/carve-js#5085).
-      # Install without lifecycle scripts, then build the pinned commit from a clone.
-      # Drop this step and go back to a plain `npm ci` once #5085 is fixed.
-      - run: npm ci --ignore-scripts
-      - name: Build the pinned carve-js commit
+      # Install everything else, build the pinned commit from a clone and install
+      # its package. Go back to a plain `npm ci` once #5085 is fixed.
+      - name: Install with the pinned carve-js built from source
         run: |
           SHA="$(node -p "require('./package.json').dependencies['@markup-carve/carve'].split('#')[1]")"
+          cp package.json package-lock.json "$RUNNER_TEMP/"
+          node -e "
+            const fs = require('fs')
+            const pkg = JSON.parse(fs.readFileSync('package.json'))
+            delete pkg.dependencies['@markup-carve/carve']
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n')
+            const lock = JSON.parse(fs.readFileSync('package-lock.json'))
+            delete lock.packages[''].dependencies['@markup-carve/carve']
+            delete lock.packages['node_modules/@markup-carve/carve']
+            fs.writeFileSync('package-lock.json', JSON.stringify(lock, null, 2) + '\n')
+          "
+          npm ci --ignore-scripts
           git clone --quiet --filter=blob:none https://github.com/markup-carve/carve-js.git "$RUNNER_TEMP/carve-js"
           git -C "$RUNNER_TEMP/carve-js" checkout --quiet "$SHA"
-          (cd "$RUNNER_TEMP/carve-js" && npm ci --no-audit --no-fund && npm run build)
-          cp -r "$RUNNER_TEMP/carve-js/dist" node_modules/@markup-carve/carve/
+          (cd "$RUNNER_TEMP/carve-js" && npm ci --no-audit --no-fund && npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP")
+          npm install --no-save --ignore-scripts --no-audit --no-fund "$RUNNER_TEMP"/markup-carve-carve-*.tgz
+          cp "$RUNNER_TEMP/package.json" "$RUNNER_TEMP/package-lock.json" .
       - run: npm run build
       - run: npm test
 
