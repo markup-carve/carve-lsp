@@ -8,14 +8,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Breaking
 
-- The server runs on the Carve 0.2 engine (`@markup-carve/carve/v2`, carve-js `next2`): diagnostics use the 0.2 lint ids, positions and node shapes, and documents are read as 0.2 reads them (#650).
-- *Export as Markdown* fails with "writer not available" until carve-js registers a `markdown` writer (markup-carve/carve-js#5057) (#650).
+- The server runs on the Carve 0.2 engine (`@markup-carve/carve`, carve-js `next2`): diagnostics use the 0.2 lint ids, positions and node shapes, and documents are read as 0.2 reads them (#650).
 - The "Escape the `+`" quick fix is gone with the 0.2 removal of the continuation marker (#650).
 
 ### Changed
 
 - A `severities` entry also turns an opt-in 0.2 lint rule on, or off with `"off"` (#650).
-- The `semantic-span` extension no longer reaches the lint rules (markup-carve/carve-js#5060) (#650).
+- The engine pin follows the carve-js `next2` rename: the 0.2 API is the package root, and the 0.1 include and Djot migration helpers come from the published 0.1.17 package under the `carve-legacy` alias until carve-js exposes them (markup-carve/carve-js#5054, #5056, #5059).
+- *Export as Markdown* writes through the engine's `markdown` export writer again (markup-carve/carve-js#5057).
+- The `semantic-span` lint extension reaches the lint rules again through the engine's `semanticSpan` extension (markup-carve/carve-js#5060).
 
 ## [0.1.16] - 2026-11-12
 

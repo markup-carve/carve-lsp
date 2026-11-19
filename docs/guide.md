@@ -7,7 +7,7 @@ Provides editor intelligence for `.crv` files via the
 ## Carve 0.2
 
 This branch serves Carve 0.2. Every engine call goes through the 0.2 API
-(`@markup-carve/carve/v2`), pinned to a carve-js `next2` commit. What an editor
+(`@markup-carve/carve`), pinned to a carve-js `next2` commit. What an editor
 user notices:
 
 - Diagnostics use the 0.2 lint catalog. Renamed rules keep their meaning under
@@ -22,16 +22,17 @@ user notices:
   separator row is an ordinary table row, and an id in two included files is a
   duplicate rather than renamed. `spec/0.2/UPGRADING.md` in the Carve
   repository lists every change.
-- *Export as Markdown* needs a `markdown` writer in the engine's writer
-  registry. Until carve-js registers one, the action fails with "The markdown
-  writer is not available yet in Carve 0.2".
+- *Export as Markdown* writes through the `markdown` writer that the engine's
+  `@markup-carve/carve/export` entry registers.
 - `carve.showAst` returns the 0.2 tree. Its positions count UTF-8 bytes in
   `startOffset` and `endOffset` and code points in columns.
-- The `semantic-span` extension still colors its span names, but the 0.2 lint
-  API cannot register the extra keys yet (markup-carve/carve-js#5060).
+- The `semantic-span` extension colors its span names and reaches lint through
+  the engine's `semanticSpan` extension, so `samp`, `var`, `cite` and `dfn`
+  outside a span report `semantic-attribute-outside-span`.
 
 Include expansion, region selection and the Djot migration fixes still use 0.1
-helpers of the same pinned package until carve-js exposes them
+helpers from the published 0.1.17 package, installed under the `carve-legacy`
+alias, until carve-js exposes them
 (markup-carve/carve-js#5056, #5059 and #5054).
 
 ## Install
