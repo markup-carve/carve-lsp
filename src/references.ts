@@ -1,6 +1,6 @@
 import { type Location, type Position, type ReferenceContext } from 'vscode-languageserver-types'
 import { type Document, type InlineNode } from './engine.js'
-import { headingId } from './tree.js'
+import { headingId, ownStartLine } from './tree.js'
 import { smartPunctuationText } from './inline-text.js'
 import { captionTargetById, captionTargets } from './captions.js'
 import { walkNodes } from './ast-walk.js'
@@ -75,7 +75,7 @@ function resolveHeadingGroup(
 ): Location[] | null {
   // Cursor anywhere on a heading's line
   const heading = model.sites.find((site) =>
-    site.kind === 'heading' && site.declaration && site.node?.pos?.startLine === position.line + 1)
+    site.kind === 'heading' && site.declaration && site.node?.pos !== undefined && ownStartLine(site.node.pos, model.lines) === position.line)
   if (heading) {
     const text = implicitKey(headingPlainText((heading.node!.children ?? []) as InlineNode[]))
     return collectRefs(uri, model, heading.key, { line: position.line, kind: 'heading', text }, context)
@@ -134,7 +134,7 @@ function captionIdDeclaredAt(model: ReferenceModel, lineIndex: number): string |
   if (!model.doc) return null
   for (const target of captionTargets(model.doc)) {
     if (!target.pos) continue
-    const hostLine = target.pos.startLine - 1
+    const hostLine = ownStartLine(target.pos, model.lines)
     if (lineIndex === hostLine || lineIndex === hostLine - 1) return target.id
   }
   return null
@@ -162,13 +162,13 @@ function findDeclarationById(
   const heading = findHeading(doc, (candidate) => headingId(candidate) === targetId)
   if (heading?.pos) {
     return {
-      line: heading.pos.startLine - 1,
+      line: ownStartLine(heading.pos, model.lines),
       kind: 'heading',
       text: implicitKey(headingPlainText(heading.children)),
     }
   }
   const caption = captionTargetById(doc, targetId)
-  if (caption?.pos) return { line: caption.pos.startLine - 1, kind: 'caption' }
+  if (caption?.pos) return { line: ownStartLine(caption.pos, model.lines), kind: 'caption' }
   return null
 }
 
@@ -386,7 +386,7 @@ function findHeadingLineByText(model: ReferenceModel, targetText: string): numbe
   if (!model.doc) return null
   const heading = findHeading(model.doc, (candidate) => headingPlainText(candidate.children) === targetText)
   if (!heading || !heading.pos) return null
-  return heading.pos.startLine - 1
+  return ownStartLine(heading.pos, model.lines)
 }
 
 function headingPlainText(nodes: InlineNode[]): string {

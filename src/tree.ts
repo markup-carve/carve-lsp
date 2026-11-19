@@ -1,5 +1,6 @@
 /** Small readers over the 0.2 tree that several features share. */
 import type { CaptionNode } from './engine.js'
+import { astColumnToCharacter } from './position.js'
 
 /** The id a heading answers to: its written `{#id}`, else the generated one. */
 export function headingId(node: { attrs?: { id?: string }; generatedId?: string }): string | undefined {
@@ -55,4 +56,32 @@ export function tableRows(table: { children?: unknown }): FlatRow[] {
     }
   }
   return rows
+}
+
+const ATTRIBUTE_OR_COMMENT = /^[ \t>]*(?:(?:\{[^{}]*\})+|%%(?!%).*)[ \t]*$/
+
+/**
+ * The 0-based line a block's own markup opens on. A 0.2 span starts at the
+ * attribute lines the block took (C2-A-148) and at comment-only lines between
+ * them (C2-B-137); this skips those. The first line is read from the span's
+ * column, so a list marker before an attribute block does not hide it.
+ */
+export function ownStartLine(pos: { startLine?: number; startColumn?: number; endLine?: number }, lines: readonly string[]): number {
+  const first = pos.startLine ?? 1
+  const last = (pos.endLine ?? first) - 1
+  let line = first - 1
+  while (line < last) {
+    const text = lines[line] ?? ''
+    const from = line === first - 1 && pos.startColumn !== undefined ? astColumnToCharacter(text, pos.startColumn) : 0
+    if (!ATTRIBUTE_OR_COMMENT.test(text.slice(from))) break
+    line += 1
+  }
+  return line
+}
+
+/** `pos` moved to the block's own first line (see `ownStartLine`); the column stays, as the container prefix does. */
+export function ownPos<P extends { startLine?: number; startColumn?: number; endLine?: number }>(pos: P | undefined, lines: readonly string[]): P | undefined {
+  if (pos?.startLine === undefined) return pos
+  const line = ownStartLine(pos, lines) + 1
+  return line === pos.startLine ? pos : { ...pos, startLine: line }
 }

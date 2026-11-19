@@ -1,6 +1,6 @@
 import { type FoldingRange } from 'vscode-languageserver-types'
 import { type BlockNode, type Document, type Heading } from './engine.js'
-import { footnoteEntries } from './tree.js'
+import { footnoteEntries, ownStartLine } from './tree.js'
 import { walkNodes, type AstNode } from './ast-walk.js'
 import { resolvedDocument } from './parse-cache.js'
 import { sourceLines } from './position.js'
@@ -111,7 +111,7 @@ export function headingSections(doc: Document, lines: readonly string[]): Headin
 
   const lastLine = Math.max(0, lines.length - 1)
   return found.map(({ heading, ancestors }, index) => {
-    const startLine = heading.pos!.startLine - 1
+    const startLine = ownStartLine(heading.pos!, lines)
     let endLine = lastLine
 
     const terminator = terminators[index]

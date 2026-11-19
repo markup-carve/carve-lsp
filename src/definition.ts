@@ -1,6 +1,6 @@
 import { type Location, type Position } from 'vscode-languageserver-types'
 import { parse, type Document, type InlineNode } from './engine.js'
-import { headingId } from './tree.js'
+import { headingId, ownStartLine } from './tree.js'
 import { astColumnToCharacter, sourceLines } from './position.js'
 import { smartPunctuationText } from './inline-text.js'
 import { captionTargetById } from './captions.js'
@@ -160,7 +160,7 @@ function resolveCrossrefAcrossSeam(
   const child = resolution.documents.find((document) => document.id === pos.file)
   if (child?.watch === undefined) return null
 
-  const childLine = pos.startLine - 1
+  const childLine = ownStartLine(pos, sourceLines(child.source))
   return {
     uri: (includes.paths ?? portableIncludePaths).toUri(child.watch),
     range: {
@@ -185,7 +185,7 @@ function findHeadingById(uri: string, source: string, model: ReferenceModel, tar
     // composite figure or one of its panels (PART 9R R4). Only headings were
     // searched here, so `</#fig>` jumped nowhere on a construct that predates
     // composite figures entirely.
-    return findCaptionById(uri, doc, targetId)
+    return findCaptionById(uri, source, doc, targetId)
   }
   return heading
 }
@@ -195,7 +195,7 @@ function headingLocation(uri: string, source: string, model: ReferenceModel, tar
   const heading = model.doc ? findHeadingWithId(model.doc, targetId) : null
   if (!heading?.pos) return null
   if (text !== undefined && implicitKey(headingPlainText(heading.children)) !== implicitKey(text)) return null
-  const line = heading.pos.startLine - 1
+  const line = ownStartLine(heading.pos, sourceLines(source))
   return {
     uri,
     range: {
@@ -220,10 +220,10 @@ function headingLocation(uri: string, source: string, model: ReferenceModel, tar
  * caption below it - so the jump lands on the host itself, which is the line an
  * author is looking for.
  */
-function findCaptionById(uri: string, doc: Document, targetId: string): Location | null {
+function findCaptionById(uri: string, source: string, doc: Document, targetId: string): Location | null {
   const target = captionTargetById(doc, targetId)
   if (!target?.pos) return null
-  return locationAtLine(uri, target.pos.startLine - 1)
+  return locationAtLine(uri, ownStartLine(target.pos, sourceLines(source)))
 }
 
 type Heading = import('./engine.js').Heading

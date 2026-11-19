@@ -1,4 +1,4 @@
-import { captionInlines, footnoteEntries } from './tree.js'
+import { captionInlines, footnoteEntries, ownPos } from './tree.js'
 import { SemanticTokensBuilder, type SemanticTokens } from 'vscode-languageserver/node.js'
 import { type CaptionNode,
   type BlockNode,
@@ -125,7 +125,8 @@ function astSemanticTokens(doc: Document, source: string, options: SemanticOptio
   )
 }
 
-function collectBlock(tokens: Token[], lines: string[], node: BlockNode, keywords: Token[], spanNames: string[]): void {
+function collectBlock(tokens: Token[], lines: string[], block: BlockNode, keywords: Token[], spanNames: string[]): void {
+  const node = { ...block, pos: ownPos(block.pos, lines) } as BlockNode
   const names = node.type === 'table'
     ? ('sourceFormat' in node && node.sourceFormat ? ['table'] : ['header-rows', 'footer-rows', 'header-cols', 'aligns', 'valigns', 'widths'])
     : node.type === 'list' || node.type === 'definition_list' ? ['loose'] : []
@@ -156,7 +157,8 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode, keyword
       pushPosition(tokens, lines, node.pos, 'comment')
       break
     case 'block_quote':
-      if ((node as { fenced?: boolean }).fenced) {
+      // 0.2 marks no fenced quote in the tree; its opener line says it.
+      if (isFencedQuote(node.pos, lines)) {
         pushLinePrefix(tokens, lines, node.pos, /^\s*:{3,}/, 'operator')
         pushLinePrefix(tokens, lines, node.pos, /(?<=^\s*:{3,}\s*)>/, 'operator')
         pushFenceCloser(tokens, lines, node.pos)
@@ -833,4 +835,10 @@ function withoutOverlaps(tokens: Token[]): Token[] {
     filtered.push(token)
   }
   return filtered
+}
+
+function isFencedQuote(pos: Position | undefined, lines: string[]): boolean {
+  if (pos?.startLine === undefined || pos.startColumn === undefined) return false
+  const text = lines[pos.startLine - 1] ?? ''
+  return /^:{3,}[ \t]*>/.test(text.slice(astColumnToCharacter(text, pos.startColumn)))
 }

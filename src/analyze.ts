@@ -38,7 +38,7 @@ import { astOffsetToIndex, codepointOffsetToIndex, sourceLines } from './positio
 import { walkNodes } from './ast-walk.js'
 import { headingSections } from './folding.js'
 import { resolvedDocument } from './parse-cache.js'
-import { captionInlines, isFigure } from './tree.js'
+import { captionInlines, isFigure, ownStartLine } from './tree.js'
 
 export interface AnalyzeOptions {
   /** URI used for diagnostic related-information locations. */
@@ -472,7 +472,7 @@ function lineSpan(lines: readonly string[], start: number, end: number): Range {
 /** `range` spans the section when `sectionEnd` is known; `selectionRange` is the heading's own lines. */
 function headingSymbol(heading: Heading, lines: readonly string[], sectionEnd?: number): DocumentSymbol {
   const selectionRange = heading.pos
-    ? lineSpan(lines, heading.pos.startLine - 1, heading.pos.endLine - 1)
+    ? lineSpan(lines, ownStartLine(heading.pos, lines), heading.pos.endLine - 1)
     : { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }
   const range = heading.pos && sectionEnd !== undefined && sectionEnd >= selectionRange.end.line
     ? lineSpan(lines, selectionRange.start.line, sectionEnd)

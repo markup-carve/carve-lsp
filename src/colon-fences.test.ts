@@ -55,7 +55,8 @@ test('a container with invalid metadata still pairs with its closer', () => {
 
 test('a fence opened on a footnote label pairs with the closer at the body indent', () => {
   assert.deepEqual(pairLines('x[^1]\n\n[^1]: ::: note\n  body\n  :::\n'), [[2, 4, 2]])
-  assert.deepEqual(pairLines('x[^long]\n\n> [^long]: ::: note\n>   body\n>   :::\n'), [[2, 4, 4]])
+  // 0.2 C2-B-081: a definition inside a quote is text, so no fence opens on that label.
+  assert.deepEqual(pairLines('x[^long]\n\n> [^long]: ::: note\n>   body\n>   :::\n'), [])
 })
 
 test('fence columns are UTF-16 after an astral character', () => {

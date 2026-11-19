@@ -2,7 +2,7 @@ import { type Position, type Range } from 'vscode-languageserver-types'
 import { parse, type Document } from './engine.js'
 import { walkNodes, type AstNode } from './ast-walk.js'
 import { astOffsetToIndex } from './position.js'
-import { headingId } from './tree.js'
+import { headingId, ownStartLine } from './tree.js'
 
 export type SiteKind = 'heading' | 'caption' | 'footnote' | 'linkref'
 
@@ -100,7 +100,7 @@ export function referenceModel(source: string): ReferenceModel {
     if (!at) return
     const attrId = (node.attrs as { id?: string } | undefined)?.id
     if (attrId && node.type !== 'heading' && !ancestors.some((ancestor) => INLINE_HOSTS.has(ancestor.type!))) {
-      const authored = authoredId(lines, positionAt(at.start).line, attrId)
+      const authored = authoredId(lines, node.pos ? ownStartLine(node.pos, lines) : positionAt(at.start).line, attrId)
       if (authored) sites.push({ kind: 'caption', key: attrId, declaration: true, node, range: range(at.start, at.end), keyRange: authored })
     }
     switch (node.type) {
@@ -109,7 +109,7 @@ export function referenceModel(source: string): ReferenceModel {
         if (!id) return
         const children = Array.isArray(node.children) ? node.children as AstNode[] : []
         const first = children.find((child) => child.pos?.startOffset !== undefined)
-        const lineIndex = positionAt(at.start).line
+        const lineIndex = node.pos ? ownStartLine(node.pos, lines) : positionAt(at.start).line
         const lineText = lines[lineIndex] ?? ''
         const prefix = lineText.slice(0, positionAt(at.start).character)
         const authored = authoredId(lines, lineIndex, id)
@@ -143,7 +143,7 @@ export function referenceModel(source: string): ReferenceModel {
       case 'link_reference_definition': {
         const label = node.key
         if (typeof label !== 'string') return
-        const lineIndex = positionAt(at.start).line
+        const lineIndex = node.pos ? ownStartLine(node.pos, lines) : positionAt(at.start).line
         const lineText = lines[lineIndex] ?? ''
         const column = lineText.indexOf(`[${label}]:`)
         if (column < 0) return
