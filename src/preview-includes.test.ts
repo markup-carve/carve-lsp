@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { carveToHtml } from '@markup-carve/carve'
+import { render } from './engine.js'
 import { LspStdioClient } from './lsp-stdio-client.js'
 
 const serverPath = fileURLToPath(new URL('./server.js', import.meta.url))
@@ -109,7 +109,7 @@ const off = await session((built) => ({ enabled: 'off', includeRoot: built.works
 const untrusted = await session((built) => ({ includeRoot: built.workspace }), false)
 
 test('with a configured includeRoot the preview renders the merged document', () => {
-  assert.equal(rooted.preview.expand, carveToHtml('# Book\n\nONE-BODY\n'))
+  assert.equal(rooted.preview.expand, render('# Book\n\nONE-BODY\n'))
 })
 
 test('a nested child is merged too', () => {
@@ -118,16 +118,16 @@ test('a nested child is merged too', () => {
 
 test('a directive escaping the root is not expanded in the preview', () => {
   assert.doesNotMatch(rooted.preview.escape, /SECRET/)
-  assert.equal(rooted.preview.escape, carveToHtml(DOCS.escape))
+  assert.equal(rooted.preview.escape, render(DOCS.escape))
 })
 
 test('a symlink out of the root is not expanded in the preview', () => {
   assert.doesNotMatch(rooted.preview.symlink, /SECRET/)
-  assert.equal(rooted.preview.symlink, carveToHtml(DOCS.symlink))
+  assert.equal(rooted.preview.symlink, render(DOCS.symlink))
 })
 
 test('a directory target is not expanded in the preview', () => {
-  assert.equal(rooted.preview.directory, carveToHtml(DOCS.directory))
+  assert.equal(rooted.preview.directory, render(DOCS.directory))
 })
 
 test('maxDepth bounds the preview', () => {
@@ -146,7 +146,7 @@ test('maxBytes bounds the preview', () => {
 })
 
 test('a document with no directive previews the same with or without a root', () => {
-  assert.equal(rooted.preview.plain, carveToHtml(DOCS.plain))
+  assert.equal(rooted.preview.plain, render(DOCS.plain))
 })
 
 test('preview uses unsaved text from an open included document', async () => {
@@ -220,9 +220,9 @@ for (const [label, observed] of [
   ['includes switched off', off],
   ['an untrusted workspace', untrusted],
 ] as const) {
-  test(`${label} previews every document byte-identical to carveToHtml of its source`, () => {
+  test(`${label} previews every document byte-identical to render of its source`, () => {
     for (const [name, text] of Object.entries(DOCS) as Array<[DocName, string]>) {
-      assert.equal(observed.preview[name], carveToHtml(text), name)
+      assert.equal(observed.preview[name], render(text), name)
     }
   })
 }

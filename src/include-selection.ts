@@ -12,7 +12,9 @@
  * generates perfectly well, and a false diagnostic on a working document is
  * worse than a missing one.
  */
-import { parse, resolve, selectIncludeRegion, type BlockNode } from '@markup-carve/carve'
+import { parse, type BlockNode } from './engine.js'
+import { selectIncludeRegion } from './engine-legacy.js'
+import { headingId, ownStartLine } from './tree.js'
 import type { Range } from 'vscode-languageserver-types'
 
 export interface Section {
@@ -27,18 +29,19 @@ export function sections(source: string): Section[] {
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   let document
   try {
-    document = resolve(parse(source, { positions: true }))
+    document = parse(source)
   } catch {
     return []
   }
   const found: Section[] = []
-  walk(document.children, (node) => {
-    if (node.type !== 'heading' || !node.pos || !node.attrs?.id) return
-    const line = node.pos.startLine - 1
+  walk(document.children as BlockNode[], (node) => {
+    const id = node.type === 'heading' ? headingId(node) : undefined
+    if (!id || !node.pos) return
+    const line = ownStartLine(node.pos, lines)
     const text = lines[line] ?? ''
     const character = Math.min(text.length, HEADING_MARKER_RE.exec(text)?.[0].length ?? 0)
     found.push({
-      id: node.attrs.id,
+      id,
       range: { start: { line, character }, end: { line, character: text.length } },
     })
   })

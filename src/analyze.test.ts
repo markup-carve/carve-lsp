@@ -70,8 +70,8 @@ test('does not diagnose djot-shift constructs (valid Carve)', () => {
       `expected no diagnostic for ${JSON.stringify(src)}`,
     )
   }
-  // `_x_` is underline too, but the authoring lint hints at it (PART 13 `markdown-italic-underline`).
-  assert.deepEqual(analyzeCarve('_italic_').diagnostics.map((d) => d.code), ['markdown-italic-underline'])
+  // 0.2 C2-I-046: a bare `_` pair is text; lint-rules.json replaces `markdown-italic-underline` with `deprecated-bare-underline`.
+  assert.deepEqual(analyzeCarve('_italic_').diagnostics.map((d) => d.code), ['deprecated-bare-underline'])
 })
 
 test('an engine Hint finding is published as a Hint', () => {
@@ -144,7 +144,9 @@ test('migration quick fixes use canonical single-char Carve delimiters', () => {
 
 test('offers a quick fix for + bullets (was missing from the old span map)', () => {
   const source = '+ item'
-  const diagnostics = analyzeCarve(source).diagnostics
+  // 0.2 lint-rules.json: `djot-plus-bullet` is opt-in (default off), so the setting turns it on.
+  assert.deepEqual(analyzeCarve(source).diagnostics, [])
+  const diagnostics = analyzeCarve(source, { lint: { severities: { 'djot-plus-bullet': 'warning' } } }).diagnostics
   assert.equal(diagnostics[0]!.code, 'djot-plus-bullet')
   const actions = migrationCodeActions('file:///demo.crv', source, diagnostics)
   const quickFix = actions.find((a) => a.title === 'Convert to Carve syntax: -')
@@ -176,10 +178,7 @@ test('returns semantic tokens for headings and inline markup', () => {
       [0, 2, 5, 'type'],
       [2, 3, 6, 'keyword'],
       [2, 10, 5, 'variable'],
-      // carve-js parses the trailing `{#id}` here as a literal `#id` hashtag
-      // (tag node) rather than an attribute attachment, so it surfaces as a
-      // `variable` token like any other hashtag.
-      [2, 17, 3, 'variable'],
+      // 0.2 U-275 (C2-I-035): the unattached `{#id}` is one literal atom, no `#id` tag.
     ],
   )
 })
@@ -421,7 +420,8 @@ test('an enabled include publishes its warning as a diagnostic on the directive 
 })
 
 test('lints a CSV code include at its directive', () => {
-  const child = 'Plan,Seats,Price\nStarter,1,"$0"\nTeam,10,"$49" billed yearly\n'
+  // 0.2 C2-B-180/C2-B-181: only an unclosed quote makes a delimited table malformed.
+  const child = 'Plan,Seats,Price\nStarter,1,"$0"\nTeam,10,"$49 billed yearly\n'
   const source = '{table}\n{{ data/plans.csv @code:csv }}\n'
   const options = {
     includes: {
@@ -516,7 +516,8 @@ test('keeps a usable heading outline when resolved analysis is unavailable', () 
 test('duplicate diagnostics point back to the first declaration', () => {
   const uri = 'file:///document.crv'
   const heading = analyzeCarve('{#same}\n# One\n\n{#same}\n# Two\n', { uri })
-  const headingDuplicate = heading.diagnostics.find((item) => item.code === 'duplicate-heading-id')
+  // 0.2 lint-rules.json: `duplicate-heading-id` is renamed `duplicate-id` (C2-A-039).
+  const headingDuplicate = heading.diagnostics.find((item) => item.code === 'duplicate-id')
   assert.deepEqual(headingDuplicate?.relatedInformation, [{
     location: { uri, range: { start: { line: 0, character: 2 }, end: { line: 0, character: 6 } } },
     message: 'First declaration is here.',
@@ -538,6 +539,7 @@ test('diagnostic severity overrides can promote or suppress individual rules', (
 test('a bare empty definition resolves its reference in the diagnostics too (carve#2878)', () => {
   // Completion and semantic tokens read `[r]:` as a definition; the engine has
   // to agree, which needs carve-js 0.1.12 or later.
+  // 0.2 C2-B-083: `[r]:` with no destination is text and defines no link, so `[t][r]` is unresolved.
   const result = analyzeCarve('[t][r]\n\n[r]:\n')
-  assert.deepEqual(result.diagnostics.map((d) => [d.code, d.range.start.line]), [['empty-reference-definition', 2]])
+  assert.deepEqual(result.diagnostics.map((d) => [d.code, d.range.start.line]), [['unresolved-reference-link', 0], ['empty-reference-definition', 2]])
 })

@@ -5,7 +5,7 @@ import {
   TextEdit,
   type Diagnostic,
 } from 'vscode-languageserver-types'
-import { applyMigrationFixes, djotMigrationWarnings } from '@markup-carve/carve'
+import { applyMigrationFixes, djotMigrationWarnings } from './engine-legacy.js'
 
 export interface MigrationFix {
   rule: string

@@ -4,6 +4,36 @@ Language server (LSP) for [Carve](https://markup-carve.github.io/carve/) markup 
 Provides editor intelligence for `.crv` files via the
 [Language Server Protocol](https://microsoft.github.io/language-server-protocol/).
 
+## Carve 0.2
+
+This branch serves Carve 0.2. Every engine call goes through the 0.2 API
+(`@markup-carve/carve/v2`), pinned to a carve-js `next2` commit. What an editor
+user notices:
+
+- Diagnostics use the 0.2 lint catalog. Renamed rules keep their meaning under
+  the new id, for example `duplicate-id` (was `duplicate-heading-id`) and
+  `deprecated-bare-underline` (was `markdown-italic-underline`). A `+` line is
+  text in 0.2 and reports `deprecated-continuation-marker`, so the "Escape the
+  `+`" quick fix is gone.
+- Opt-in 0.2 rules, such as `djot-plus-bullet`, stay off until the `severities`
+  setting names them.
+- Shapes 0.2 reads differently are followed as the engine reads them: a
+  definition inside a quote is text, a tilde run opens no code fence, a GFM
+  separator row is an ordinary table row, and an id in two included files is a
+  duplicate rather than renamed. `spec/0.2/UPGRADING.md` in the Carve
+  repository lists every change.
+- *Export as Markdown* needs a `markdown` writer in the engine's writer
+  registry. Until carve-js registers one, the action fails with "The markdown
+  writer is not available yet in Carve 0.2".
+- `carve.showAst` returns the 0.2 tree. Its positions count UTF-8 bytes in
+  `startOffset` and `endOffset` and code points in columns.
+- The `semantic-span` extension still colors its span names, but the 0.2 lint
+  API cannot register the extra keys yet (markup-carve/carve-js#5060).
+
+Include expansion, region selection and the Djot migration fixes still use 0.1
+helpers of the same pinned package until carve-js exposes them
+(markup-carve/carve-js#5056, #5059 and #5054).
+
 ## Install
 
 ```bash
@@ -50,8 +80,7 @@ Use **Align table** to line up pipe table cells. **Convert to pipe table** chang
 | `deprecated-cell-alignment` | Rewrite a 0.1.13 alignment prefix in the braced spelling, `\|=>` as `\|={>}` |
 | `colon-fence-length-mismatch` | Resize the colon run, or keep it as literal text |
 | `unresolved-footnote`, `unresolved-reference-link` | Append the missing definition |
-| `continuation-marker-refused`, `refused-continuation-marker` | Escape the `+` as text, offered only when the output stays the same |
-| `list-marker-below-content-column` | Indent the marker to nest it, or outdent it to the item's own column |
+| `list-marker-below-content-column` | Indent the marker to the deeper list's column, or outdent it to the outer list's column |
 | `description-separator-below-content-column` | Indent the separator to continue the definition list |
 | `consumed-key-near-miss` | Replace the misspelled key with the one the engine suggests |
 
@@ -155,12 +184,12 @@ client severity for one code keeps the project severities for the others.
 | Setting | Default | Meaning |
 |---|---|---|
 | `platforms` | `[]` | Extra platform lint profiles. Currently supports `"github"`. |
-| `extensions` | `[]` | Enabled extension names. `"semantic-span"` colors `samp`, `var`, `cite`, and `dfn` as keywords in span attributes. |
+| `extensions` | `[]` | Enabled extension names. `"semantic-span"` colors `samp`, `var`, `cite`, and `dfn` as keywords in span attributes. Under Carve 0.2 it does not reach the lint rules yet. |
 | `inlayHints` | `true` | Show inlay hints: generated heading identifiers, colon-fence closers, and the bare list marker hint. `false` turns all of them off; an object such as `{ "bareListMarkers": false }` keeps the others and turns that one off. |
 | `exportActions` | `true` | Offer the *Export as Markdown* and *Export as HTML* source actions, plus *Export as PDF* when the client opts in to its server command. Editors with their own export commands can turn this off. |
 | `formatter` | `"conservative"` | Use whitespace-only conservative formatting; `"migration"` opts into canonical whole-document conversion. |
 | `format.alignTables` | `false` | Align table cells in document, range, and on-type formatting. The *Align table* action works without this setting. |
-| `severities` | `{}` | Override a diagnostic code with `"error"`, `"warning"`, `"information"`, `"hint"`, or `"off"`. |
+| `severities` | `{}` | Override a diagnostic code with `"error"`, `"warning"`, `"information"`, `"hint"`, or `"off"`. Any value but `"off"` also turns an opt-in 0.2 rule on, and `"off"` turns a rule off in the engine. |
 
 When table alignment is enabled, the selected table uses canonical Carve cell spelling before padding. Other source remains in the conservative formatter's form.
 
@@ -284,7 +313,8 @@ The source actions *Export as Markdown* and *Export as HTML*, plus *Export as PD
 when enabled by the client, write next to the source (kind `source.export`):
 `notes.crv` becomes `notes.md`,
 `notes.html`, or `notes.pdf`. The text exports expand includes on the same terms as
-the preview. A missing target is created, an existing one is replaced as a
+the preview. *Export as Markdown* fails with a "writer not available" error
+until the 0.2 engine registers a `markdown` writer. A missing target is created, an existing one is replaced as a
 whole. The text actions are offered only to clients that support creating files
 in a workspace edit. All three can be turned off with the `exportActions`
 setting. Most editors apply text edits to a buffer and leave saving to the user.

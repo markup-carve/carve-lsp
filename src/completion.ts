@@ -1,10 +1,11 @@
+import { footnoteEntries, headingId } from './tree.js'
 import { SEMANTIC_SPAN_EXTENSION_NAMES } from './semantic-span-names.js'
 import {
   CompletionItemKind,
   type CompletionItem,
   type Position,
 } from 'vscode-languageserver-types'
-import { parse, resolve, type Document } from '@markup-carve/carve'
+import { parse, type Document } from './engine.js'
 import { captionTargets, type CaptionTarget } from './captions.js'
 import { walkNodes } from './ast-walk.js'
 import type { IndexedToken } from './workspace-index.js'
@@ -231,9 +232,9 @@ function headingTitles(source: string): string[] {
 function headingIds(source: string): string[] {
   const ids: string[] = []
   try {
-    walkNodes(resolve(parse(source)), (node) => {
-      const id = (node.attrs as { id?: string } | undefined)?.id
-      if (node.type === 'heading' && id) ids.push(id)
+    walkNodes(parse(source), (node) => {
+      const id = node.type === 'heading' ? headingId(node as { attrs?: { id?: string }; generatedId?: string }) : undefined
+      if (id) ids.push(id)
     })
   } catch {
     // Parsing may fail mid-edit; offer no ids rather than throwing.
@@ -255,7 +256,7 @@ function headingIds(source: string): string[] {
 function resolvableCaptionIds(source: string): Array<{ id: string; detail: string }> {
   let targets: CaptionTarget[]
   try {
-    targets = captionTargets(resolve(parse(source, { positions: true })))
+    targets = captionTargets(parse(source))
   } catch {
     // Parsing may fail mid-edit; offer no ids rather than throwing.
     return []
@@ -270,8 +271,8 @@ function resolvableCaptionIds(source: string): Array<{ id: string; detail: strin
 
 function footnoteLabels(source: string): string[] {
   try {
-    const doc: Document = resolve(parse(source))
-    return Object.keys(doc.footnoteDefs ?? {})
+    const doc: Document = parse(source)
+    return footnoteEntries(doc).map(([label]) => label)
   } catch {
     return []
   }

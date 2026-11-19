@@ -22,5 +22,7 @@ test('emits no lenses without footnote definitions', () => {
 test('counts heading, citation, and link-reference usages', () => {
   const source = '{#h}\n# H\n\nSee </#h> and [x][r] [@c].\n\n[r]: /u\n[@c]: Entry\n'
   const titles = codeLenses(source).map((lens) => lens.command?.title)
-  assert.deepEqual(titles, ['1 reference', '1 reference', '1 reference'])
+  // 0.2 C2-I-101: citations have no core form, so `[@c]: Entry` is also a core link
+  // definition (key `@c`) that nothing references, beside the citation the text scan reads.
+  assert.deepEqual(titles, ['1 reference', '1 reference', '0 references', '1 reference'])
 })

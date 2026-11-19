@@ -1,4 +1,4 @@
-import type { LintPlatform } from '@markup-carve/carve'
+type LintPlatform = 'github'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 

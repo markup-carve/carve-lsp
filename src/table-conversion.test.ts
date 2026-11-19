@@ -64,7 +64,8 @@ test('converts plain pipe tables and refuses markup and cell attributes', () => 
   const source = '|= Plan |= Seats |\n| Starter | 1 |\n'
   assert.equal(pipeTableToCsv(source, 0)?.newText, '{table}\n```csv\nPlan,Seats\nStarter,1\n```')
   assert.equal(pipeTableToCsv('| *x* | y |\n', 0), null)
-  assert.equal(pipeTableToCsv('|= a |= b |\n| x |> y |\n', 0), null)
+  // 0.2 C2-B-171, C2-B-182: alignment is the braced mark; the 0.1.13 `|>` prefix is cell text.
+  assert.equal(pipeTableToCsv('|= a |= b |\n| x |{>} y |\n', 0), null)
   assert.equal(pipeTableToCsv('|= a |= b |\n|= x | y |\n', 0), null)
   assert.equal(pipeTableToCsv('|= a |\n| x\\|y |\n', 0)?.newText, '{table}\n```csv\na\nx|y\n```')
   assert.equal(pipeTableToCsv('{.wide}\n| a, b | c |\n^ Cap\n', 0)?.newText, '{table .wide header-rows=0}\n```csv\n"a, b",c\n```\n^ Cap')

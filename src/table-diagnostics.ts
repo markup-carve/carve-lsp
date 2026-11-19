@@ -1,6 +1,7 @@
 import { DiagnosticSeverity, type Diagnostic } from 'vscode-languageserver-types'
-import { parse } from '@markup-carve/carve'
-import { walkNodes, type AstNode } from './ast-walk.js'
+import { parse } from './engine.js'
+import { walkNodes } from './ast-walk.js'
+import { ownStartLine, tableRows } from './tree.js'
 
 /**
  * The draft #1344 table check the engine lint does not run: a positional
@@ -18,26 +19,21 @@ export function tableDiagnostics(source: string): Diagnostic[] {
   const diagnostics: Diagnostic[] = []
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   walkNodes(document, (node) => {
-    if (node.type !== 'table' || !node.pos?.startLine || !Array.isArray(node.rows)) return
-    const attrLine = node.pos.startLine - 2
-    if (attrLine < 0) return
-    const rows = node.rows as Array<{ cells?: unknown[] }>
+    if (node.type !== 'table' || !node.pos?.startLine) return
+    const rows = tableRows(node)
     const columns = Math.max(0, ...rows.map((row) => row.cells?.length ?? 0))
-    for (const attr of positionalAttributes(lines[attrLine] ?? '').filter((entry) => keyed(node, entry.name))) {
-      if (attr.values.length > columns) {
-        diagnostics.push(diagnostic('table-column-arity', DiagnosticSeverity.Error, attrLine,
-          attr.start, attr.end, `${attr.name} has ${attr.values.length} entries for a ${columns}-column table.`))
+    // A 0.2 table span starts at the attribute lines it took (C2-A-148), so those lines are its own.
+    for (let attrLine = node.pos.startLine - 1; attrLine < ownStartLine(node.pos, lines); attrLine += 1) {
+      for (const attr of positionalAttributes(lines[attrLine] ?? '')) {
+        if (attr.values.length > columns) {
+          diagnostics.push(diagnostic('table-column-arity', DiagnosticSeverity.Error, attrLine,
+            attr.start, attr.end, `${attr.name} has ${attr.values.length} entries for a ${columns}-column table.`))
+        }
       }
     }
     return false
   })
   return diagnostics
-}
-
-/** The table's own attribute block carries `name`, so a match on its line is not stray text. */
-function keyed(table: AstNode, name: string): boolean {
-  const attrs = table.attrs as { keyValues?: Record<string, unknown> } | undefined
-  return attrs?.keyValues?.[name] !== undefined
 }
 
 function positionalAttributes(line: string): Array<{ name: string; values: string[]; start: number; end: number }> {
