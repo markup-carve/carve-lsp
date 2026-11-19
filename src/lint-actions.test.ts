@@ -89,7 +89,7 @@ test('rewrites a deprecated alignment prefix in the braced spelling (carve#5091 
   }
 })
 
-test('rewrites a deprecated alignment run with a glued brace block', { skip: 'carve-js v2 lint reports emphasis-marker-before-attributes here (markup-carve/carve-js#5058)' }, () => {
+test('rewrites a deprecated alignment run with a glued brace block', () => {
   assert.equal(applyFirst('|=~{.x} Mid |\n', 'Write the alignment'), '|={~ .x} Mid |\n')
 })
 
