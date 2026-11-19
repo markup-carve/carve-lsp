@@ -50,8 +50,9 @@ function serverIsQuietAndPreserving(source: string, label: string, engineRaises:
 test('the {empty} description sentinel is accepted, not diagnosed (PART 11 §7d, carve#1827)', () => {
   const source = corpusDocument('438-an-empty-description-body-is-written-with-the-empty-sentinel')
   assert.match(source, /^: \{empty\}$/m, 'corpus 438 no longer spells the sentinel')
-  serverIsQuietAndPreserving(source, '{empty} sentinel')
-  // 0.2 U-142: `{empty}` is no sentinel any more; it is printed as the description's text.
+  // 0.2 U-142: `{empty}` is an attribute line (C2-B-090) that the blank line leaves as text (C2-B-192), which
+  // lint-rules.json `unattached-block-attribute` reports.
+  serverIsQuietAndPreserving(source, '{empty} sentinel', [['unattached-block-attribute', 2]])
   assert.match(render(source), /<dd>\{empty\}<\/dd>/, 'the 0.2 description body holds the literal text')
   // The sentinel is content, so the marker did open a description: Enter
   // starts the next definition, as after any other one. The prefix fallback
