@@ -20,7 +20,9 @@ export {
   utf8Length,
   CarveOptionError,
   RESERVED_WRITER_TARGETS,
-} from '@markup-carve/carve/v2'
+} from '@markup-carve/carve'
+export { semanticSpan } from '@markup-carve/carve/extensions'
+export { registerExports } from '@markup-carve/carve/export'
 export type {
   DocumentNode as Document,
   Block as BlockNode,
@@ -37,4 +39,4 @@ export type {
   LintOptions,
   ParseOptions,
   RenderOptions,
-} from '@markup-carve/carve/v2'
+} from '@markup-carve/carve'

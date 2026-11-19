@@ -11,6 +11,7 @@ import {
   CarveOptionError,
   lint,
   parse,
+  semanticSpan,
   type BlockNode,
   type CaptionNode,
   type Document,
@@ -96,6 +97,7 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
   let lintDiagnostics: EngineDiagnostic[] = []
   const lintOptions = {
     ...(options.lint?.platforms?.length ? { platforms: options.lint.platforms } : {}),
+    ...(options.lint?.extensions?.includes('semantic-span') ? { extensions: semanticSpan().extensions } : {}),
     ...(includeConfig ? { includes: includeConfig } : {}),
   }
   const rules = lintRules(options.lint?.severities)
