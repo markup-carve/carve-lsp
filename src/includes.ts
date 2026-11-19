@@ -213,11 +213,12 @@ interface Seam {
   /** Watchable filesystem candidate, by the identity the engine reports. */
   watch: Map<string, string>
   /**
-   * A refused request, keyed by the file the directive was written in and the
-   * path it wrote: what a diagnostic and a dependency both carry. The same
-   * spelling below two directories is two different refusals.
+   * Refused requests in call order, keyed by the file the directive was written
+   * in and the path it wrote: what a diagnostic and a dependency both carry.
+   * The same spelling below two directories is two different refusals, and a
+   * repeated directive keeps one entry per occurrence.
    */
-  refused: Map<string, { id: string; denial?: IncludeDenial; detail?: string; callLimit?: boolean; budget?: boolean }>
+  refused: Map<string, Refusal[]>
   /** Child source as read, line endings normalized, by identity. */
   documents: Map<string, { source: string; version?: string; watch?: string }>
   /** UTF-8 bytes charged: every text the resolver returned, the one that overran the budget included. */
@@ -226,6 +227,16 @@ interface Seam {
   spent: boolean
 }
 
+interface Refusal { id: string; denial?: IncludeDenial; detail?: string; callLimit?: boolean; budget?: boolean }
+
+function refuse(seam: Seam | undefined, key: string, refusal: Refusal): void {
+  if (!seam) return
+  const list = seam.refused.get(key)
+  if (list) list.push(refusal)
+  else seam.refused.set(key, [refusal])
+}
+
+const RESOLVER_CODES = new Set(['include-not-found', 'include-outside-root', 'include-unreadable'])
 const DEFAULT_MAX_RESOLVER_CALLS = 1000
 const DEFAULT_MAX_WARNINGS = 100
 const ENGINE_MAX_DEPTH = 16
@@ -243,39 +254,39 @@ export function v2IncludeConfig(options: IncludeOptions, seam?: Seam): IncludeCo
   // The 0.2 option has no resolver-call bound, so the resolver enforces the server's own; a call past it reads as unreadable.
   const maxCalls = options.maxResolverCalls ?? DEFAULT_MAX_RESOLVER_CALLS
   let calls = 0
-  // The engine names only the including file; the server's resolver wants the
-  // chain, root first, to resolve a nested path against its actual parent.
-  const parents = new Map<string, string | undefined>()
-  const chain = (id: string | undefined): string[] => {
-    const stack: string[] = []
-    for (let at = id, guard = 0; at !== undefined && guard <= ENGINE_MAX_DEPTH; at = parents.get(at), guard += 1) stack.unshift(at)
-    return options.sourcePath === undefined ? stack : [options.sourcePath, ...stack]
-  }
+  // The 0.2 request names only the including file, not the branch it was
+  // reached through, so the stack holds the root and that file: enough to
+  // resolve a nested path against its actual parent. The engine itself bounds
+  // depth and refuses cycles (C2-N-064, C2-N-066); `depth` is the shallowest
+  // depth the including file was reached at.
+  const depths = new Map<string, number>()
+  const root = options.sourcePath === undefined ? [] : [options.sourcePath]
   const v2: V2IncludeResolver = (request) => {
     const from = request.from === undefined || request.from === options.sourcePath ? undefined : request.from
     const key = refusalKey(from, request.path)
-    const stack = chain(from)
+    const stack = from === undefined ? root : [...root, from]
+    const depth = from === undefined ? 0 : (depths.get(from) ?? 0) + 1
     // The engine charges only texts it accepts (C2-N-065), so a document of many
     // over-budget directives would read every one; the server stops reading at
     // the first overrun.
     if (seam?.spent) {
-      seam.refused.set(key, { id: request.path, budget: true })
+      refuse(seam, key, { id: request.path, budget: true })
       return { error: 'unreadable' }
     }
     calls += 1
     if (calls > maxCalls) {
-      seam?.refused.set(key, { id: request.path, callLimit: true })
+      refuse(seam, key, { id: request.path, callLimit: true })
       return { error: 'unreadable' }
     }
     let result
     try {
       result = resolver(request.path, {
         stack,
-        depth: stack.length - (options.sourcePath === undefined ? 0 : 1),
+        depth,
         ...(options.sourcePath !== undefined ? { sourcePath: options.sourcePath } : {}),
       })
     } catch (error) {
-      seam?.refused.set(key, { id: request.path, detail: error instanceof Error ? error.message : String(error) })
+      refuse(seam, key, { id: request.path, detail: error instanceof Error ? error.message : String(error) })
       return { error: 'unreadable' }
     }
     if (!result.ok) {
@@ -283,7 +294,7 @@ export function v2IncludeConfig(options: IncludeOptions, seam?: Seam): IncludeCo
       // files below different directories that both name `missing.crv` stay
       // distinct watchers (§19 I11).
       const id = result.watch ?? result.id
-      seam?.refused.set(key, { id, denial: result.denial })
+      refuse(seam, key, { id, denial: result.denial })
       if (result.watch !== undefined) seam?.watch.set(id, result.watch)
       const outside = result.denial === 'outside-root' || result.denial === 'absolute-denied' || result.denial === 'remote-not-allowed'
       return { error: outside ? 'outside_root' : result.denial === 'not-a-file' ? 'unreadable' : 'not_found' }
@@ -292,7 +303,7 @@ export function v2IncludeConfig(options: IncludeOptions, seam?: Seam): IncludeCo
     // here; substituting it is one code unit for one, so the byte budget still
     // bounds the size of the file that was read.
     const text = result.source.replace(/\r(?!\n)/g, '\n')
-    if (!parents.has(result.id) && result.id !== options.sourcePath) parents.set(result.id, from)
+    if (result.id !== options.sourcePath && depth < (depths.get(result.id) ?? Infinity)) depths.set(result.id, depth)
     if (seam) {
       if (!NON_TEXT.test(text)) seam.bytes += utf8Length(text)
       if (options.maxBytes !== undefined && seam.bytes > options.maxBytes) seam.spent = true
@@ -352,6 +363,18 @@ export function resolveIncludes(source: string, options: IncludeOptions = {}): I
   // merged child with its file, so the stamps are the children that survived.
   const merged = mergedFiles(tree)
 
+  const dependencies: IncludeDependency[] = []
+  const seen = new Set<string>()
+  for (const dependency of includeDependencies(tree)) {
+    const refusal = dependency.read ? undefined : seam.refused.get(refusalKey(dependency.from, dependency.path))?.[0]
+    const id = dependency.file ?? refusal?.id ?? dependency.path
+    if (seen.has(id)) continue
+    seen.add(id)
+    const watch = seam.watch.get(id)
+    dependencies.push({ id, resolved: dependency.read, ...(watch === undefined ? {} : { watch }) })
+  }
+
+  // After the dependencies: each warning takes its own occurrence's refusal off the list.
   const starts = lineStarts(normalized)
   const all: IncludeWarning[] = []
   for (const entry of parsed.diagnostics) {
@@ -359,17 +382,6 @@ export function resolveIncludes(source: string, options: IncludeOptions = {}): I
     all.push(toWarning(entry, tree, normalized, starts, seam, options))
   }
   const { kept, suppressed } = capWarnings(all, options.maxWarnings ?? DEFAULT_MAX_WARNINGS)
-
-  const dependencies: IncludeDependency[] = []
-  const seen = new Set<string>()
-  for (const dependency of includeDependencies(tree)) {
-    const refusal = dependency.read ? undefined : seam.refused.get(refusalKey(dependency.from, dependency.path))
-    const id = dependency.file ?? refusal?.id ?? dependency.path
-    if (seen.has(id)) continue
-    seen.add(id)
-    const watch = seam.watch.get(id)
-    dependencies.push({ id, resolved: dependency.read, ...(watch === undefined ? {} : { watch }) })
-  }
 
   return {
     warnings: kept,
@@ -400,7 +412,10 @@ function toWarning(
   const start = codepoints(root, span.startOffset)
   const end = codepoints(root, span.endOffset)
   const written = /"([^"]+)"/.exec(entry.message)?.[1]
-  const refusal = written === undefined ? undefined : seam.refused.get(refusalKey(entry.file, written))
+  // Only a resolver-stage finding answers a refused request (C2-N-013); a budget or cycle finding has no refusal.
+  const refusal = written === undefined || !RESOLVER_CODES.has(entry.code)
+    ? undefined
+    : seam.refused.get(refusalKey(entry.file, written))?.shift()
   const warning: IncludeWarning = {
     ...locateIn(starts, start),
     rule: refusal?.callLimit ? 'include-call-limit' : refusal?.budget ? 'include-budget' : entry.code,

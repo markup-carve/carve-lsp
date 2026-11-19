@@ -249,3 +249,29 @@ test('a directive inside a fence is not resolved even with a resolver active (i0
   assert.deepEqual(result.dependencies, [])
   assert.deepEqual(reads, [])
 })
+
+test('a repeated directive keeps its own refusal for each occurrence', () => {
+  const result = resolveIncludes('{{ gone }}\n\n{{ gone }}\n', {
+    resolver: virtualResolver({}),
+    maxResolverCalls: 1,
+  })
+  assert.deepEqual(result.warnings.map((w) => w.rule), ['include-not-found', 'include-call-limit'])
+})
+
+test('a child reached through two branches gets the same parent stack on each visit', () => {
+  const seen: Array<{ path: string; stack: string[]; depth: number }> = []
+  const files: Record<string, string> = { a: '{{ s }}', b: '{{ s }}', s: '{{ x }}', x: 'X.' }
+  resolveIncludes('{{ a }}\n\n{{ b }}\n', {
+    resolver: (includePath, ctx) => {
+      seen.push({ path: includePath, stack: [...ctx.stack], depth: ctx.depth })
+      const source = files[includePath]
+      return source === undefined
+        ? { ok: false, id: includePath, denial: 'not-found' }
+        : { ok: true, id: includePath, source, bytes: Buffer.byteLength(source, 'utf8') }
+    },
+  })
+  assert.deepEqual(seen.filter((call) => call.path === 'x'), [
+    { path: 'x', stack: ['s'], depth: 2 },
+    { path: 'x', stack: ['s'], depth: 2 },
+  ])
+})
