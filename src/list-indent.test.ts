@@ -60,7 +60,8 @@ const rows: Array<[string, number, 'indent' | 'outdent', string, number]> = [
   ['> - a\n> - b', 1, 'indent', '> - a\n>   - b', 1],
   ['> - a\n> - b\n>   more', 1, 'indent', '> - a\n>   - b\n>     more', 1],
   ['> > - a\n> > - ', 1, 'indent', '> > - a\n> >   - ', 1],
-  ['- item\n  > - a\n  > - b', 2, 'indent', '- item\n  > - a\n  >   - b', 2],
+  // 0.2 U-006: a quote directly under item text is text, so a blank line opens it.
+  ['- item\n\n  > - a\n  > - b', 3, 'indent', '- item\n\n  > - a\n  >   - b', 2],
   ['[^a]: - a\n  - b\n\nx[^a]', 1, 'indent', '[^a]: - a\n        - b\n\nx[^a]', 1],
   [':: t\n: - a\n  - b', 2, 'indent', ':: t\n: - a\n    - b', 1],
   ['::: note\n- a\n- b\n:::', 2, 'indent', '::: note\n- a\n  - b\n:::', 1],
@@ -89,7 +90,7 @@ test('Tab and Shift+Tab move a list item to the intended depth', () => {
   }
 })
 
-test('Tab keeps a continuation marker on the moved item\'s marker column', () => {
+test('Tab keeps a continuation marker on the moved item\'s marker column', { skip: '0.2 C2-B-059 removed the + continuation marker; a + line is text' }, () => {
   for (const [source, line, direction, expected] of [
     ['- a\n- b\n+\n```\nx\n```\n', 1, 'indent', '- a\n  - b\n  +\n  ```\n  x\n  ```\n'],
     ['> - a\n> - b\n> +\n> ```\n> x\n> ```\n', 1, 'indent', '> - a\n>   - b\n>   +\n>   ```\n>   x\n>   ```\n'],

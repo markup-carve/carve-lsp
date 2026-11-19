@@ -53,7 +53,8 @@ test('the next marker follows the list, not the letter', () => {
   assert.equal(inserted('iv.  one'), 'v.   ')
   assert.equal(inserted('z.  last'), null)
   assert.equal(inserted('007. item'), '008. ')
-  assert.equal(inserted('999999999. item'), '1000000000. ')
+  // 0.2 U-025: a ten-digit ordered marker is text, so the list offers no next marker.
+  assert.equal(inserted('999999999. item'), null)
 })
 
 test('the content column stays put when the marker changes width', () => {
@@ -123,7 +124,8 @@ test('a list inside a container continues after the container prefix', () => {
     ['> - [x] done', '> - [ ] '],
     ['> - a\n>   - nested', '>   - '],
     ['> > - a', '> > - '],
-    ['- item\n  > - a', '  > - '],
+    // 0.2 U-006: a quote directly under item text is text, so a blank line opens it.
+    ['- item\n\n  > - a', '  > - '],
     ['- a\n\n  > - b', '  > - '],
     ['> ::: note\n> - a', '> - '],
     // A footnote body continues at the two-space body indent, whatever the label's width.
@@ -132,11 +134,12 @@ test('a list inside a container continues after the container prefix', () => {
     ['[^😀]: - first', '  - '],
     ['[^a]: - first\n  - second', '  - '],
     ['[^a]: 1. first', '  2. '],
-    ['> [^a]: - first', '>   - '],
     // A description body continues at its content column.
     [':: term\n: - first', '  - '],
     [':: term\n:   1. first', '    2. '],
   ] as const) assert.equal(inserted(before), next, before)
+  // 0.2 C2-B-081: a definition inside a quote is text, so no list opens there.
+  assert.equal(inserted('> [^a]: - first'), null)
 })
 
 test('the container prefix and the marker are one edit', () => {
@@ -152,7 +155,7 @@ test('Enter on a content-less marker in a container ends the list and keeps the 
   for (const [before, kept, cursor] of [
     ['> - a\n> - ', '>', '> '],
     ['> > - a\n> > - ', '> >', '> > '],
-    ['- item\n  > - a\n  > - ', '  >', '  > '],
+    ['- item\n\n  > - a\n  > - ', '  >', '  > '],
     ['> ::: note\n> - a\n> - ', '>', '> '],
   ] as const) {
     const markerLine = before.split('\n').length - 1

@@ -18,6 +18,7 @@ import {
   type Heading,
   type IncludeConfig,
   type InlineNode,
+  type LintOptions,
 } from './engine.js'
 import { portableIncludePaths, type IncludePaths } from './include-paths.js'
 import { smartPunctuationText } from './inline-text.js'
@@ -93,13 +94,23 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
   const paths = options.includes?.paths ?? portableIncludePaths
   const includeConfig = v2IncludeConfig(options.includes ?? {})
   let lintDiagnostics: EngineDiagnostic[] = []
+  const lintOptions = {
+    ...(options.lint?.platforms?.length ? { platforms: options.lint.platforms } : {}),
+    ...(includeConfig ? { includes: includeConfig } : {}),
+  }
+  const rules = lintRules(options.lint?.severities)
   try {
-    lintDiagnostics = lint(source, {
-      ...(options.lint?.platforms?.length ? { platforms: options.lint.platforms } : {}),
-      ...(includeConfig ? { includes: includeConfig } : {}),
-    })
+    lintDiagnostics = lint(source, rules ? { ...lintOptions, rules: rules as LintOptions['rules'] } : lintOptions)
   } catch (error) {
     if (!(error instanceof CarveOptionError)) throw error
+    // A severity naming no 0.2 rule must not cost the other findings.
+    if (rules) {
+      try {
+        lintDiagnostics = lint(source, lintOptions)
+      } catch (retry) {
+        if (!(retry instanceof CarveOptionError)) throw retry
+      }
+    }
   }
   // Include findings are published from the include pass below, anchored on the root.
   const included = includeConfig && lintDiagnostics.some((entry) => entry.file !== undefined)
@@ -118,7 +129,7 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
       range,
       source: 'carve',
       code: entry.code,
-      message: childName ? `${entry.message} (in ${childName})` : entry.message,
+      message: childName ? `${entry.message} (in ${childName}${childLineSuffix(child?.source, entry.range?.startOffset)})` : entry.message,
     }
     if (child?.watch !== undefined && entry.range) diagnostic.relatedInformation = [{
       location: { uri: paths.toUri(child.watch), range: byteRange(child.source, entry.range.startOffset, entry.range.endOffset) },
@@ -207,7 +218,11 @@ function includeSiteOf(document: Document, pointer: string | undefined): Range |
     const typed = node as { type?: string; pos?: { startOffset: number; endOffset: number } } | undefined
     if (typed?.type === 'include' && typed.pos) {
       const source = sourceOfLastAnalysis
-      return source === undefined ? undefined : byteRange(source, typed.pos.startOffset, typed.pos.endOffset)
+      if (source === undefined) return undefined
+      const range = byteRange(source, typed.pos.startOffset, typed.pos.endOffset)
+      // The directive's own line, below any attribute lines its span starts at (C2-A-148).
+      const line = ownStartLine({ startLine: range.start.line + 1, endLine: range.end.line + 1 }, source.split(/\r\n?|\n/))
+      return line === range.start.line ? range : { start: { line, character: range.start.character }, end: range.end }
     }
   }
   return undefined
@@ -253,7 +268,7 @@ export function tolerantHeadingSymbols(source: string): DocumentSymbol[] {
 }
 
 function firstDuplicateDeclaration(source: string, rule: string, message: string, repeatedLine: number): Range | null {
-  const headingKey = rule === 'duplicate-heading-id' ? /heading id "([^"]+)"/.exec(message)?.[1] : undefined
+  const headingKey = rule === 'duplicate-id' ? /authored id "([^"]+)"/.exec(message)?.[1] : undefined
   const footnoteKey = rule === 'duplicate-footnote-definition' ? /\[\^([^\]]+)\]/.exec(message)?.[1] : undefined
   const key = headingKey ?? footnoteKey
   if (!key) return null
@@ -537,4 +552,21 @@ function rangeAt(source: string, index: number, length: number): Range {
     start: { line, character },
     end: { line, character: character + length },
   }
+}
+
+/**
+ * 0.2 lint switches rules by id and keeps opt-in rules off by default. A
+ * configured severity turns its rule on, and `off` turns it off.
+ */
+function lintRules(severities: NonNullable<AnalyzeOptions['lint']>['severities']): Record<string, 'on' | 'off'> | undefined {
+  if (!severities) return undefined
+  const entries = Object.entries(severities)
+  if (entries.length === 0) return undefined
+  return Object.fromEntries(entries.map(([id, severity]) => [id, severity === 'off' ? 'off' : 'on']))
+}
+
+/** `:line` of a byte offset in an included file, 1-based, when the file was read. */
+function childLineSuffix(source: string | undefined, byteOffset: number | undefined): string {
+  if (source === undefined || byteOffset === undefined) return ''
+  return `:${byteRange(source, byteOffset, byteOffset).start.line + 1}`
 }

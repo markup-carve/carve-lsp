@@ -1,4 +1,4 @@
-import { captionInlines, footnoteEntries, ownPos } from './tree.js'
+import { captionInlines, delimitedTableFormat, footnoteEntries, ownPos, ownStartLine } from './tree.js'
 import { SemanticTokensBuilder, type SemanticTokens } from 'vscode-languageserver/node.js'
 import { type CaptionNode,
   type BlockNode,
@@ -90,9 +90,10 @@ function astSemanticTokens(doc: Document, source: string, options: SemanticOptio
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   for (const node of doc.children) {
     if (node.type === 'footnote') for (const child of node.children) collectBlock(tokens, lines, child, keywords, spanNames)
+    else if (node.type === 'abbreviation_def') pushPosition(tokens, lines, node.pos, 'property')
     else collectBlock(tokens, lines, node as BlockNode, keywords, spanNames)
   }
-  const codeBlock = codeBlockLines(doc)
+  const codeBlock = codeBlockLines(doc, lines)
 
   // Emit frontmatter tokens. The AST stores the parsed YAML in doc.frontmatter
   // but has no position info for the --- delimiters, so we walk source lines.
@@ -128,7 +129,7 @@ function astSemanticTokens(doc: Document, source: string, options: SemanticOptio
 function collectBlock(tokens: Token[], lines: string[], block: BlockNode, keywords: Token[], spanNames: string[]): void {
   const node = { ...block, pos: ownPos(block.pos, lines) } as BlockNode
   const names = node.type === 'table'
-    ? ('sourceFormat' in node && node.sourceFormat ? ['table'] : ['header-rows', 'footer-rows', 'header-cols', 'aligns', 'valigns', 'widths'])
+    ? (delimitedTableFormat(node, lines) ? ['table'] : ['header-rows', 'footer-rows', 'header-cols', 'aligns', 'valigns', 'widths'])
     : node.type === 'list' || node.type === 'definition_list' ? ['loose'] : []
   if (names.length && node.pos?.startLine !== undefined) {
     for (let line = node.pos.startLine - 2; line >= 0; line--) {
@@ -205,7 +206,7 @@ function collectBlock(tokens: Token[], lines: string[], block: BlockNode, keywor
       collectInline(tokens, lines, captionInlines(node.caption), keywords, spanNames)
       break
     case 'table':
-      if (node.pos && /^\s*:{3,}\s*table\b/.test(lines[node.pos.startLine - 1] ?? '')) {
+      if (node.pos && (/^\s*:{3,}\s*table\b/.test(lines[node.pos.startLine - 1] ?? '') || delimitedTableFormat(node, lines))) {
         pushFenceLines(tokens, lines, node.pos)
         collectInline(tokens, lines, captionInlines(node.caption), keywords, spanNames)
         break
@@ -397,7 +398,7 @@ function pushFenceLines(tokens: Token[], lines: string[], pos: Position | undefi
 
 // Zero-based lines of fenced blocks, fences included, at any nesting depth.
 // pushFenceLines owns their tokens; the generic scanners must not add to them.
-function codeBlockLines(doc: Document): Set<number> {
+function codeBlockLines(doc: Document, lines: readonly string[]): Set<number> {
   const body = new Set<number>()
   const visit = (value: unknown): void => {
     if (Array.isArray(value)) {
@@ -406,8 +407,8 @@ function codeBlockLines(doc: Document): Set<number> {
     }
     if (value === null || typeof value !== 'object') return
     const node = value as { type?: unknown; pos?: Position }
-    if ((node.type === 'code_block' || node.type === 'raw_block' || (node.type === 'table' && 'sourceFormat' in node && node.sourceFormat)) && node.pos?.startLine !== undefined && node.pos.endLine !== undefined) {
-      for (let line = node.pos.startLine - 1; line < node.pos.endLine; line++) body.add(line)
+    if ((node.type === 'code_block' || node.type === 'raw_block' || delimitedTableFormat(node as { type?: string; pos?: Position }, lines) !== undefined) && node.pos?.startLine !== undefined && node.pos.endLine !== undefined) {
+      for (let line = ownStartLine(node.pos, lines); line < node.pos.endLine; line++) body.add(line)
       return
     }
     for (const key of Object.keys(node)) if (key !== 'pos') visit((node as Record<string, unknown>)[key])

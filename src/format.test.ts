@@ -68,14 +68,14 @@ test('inserts a matching closer after a code fence opener', () => {
   for (const [before, closer] of [
     ['```js', '\n```'],
     ['```', '\n```'],
-    ['~~~', '\n~~~'],
     ['````js', '\n````'],
-    ['~~~~ py "title" [lbl]', '\n~~~~'],
     ['```js "t"', '\n```'],
     ['``` =html', '\n```'],
     ['::: note\n```js', '\n```'],
     ['- a\n\n  ```js', '\n  ```'],
   ] as const) assert.equal(prefixAfter(before), closer, before)
+  // 0.2 U-116: a tilde run opens no fence, so no closer follows it.
+  for (const before of ['~~~', '~~~~ py "title" [lbl]']) assert.equal(prefixAfter(before), '', before)
   // The closer lands as the block's own closing fence.
   const html = render('```js\nx' + prefixAfter('```js') + '\n')
   assert.equal(html, '<pre><code class="language-js">x\n</code></pre>')
@@ -140,7 +140,8 @@ test('list continuation leaves a colon fence on a marker line to the fence conti
 })
 
 test('keeps a missing final line ending missing when adding it changes the render', () => {
-  assert.equal(formatDocument('```\nx'), '```\nx')
+  // 0.2 C2-B-222: an unclosed fence's last line keeps its line feed, so adding one no longer changes the render.
+  assert.equal(formatDocument('```\nx'), '```\nx\n')
   assert.equal(formatDocument('```\nx\n```'), '```\nx\n```\n')
 })
 

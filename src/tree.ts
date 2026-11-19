@@ -85,3 +85,16 @@ export function ownPos<P extends { startLine?: number; startColumn?: number; end
   const line = ownStartLine(pos, lines) + 1
   return line === pos.startLine ? pos : { ...pos, startLine: line }
 }
+
+/**
+ * `csv` or `tsv` for a delimited table (C2-B-180), read from its fence line:
+ * the 0.2 tree keeps no source format on the table.
+ */
+export function delimitedTableFormat(node: { type?: string; pos?: { startLine?: number; startColumn?: number; endLine?: number } }, lines: readonly string[]): 'csv' | 'tsv' | undefined {
+  if (node.type !== 'table' || node.pos?.startLine === undefined) return undefined
+  const line = ownStartLine(node.pos, lines)
+  const text = lines[line] ?? ''
+  const from = line === node.pos.startLine - 1 && node.pos.startColumn !== undefined ? astColumnToCharacter(text, node.pos.startColumn) : 0
+  const format = /^[ \t>]*(?:`{3,}|~{3,})[ \t]*(csv|tsv)\b/.exec(text.slice(from))?.[1]
+  return format === 'csv' || format === 'tsv' ? format : undefined
+}

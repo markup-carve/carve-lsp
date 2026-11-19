@@ -143,8 +143,8 @@ function verbatimColumn(source: string, lines: string[], line: number): number |
   let column: number | null = null
   walkAst(source, (node) => {
     const { startLine, endLine, startColumn } = node.pos ?? {}
-    // A `%%` line comment is inline: the text before it is ordinary.
-    if (!VERBATIM_TYPES.has(node.type ?? '') || node.block === false || startLine === undefined || endLine === undefined || startColumn === undefined) return
+    // Only a `%%%` comment block is verbatim (C2-A-074); a `%%` or braced comment is inline.
+    if (!VERBATIM_TYPES.has(node.type ?? '') || (node.type === 'comment' && node.form !== 'block') || startLine === undefined || endLine === undefined || startColumn === undefined) return
     if (line + 1 < startLine || line + 1 > endLine) return
     const at = astColumnToCharacter(lines[startLine - 1] ?? '', startColumn)
     column = column === null ? at : Math.min(column, at)
@@ -157,7 +157,7 @@ function inVerbatim(source: string, line: number): boolean {
   let found = false
   walkAst(source, (node) => {
     const { startLine, endLine } = node.pos ?? {}
-    if (VERBATIM_TYPES.has(node.type ?? '') && startLine !== undefined && endLine !== undefined && line + 1 >= startLine && line + 1 <= endLine) found = true
+    if (VERBATIM_TYPES.has(node.type ?? '') && !(node.type === 'comment' && node.form !== 'block') && startLine !== undefined && endLine !== undefined && line + 1 >= startLine && line + 1 <= endLine) found = true
   })
   return found
 }
@@ -299,10 +299,12 @@ const BARE_DESCRIPTION = /^: +$/
 function descriptionLines(source: string): Map<number, AstNode> {
   const lines = new Map<number, AstNode>()
   walkAst(source, (node) => {
-    if (node.type !== 'definition_list' || !Array.isArray(node.items)) return
-    for (const item of node.items as Array<{ termSpans?: Array<{ startLine: number }>; definitionLines?: number[] }>) {
-      for (const span of item.termSpans ?? []) lines.set(span.startLine - 1, node)
-      for (const line of item.definitionLines ?? []) lines.set(line - 1, node)
+    // 0.2 C2-A-062: the list holds `definition_term` and `definition_description` nodes; each opens on its marker line.
+    if (node.type !== 'definition_list' || !Array.isArray(node.children)) return
+    for (const child of node.children as AstNode[]) {
+      if ((child.type === 'definition_term' || child.type === 'definition_description') && child.pos?.startLine !== undefined) {
+        lines.set(child.pos.startLine - 1, node)
+      }
     }
   })
   return lines
