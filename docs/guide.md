@@ -185,7 +185,7 @@ client severity for one code keeps the project severities for the others.
 | Setting | Default | Meaning |
 |---|---|---|
 | `platforms` | `[]` | Extra platform lint profiles. Currently supports `"github"`. |
-| `extensions` | `[]` | Enabled extension names. `"semantic-span"` colors `samp`, `var`, `cite`, and `dfn` as keywords in span attributes. Under Carve 0.2 it does not reach the lint rules yet. |
+| `extensions` | `[]` | Enabled extension names. `"semantic-span"` colors `samp`, `var`, `cite`, and `dfn` as keywords in span attributes. It also turns on the lint rules for those attributes, such as `semantic-attribute-outside-span`. |
 | `inlayHints` | `true` | Show inlay hints: generated heading identifiers, colon-fence closers, and the bare list marker hint. `false` turns all of them off; an object such as `{ "bareListMarkers": false }` keeps the others and turns that one off. |
 | `exportActions` | `true` | Offer the *Export as Markdown* and *Export as HTML* source actions, plus *Export as PDF* when the client opts in to its server command. Editors with their own export commands can turn this off. |
 | `formatter` | `"conservative"` | Use whitespace-only conservative formatting; `"migration"` opts into canonical whole-document conversion. |
@@ -315,8 +315,7 @@ The source actions *Export as Markdown* and *Export as HTML*, plus *Export as PD
 when enabled by the client, write next to the source (kind `source.export`):
 `notes.crv` becomes `notes.md`,
 `notes.html`, or `notes.pdf`. The text exports expand includes on the same terms as
-the preview. *Export as Markdown* fails with a "writer not available" error
-until the 0.2 engine registers a `markdown` writer. A missing target is created, an existing one is replaced as a
+the preview. A missing target is created, an existing one is replaced as a
 whole. The text actions are offered only to clients that support creating files
 in a workspace edit. All three can be turned off with the `exportActions`
 setting. Most editors apply text edits to a buffer and leave saving to the user.
