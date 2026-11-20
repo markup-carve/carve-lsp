@@ -114,9 +114,9 @@ test('moves a list marker below the content column to either column the engine n
 })
 
 test('indents a description separator below its list to the column the engine names', () => {
-  assert.equal(applyFirst('- a\n  :: term\n : detail\n', 'Indent'), '- a\n  :: term\n  : detail\n')
-  assert.equal(applyFirst('- a\n  :: term\n: detail\n', 'Indent'), '- a\n  :: term\n  : detail\n')
-  assert.deepEqual(analyzeCarve('- a\n  :: term\n  : detail\n').diagnostics.filter((d) => d.code === 'description-separator-below-content-column'), [])
+  assert.equal(applyFirst('- a\n\n  :: term\n : detail\n', 'Indent'), '- a\n\n  :: term\n  : detail\n')
+  assert.equal(applyFirst('- a\n\n  :: term\n: detail\n', 'Indent'), '- a\n\n  :: term\n  : detail\n')
+  assert.deepEqual(analyzeCarve('- a\n\n  :: term\n  : detail\n').diagnostics.filter((d) => d.code === 'description-separator-below-content-column'), [])
 })
 
 test('replaces a near-miss consumed key with the key the engine suggests', () => {
