@@ -1,18 +1,21 @@
-import { carveToHtml, parse } from '@markup-carve/carve'
+import { render, parse } from './engine.js'
 import { CodeAction, CodeActionKind, Range, TextEdit } from 'vscode-languageserver-types'
 import { walkNodes, type AstNode } from './ast-walk.js'
 import { alignCanonicalTable } from './table-alignment.js'
+import { delimitedTableFormat, ownStartLine, tableRows } from './tree.js'
 
-type Cell = AstNode & { header?: boolean; children?: AstNode[] }
-type Row = AstNode & { cells?: Cell[]; footer?: boolean }
-type Table = AstNode & { rows?: Row[]; sourceFormat?: string }
+const rowsOf = (table: { children?: unknown }): Row[] => tableRows(table) as unknown as Row[]
+
+type Cell = { header?: boolean; children?: AstNode[]; [key: string]: unknown }
+type Row = { cells?: Cell[]; footer?: boolean }
+type Table = AstNode & { rows?: Row[] }
 export interface ConversionEdit { startOffset: number; endOffset: number; textEdit: TextEdit; newText: string }
 
 function cells(source: string): string[][][] {
   const result: string[][][] = []
   walkNodes(parse(source), node => {
     if (node.type === 'table') {
-      result.push(((node as Table).rows ?? []).map(row => (row.cells ?? []).map(cell =>
+      result.push((rowsOf(node)).map(row => (row.cells ?? []).map(cell =>
         (cell.children ?? []).filter(child => child.type === 'text' || child.type === 'escaped_text').map(child => String(child.value ?? '')).join(''))))
       return false
     }
@@ -22,7 +25,7 @@ function cells(source: string): string[][][] {
 
 export function isLosslessRewrite(oldSource: string, newSource: string): boolean {
   try {
-    return carveToHtml(oldSource) === carveToHtml(newSource) && JSON.stringify(cells(oldSource)) === JSON.stringify(cells(newSource))
+    return render(oldSource) === render(newSource) && JSON.stringify(cells(oldSource)) === JSON.stringify(cells(newSource))
   } catch { return false }
 }
 
@@ -46,8 +49,11 @@ function selected(source: string, line: number, format: 'csv' | 'pipe'): { table
   walkNodes(parse(source, { positions: true }), node => {
     if (node.type !== 'table' || !node.pos?.startLine || !node.pos.endLine) return
     const table = node as Table
-    if (format === 'csv' ? !['csv', 'tsv'].includes(table.sourceFormat ?? '') : !!table.sourceFormat) return false
-    const start = node.pos.startLine - 1, last = node.pos.endLine - 1
+    const texts = lines.map((item) => item.text)
+    const delimited = delimitedTableFormat(node, texts)
+    if (format === 'csv' ? delimited === undefined : delimited !== undefined) return false
+    // A 0.2 span starts at the attribute line the table took (C2-A-148); `start` is the table's own first line.
+    const start = ownStartLine(node.pos, texts), last = node.pos.endLine - 1
     const previous = lines[start - 1]?.text ?? ''
     const hasAttrs = format === 'csv' ? TABLE_FLAG.test(previous) : /^\{[^{}]*\}$/.test(previous) && !TABLE_FLAG.test(previous)
     const first = hasAttrs ? start - 1 : start
@@ -86,7 +92,7 @@ function escapeField(field: string, minimum: number): string {
   for (let tier = minimum; tier < ESCAPE_TIERS.length; tier++) {
     const escaped = field.replace(ESCAPE_TIERS[tier]!, character => '\\' + character)
     if (tier === ESCAPE_TIERS.length - 1) return escaped
-    const cell = ((parse(`| ${escaped} |\n`).children?.[0] as Table | undefined)?.rows?.[0]?.cells ?? [])
+    const cell = (rowsOf((parse(`| ${escaped} |\n`).children?.[0] ?? {}) as { children?: unknown })[0]?.cells ?? [])
     if (cell.length === 1 && isPlainCell(cell[0]!) && value(cell[0]!).trim() === field.trim()) return escaped
   }
   return field
@@ -96,7 +102,7 @@ export function csvTableToPipe(source: string, line: number): ConversionEdit | n
   try {
     const info = selected(source, line, 'csv')
     if (!info) return null
-    const rows = info.table.rows ?? []
+    const rows = rowsOf(info.table)
     if (rows.some(row => (row.cells ?? []).some(cell => /[\r\n]/.test(value(cell))))) return null
     const caption = info.lines[info.last]?.text.startsWith('^ ') ? '\n' + info.lines[info.last]!.text : ''
     const attrs = info.attrs?.slice(1, -1).split(/\s+/).filter(token => token !== '' && token !== 'table').join(' ')
@@ -120,9 +126,9 @@ export function pipeTableToCsv(source: string, line: number): ConversionEdit | n
   try {
     const info = selected(source, line, 'pipe')
     if (!info) return null
-    const rows = info.table.rows ?? []
+    const rows = rowsOf(info.table)
     if (rows.length === 0 || rows.some(row => !row.cells?.length || row.cells.some(cell =>
-      !!cell.attrs || !!cell.colspan || !!cell.rowspan || !!cell.colSpan || !!cell.rowSpan ||
+      !!cell.attrs || !!cell.align || !!cell.valign || !!cell.colspan || !!cell.rowspan || !!cell.colSpan || !!cell.rowSpan ||
       !isPlainCell(cell)))) return null
     const headers = rows.filter(row => row.cells!.every(cell => cell.header)).length
     if (rows.some((row, index) => row.cells!.some(cell => !!cell.header !== (index < headers)))) return null

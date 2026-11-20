@@ -44,12 +44,13 @@ test('a containment refusal no longer claims the target could not be resolved', 
 
 // The control. A file that really is missing must keep reporting as missing, or
 // the new code means nothing.
-test('a genuinely missing target still publishes include-unresolved', () => {
-  assert.equal(diagnose('{{ chapters/missing.crv }}\n', 'not-found').code, 'include-unresolved')
+// 0.2 C2-N-013: the engine names a missing target `include-not-found`, with its own wording.
+test('a genuinely missing target still publishes include-not-found', () => {
+  assert.equal(diagnose('{{ chapters/missing.crv }}\n', 'not-found').code, 'include-not-found')
 })
 
-test('a genuinely missing target keeps its unresolved wording', () => {
-  assert.match(diagnose('{{ chapters/missing.crv }}\n', 'not-found').message, /could not be resolved/)
+test('a genuinely missing target keeps the not-found wording', () => {
+  assert.match(diagnose('{{ chapters/missing.crv }}\n', 'not-found').message, /does not exist/)
 })
 
 test('an absolute path refusal publishes include-denied', () => {
@@ -75,7 +76,8 @@ test('a target that is not a regular file publishes include-non-text', () => {
   assert.equal(diagnose('{{ chapters }}\n', 'not-a-file').code, 'include-non-text')
 })
 
-test('a resolver that throws keeps include-unresolved, since no class is known', () => {
+// 0.2 C2-N-007, C2-N-013: a resolver that throws refuses the target as `include-unreadable`.
+test('a resolver that throws publishes include-unreadable, since no class is known', () => {
   const result = analyzeCarve('{{ a.crv }}\n', {
     includes: {
       resolver: () => {
@@ -84,7 +86,7 @@ test('a resolver that throws keeps include-unresolved, since no class is known',
       sourcePath: '/ws/doc.crv',
     },
   })
-  assert.equal(result.diagnostics.find((item) => item.source === 'carve')?.code, 'include-unresolved')
+  assert.equal(result.diagnostics.find((item) => item.source === 'carve')?.code, 'include-unreadable')
 })
 
 // §19 I7. The internal token stays internal; the message names the class in the
@@ -93,14 +95,13 @@ test('the internal denial token never reaches the published message', () => {
   assert.doesNotMatch(diagnose('{{ ../outside.crv }}\n', 'outside-root').message, /outside-root/)
 })
 
-// The cross-engine contract. Changing this would diverge from four
-// include-conformance goldens and could not survive #187, where the engine owns
-// the warning and can only spell `include-unresolved`.
-test('the cross-engine rule id on the warning is still include-unresolved', () => {
+// The cross-engine contract: the warning keeps the engine's rule id. 0.2 C2-N-013
+// names a target outside the root `include-outside-root`.
+test('the cross-engine rule id on the warning is the engine\'s include-outside-root', () => {
   const result = resolveIncludes('{{ ../outside.crv }}\n', {
     resolver: (includePath) => ({ ok: false, id: includePath, denial: 'outside-root' }),
   })
-  assert.equal(result.warnings[0]?.rule, 'include-unresolved')
+  assert.equal(result.warnings[0]?.rule, 'include-outside-root')
 })
 
 test('the warning carries the refusal class for the diagnostic layer to map', () => {

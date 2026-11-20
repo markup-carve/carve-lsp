@@ -1,5 +1,6 @@
 import { type Location, type Position, type ReferenceContext } from 'vscode-languageserver-types'
-import { type Document, type InlineNode } from '@markup-carve/carve'
+import { type Document, type InlineNode } from './engine.js'
+import { headingId, ownStartLine } from './tree.js'
 import { smartPunctuationText } from './inline-text.js'
 import { captionTargetById, captionTargets } from './captions.js'
 import { walkNodes } from './ast-walk.js'
@@ -74,7 +75,7 @@ function resolveHeadingGroup(
 ): Location[] | null {
   // Cursor anywhere on a heading's line
   const heading = model.sites.find((site) =>
-    site.kind === 'heading' && site.declaration && site.node?.pos?.startLine === position.line + 1)
+    site.kind === 'heading' && site.declaration && site.node?.pos !== undefined && ownStartLine(site.node.pos, model.lines) === position.line)
   if (heading) {
     const text = implicitKey(headingPlainText((heading.node!.children ?? []) as InlineNode[]))
     return collectRefs(uri, model, heading.key, { line: position.line, kind: 'heading', text }, context)
@@ -133,7 +134,7 @@ function captionIdDeclaredAt(model: ReferenceModel, lineIndex: number): string |
   if (!model.doc) return null
   for (const target of captionTargets(model.doc)) {
     if (!target.pos) continue
-    const hostLine = target.pos.startLine - 1
+    const hostLine = ownStartLine(target.pos, model.lines)
     if (lineIndex === hostLine || lineIndex === hostLine - 1) return target.id
   }
   return null
@@ -158,20 +159,20 @@ function findDeclarationById(
 ): Declaration | null {
   const doc = model.doc
   if (!doc) return null
-  const heading = findHeading(doc, (candidate) => candidate.attrs?.id === targetId)
+  const heading = findHeading(doc, (candidate) => headingId(candidate) === targetId)
   if (heading?.pos) {
     return {
-      line: heading.pos.startLine - 1,
+      line: ownStartLine(heading.pos, model.lines),
       kind: 'heading',
       text: implicitKey(headingPlainText(heading.children)),
     }
   }
   const caption = captionTargetById(doc, targetId)
-  if (caption?.pos) return { line: caption.pos.startLine - 1, kind: 'caption' }
+  if (caption?.pos) return { line: ownStartLine(caption.pos, model.lines), kind: 'caption' }
   return null
 }
 
-type Heading = import('@markup-carve/carve').Heading
+type Heading = import('./engine.js').Heading
 
 /** The first heading anywhere in the document - list items and footnote bodies included - that matches. */
 function findHeading(doc: Document, matches: (heading: Heading) => boolean): Heading | null {
@@ -385,7 +386,7 @@ function findHeadingLineByText(model: ReferenceModel, targetText: string): numbe
   if (!model.doc) return null
   const heading = findHeading(model.doc, (candidate) => headingPlainText(candidate.children) === targetText)
   if (!heading || !heading.pos) return null
-  return heading.pos.startLine - 1
+  return ownStartLine(heading.pos, model.lines)
 }
 
 function headingPlainText(nodes: InlineNode[]): string {
@@ -397,7 +398,7 @@ function headingPlainText(nodes: InlineNode[]): string {
     } else if (node.type === 'code') out += node.value
     // An inline literal (§27) renders as visible prose, so it must contribute
     // to the heading text used for cross-reference and rename matching.
-    else if (node.type === 'literal_inline') out += node.content
+    else if (node.type === 'literal_inline') out += node.value
     else out += smartPunctuationText(node)
   }
   return out.trim()

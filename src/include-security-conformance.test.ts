@@ -130,7 +130,8 @@ const PINNED_DENIAL_CLASSES = [
 ]
 
 const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const corpusPath = path.join(sourceRoot, 'tests/spec/tests/include-security-conformance/vectors.json')
+// The 0.1 vectors (carve 51c5631 `tests/include-security-conformance/vectors.json`); carve `next2` no longer carries them.
+const corpusPath = path.join(sourceRoot, 'tests/fixtures/include-security-vectors.json')
 const corpus = JSON.parse(readFileSync(corpusPath, 'utf8')) as { version: number; vectors: Vector[] }
 
 function fixture(tree: Vector['tree']): string {
@@ -192,7 +193,10 @@ function graph(vector: Vector): Record<string, unknown> {
       ? { ok: false, id: request, denial: 'not-found' }
       : { ok: true, id: request, source, bytes: Buffer.byteLength(source, 'utf8') }
   }
-  const result = resolveIncludes(vector.entry ?? '', {
+  // 0.2 C2-N-002: a directive in a sentence is text, so the 0.1 entries that
+  // chain directives on one line give each its own block line.
+  const entry = (vector.entry ?? '').replace(/\}\} \{\{/g, '}}\n\n{{')
+  const result = resolveIncludes(entry, {
     resolver,
     maxDepth: vector.maxDepth,
     maxBytes: vector.maxBytes,

@@ -4,6 +4,22 @@ All notable changes to carve-lsp are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Breaking
+
+- The server runs on the Carve 0.2 engine (`@markup-carve/carve`, carve-js `next2`): diagnostics use the 0.2 lint ids, positions and node shapes, and documents are read as 0.2 reads them (#650).
+- The "Escape the `+`" quick fix is gone with the 0.2 removal of the continuation marker (#650).
+
+### Changed
+
+- A `severities` entry also turns an opt-in 0.2 lint rule on, or off with `"off"` (#650).
+- The engine pin follows the carve-js `next2` rename: the 0.2 API is the package root (markup-carve/carve-js#5064).
+- Include diagnostics come from the 0.2 engine's include pass and carry its rule ids: a missing target is `include-not-found`, a target outside the root `include-outside-root`, a resolver that throws `include-unreadable`, and an invalid option `include-option-invalid`. Ids and footnote labels are no longer renamed across includes, and a directive inside a sentence is text.
+- Migration quick fixes and *Fix all Carve migration collisions* apply the rewrites of `carve lint --fix`, so a bare strike becomes `{~x~}`. The `carve-legacy` 0.1.17 alias is gone (markup-carve/carve-js#5086).
+- *Export as Markdown* writes through the engine's `markdown` export writer again (markup-carve/carve-js#5057).
+- The `semantic-span` lint extension reaches the lint rules again through the engine's `semanticSpan` extension (markup-carve/carve-js#5060).
+
 ## [0.1.16] - 2026-11-12
 
 The server follows the carve-js 0.1.16 readings: braced table alignment, the renamed lint rules and the new lint severities.

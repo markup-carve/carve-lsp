@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, next2]
   pull_request:
-    branches: [main]
+    branches: [main, next2]
 
 # Only PR runs share a group; every other run gets its own so none is dropped.
 concurrency:
@@ -41,20 +41,8 @@ jobs:
       - run: npm run build
       - run: npm test
 
-      # The unit suite reads exactly ONE file out of the tests/spec submodule
-      # (tests/include-security-conformance/vectors.json, 19 vectors). It reads no
-      # corpus document at all, so every `chore: bump spec corpus` PR was gated by a
-      # check that could not tell one corpus from another: measured on this repo,
-      # deleting the entire tests/spec/tests/corpus directory left the suite green at
-      # 272 of 272. The submodule bump was reviewed on a green that carried no
-      # information about the thing being bumped.
-      #
-      # tools/corpus-through-server.mjs already drives every corpus document through
-      # the built server, and already refuses to report over a short population. It
-      # existed only in the scheduled engine-drift workflow, which clones carve main
-      # and therefore never looks at the pin this repo actually ships. Running it here
-      # against the SUBMODULE is what makes the pin gated: a truncated checkout, a
-      # corpus that needs regenerating, or a document this server throws on now turns
-      # the pull request red instead of arriving after the merge.
-      - name: The pinned corpus goes through the server
-        run: node tools/corpus-through-server.mjs tests/spec/tests/corpus
+      # Every input of the pinned spec's 0.2 conformance examples goes through the
+      # built server; the 0.1 corpus that corpus-through-server.mjs reads is gone
+      # from carve next2.
+      - name: The pinned spec examples go through the server
+        run: node tools/examples-through-server.mjs tests/spec/spec/0.2/conformance/examples.json

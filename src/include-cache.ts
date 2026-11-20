@@ -88,4 +88,4 @@ export class IncludeParseCache {
     this.#entries.clear()
   }
 }
-import type { Document } from '@markup-carve/carve'
+import type { Document } from './engine.js'

@@ -1,10 +1,8 @@
-import { parse, resolve, type Document } from '@markup-carve/carve'
+import { parse, type Document } from './engine.js'
 
 /**
- * `resolve(parse(source))`, memoized for the last few sources.
- *
- * The cache holds the RESOLVED tree because `resolve()` mutates the parsed one
- * in place. Callers share the returned object and must treat it as read-only.
+ * The 0.2 tree of `source`, memoized for the last few sources. Callers share
+ * the returned object and must treat it as read-only.
  */
 const LIMIT = 4
 const entries: Array<{ source: string; doc: Document }> = []
@@ -16,7 +14,7 @@ export function resolvedDocument(source: string): Document {
     entries.unshift(hit!)
     return hit!.doc
   }
-  const doc = resolve(parse(source, { positions: true }))
+  const doc = parse(source)
   entries.unshift({ source, doc })
   if (entries.length > LIMIT) entries.length = LIMIT
   return doc

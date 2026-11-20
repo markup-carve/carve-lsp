@@ -14,8 +14,9 @@ test('keeps serving when the client refuses every capability registration', asyn
     initializationOptions: {},
   })
   client.notify('initialized', {})
+  // 0.2 lint-rules.json: `djot-plus-bullet` is opt-in, so the sample uses a rule that is on by default.
   client.notify('textDocument/didOpen', {
-    textDocument: { uri: 'untitled:refused.crv', languageId: 'carve', version: 1, text: '+ item\n' },
+    textDocument: { uri: 'untitled:refused.crv', languageId: 'carve', version: 1, text: '**bold**\n' },
   })
 
   // Both registrations are refused before this request is answered, so an

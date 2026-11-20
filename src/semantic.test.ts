@@ -150,21 +150,23 @@ const at = (source: string, line: number) =>
 
 test('consumed block attributes color only their key words', () => {
   for (const format of ['csv', 'tsv']) {
-    const source = `{table #data}\n\n\`\`\`${format}\na,b\n1,2\n\`\`\``
+    // 0.2 U-031: an attribute line above a blank line attaches to nothing, so it sits directly on the block.
+    const source = `{table #data}\n\`\`\`${format}\na,b\n1,2\n\`\`\``
     assert.ok(at(source, 0).includes('1+5:keyword'), format)
     assert.ok(at(source, 0).some((token) => token.endsWith(':property')), format)
   }
   for (const body of ['- one\n- two', ':: Term\n: definition']) {
-    assert.ok(at(`{loose}\n\n${body}`, 0).includes('1+5:keyword'), body)
+    assert.ok(at(`{loose}\n${body}`, 0).includes('1+5:keyword'), body)
   }
-  const table = '{header-rows=1 footer-rows=0 header-cols=1 aligns=lc valigns=tt widths=12 #x}\n\n| a | b |\n|---|---|\n| c | d |'
+  const table = '{header-rows=1 footer-rows=0 header-cols=1 aligns=lc valigns=tt widths=12 #x}\n| a | b |\n| c | d |'
   for (const name of ['header-rows', 'footer-rows', 'header-cols', 'aligns', 'valigns', 'widths']) {
     assert.ok(semanticTokens(table).some((token) => token.line === 0 && token.character === table.indexOf(name) && token.length === name.length && token.type === 'keyword'), name)
   }
 })
 
 test('table attribute words in a cell are not keywords', () => {
-  assert.ok(!semanticTokens('| header-rows=1 | b |\n|---|---|\n| c | d |').some((token) => token.type === 'keyword'))
+  // 0.2 U-055: a GFM separator row is an ordinary row, so the sample has none.
+  assert.ok(!semanticTokens('| header-rows=1 | b |\n| c | d |').some((token) => token.type === 'keyword'))
 })
 
 test('a consumed key reaches its block through a stacked attribute line', () => {
@@ -245,7 +247,8 @@ test('heading and caption verbatim runs protect percent markers without hiding t
       const at = (prefix + body).split('\n')[line]!.indexOf('%%')
       const over = tokens.filter((token) => token.line === line && token.character <= at && at < token.character + token.length)
       assert.equal(over.length, 1, source)
-      assert.equal(over[0]!.type, 'string', source)
+      // 0.2 C2-I-017: an unclosed backtick run is text, so the `%%` after it starts a comment.
+      assert.equal(over[0]!.type, body === '`x %% b' ? 'comment' : 'string', source)
       assert.ok(!tokens.some((token) => token.line === line + 2), source)
     }
     for (const gap of [' ', '\t']) {
@@ -266,8 +269,9 @@ test('heading comments respect delimiter widths and escaped openers', () => {
     for (const body of ['`` x ` y `` %% hidden', '\\`x %% hidden']) {
       assert.ok(semanticTokens(prefix + body).some((token) => token.type === 'comment'), body)
     }
+    // 0.2 C2-I-017: a run with no closing run of its own length is text, so these `%%` start comments too.
     for (const body of ['` x `` y %% hidden', '\\\\`x %% hidden']) {
-      assert.ok(!semanticTokens(prefix + body).some((token) => token.type === 'comment'), body)
+      assert.ok(semanticTokens(prefix + body).some((token) => token.type === 'comment'), body)
     }
   }
 })

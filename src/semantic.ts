@@ -1,10 +1,11 @@
+import { captionInlines, delimitedTableFormat, footnoteEntries, ownPos, ownStartLine } from './tree.js'
 import { SemanticTokensBuilder, type SemanticTokens } from 'vscode-languageserver/node.js'
-import {
+import { type CaptionNode,
   type BlockNode,
   type Document,
   type InlineNode,
   type Position,
-} from '@markup-carve/carve'
+} from './engine.js'
 import { astColumnToCharacter } from './position.js'
 import { resolvedDocument } from './parse-cache.js'
 import { SEMANTIC_SPAN_EXTENSION_NAMES } from './semantic-span-names.js'
@@ -87,15 +88,16 @@ function astSemanticTokens(doc: Document, source: string, options: SemanticOptio
   const tokens: Token[] = []
   const keywords: Token[] = []
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
-  for (const node of doc.children) collectBlock(tokens, lines, node, keywords, spanNames)
-  for (const body of Object.values(doc.footnoteDefs ?? {})) {
-    for (const node of body) collectBlock(tokens, lines, node, keywords, spanNames)
+  for (const node of doc.children) {
+    if (node.type === 'footnote') for (const child of node.children) collectBlock(tokens, lines, child, keywords, spanNames)
+    else if (node.type === 'abbreviation_def') pushPosition(tokens, lines, node.pos, 'property')
+    else collectBlock(tokens, lines, node as BlockNode, keywords, spanNames)
   }
-  const codeBlock = codeBlockLines(doc)
+  const codeBlock = codeBlockLines(doc, lines)
 
   // Emit frontmatter tokens. The AST stores the parsed YAML in doc.frontmatter
   // but has no position info for the --- delimiters, so we walk source lines.
-  let inFrontmatter = doc.frontmatter !== undefined
+  let inFrontmatter = doc.children.some((node) => node.type === 'frontmatter')
 
   for (let i = 0; i < lines.length; i++) {
     const text = lines[i]!
@@ -124,9 +126,10 @@ function astSemanticTokens(doc: Document, source: string, options: SemanticOptio
   )
 }
 
-function collectBlock(tokens: Token[], lines: string[], node: BlockNode, keywords: Token[], spanNames: string[]): void {
+function collectBlock(tokens: Token[], lines: string[], block: BlockNode, keywords: Token[], spanNames: string[]): void {
+  const node = { ...block, pos: ownPos(block.pos, lines) } as BlockNode
   const names = node.type === 'table'
-    ? ('sourceFormat' in node && node.sourceFormat ? ['table'] : ['header-rows', 'footer-rows', 'header-cols', 'aligns', 'valigns', 'widths'])
+    ? (delimitedTableFormat(node, lines) ? ['table'] : ['header-rows', 'footer-rows', 'header-cols', 'aligns', 'valigns', 'widths'])
     : node.type === 'list' || node.type === 'definition_list' ? ['loose'] : []
   if (names.length && node.pos?.startLine !== undefined) {
     for (let line = node.pos.startLine - 2; line >= 0; line--) {
@@ -155,7 +158,8 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode, keyword
       pushPosition(tokens, lines, node.pos, 'comment')
       break
     case 'block_quote':
-      if ((node as { fenced?: boolean }).fenced) {
+      // 0.2 marks no fenced quote in the tree; its opener line says it.
+      if (isFencedQuote(node.pos, lines)) {
         pushLinePrefix(tokens, lines, node.pos, /^\s*:{3,}/, 'operator')
         pushLinePrefix(tokens, lines, node.pos, /(?<=^\s*:{3,}\s*)>/, 'operator')
         pushFenceCloser(tokens, lines, node.pos)
@@ -165,7 +169,7 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode, keyword
       for (const child of node.children) collectBlock(tokens, lines, child, keywords, spanNames)
       break
     case 'list':
-      for (const item of node.items) {
+      for (const item of node.children) {
         pushMarker(tokens, lines, item.pos, LIST_MARKER_ONLY, 'operator')
         for (const child of item.children) collectBlock(tokens, lines, child, keywords, spanNames)
       }
@@ -182,16 +186,12 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode, keyword
       for (const child of node.children) collectBlock(tokens, lines, child, keywords, spanNames)
       break
     case 'definition_list':
-      for (const item of node.items) {
-        for (const term of item.terms) collectInline(tokens, lines, term, keywords, spanNames)
-        for (const definition of item.definitions) {
-          for (const child of definition) collectBlock(tokens, lines, child, keywords, spanNames)
+      for (const entry of node.children) {
+        if (entry.type === 'definition_term') collectInline(tokens, lines, entry.children, keywords, spanNames)
+        else if (entry.type === 'definition_description') {
+          for (const child of entry.children) collectBlock(tokens, lines, child, keywords, spanNames)
         }
       }
-      break
-    case 'figure':
-      collectFigureTarget(tokens, lines, node.target, keywords, spanNames)
-      collectInline(tokens, lines, node.caption, keywords, spanNames)
       break
     // A composite figure (PART 9 §4c): one figure of ordered panels, opened by a
     // BARE `::: figure` fence. Its opener carries the reserved kind word, so the
@@ -203,12 +203,12 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode, keyword
     case 'figure_group':
       pushLinePrefix(tokens, lines, node.pos, /^\s*:{3,}\s*figure/, 'type')
       for (const child of node.children) collectBlock(tokens, lines, child, keywords, spanNames)
-      if (node.caption) collectInline(tokens, lines, node.caption, keywords, spanNames)
+      collectInline(tokens, lines, captionInlines(node.caption), keywords, spanNames)
       break
     case 'table':
-      if (node.sourceFormat) {
+      if (node.pos && (/^\s*:{3,}\s*table\b/.test(lines[node.pos.startLine - 1] ?? '') || delimitedTableFormat(node, lines))) {
         pushFenceLines(tokens, lines, node.pos)
-        if (node.caption) collectInline(tokens, lines, node.caption, keywords, spanNames)
+        collectInline(tokens, lines, captionInlines(node.caption), keywords, spanNames)
         break
       }
       if (node.pos) {
@@ -216,22 +216,26 @@ function collectBlock(tokens: Token[], lines: string[], node: BlockNode, keyword
           scanTableLine(tokens, line, lines[line] ?? '')
         }
       }
-      if (node.caption) collectInline(tokens, lines, node.caption, keywords, spanNames)
-      for (const row of node.rows) {
-        // A cell carries EITHER inline children or imported `blocks` (carve-js#1980), never both.
-        // Carve source always yields the inline half, and this server only ever parses source.
-        for (const cell of row.cells) collectInline(tokens, lines, cell.children ?? [], keywords, spanNames)
+      collectInline(tokens, lines, captionInlines(node.caption), keywords, spanNames)
+      for (const group of node.children) {
+        if (group.type === 'comment') continue
+        for (const row of group.children) {
+          if (row.type !== 'table_row') continue
+          for (const cell of row.children) {
+            for (const block of cell.children) {
+              if (block.type === 'cell_paragraph') collectInline(tokens, lines, block.children, keywords, spanNames)
+              else collectBlock(tokens, lines, block, keywords, spanNames)
+            }
+          }
+        }
       }
-      break
-    case 'image':
-      pushPosition(tokens, lines, node.pos, 'string')
       break
     case 'thematic_break':
       pushPosition(tokens, lines, node.pos, 'operator')
       break
-    case 'abbreviation_def':
-      pushPosition(tokens, lines, node.pos, 'property')
-      break
+  }
+  if ((node as { caption?: CaptionNode }).caption && (node.type === 'paragraph' || node.type === 'code_block' || node.type === 'block_quote')) {
+    collectInline(tokens, lines, captionInlines((node as { caption?: CaptionNode }).caption), keywords, spanNames)
   }
 }
 
@@ -248,11 +252,6 @@ function scanTableLine(tokens: Token[], line: number, text: string): void {
   for (const attr of text.matchAll(/\b(aligns|valigns|widths|footer-rows|header-rows|header-cols)=/g)) {
     push(tokens, line, attr.index!, attr[1]!.length, 'property')
   }
-}
-
-function collectFigureTarget(tokens: Token[], lines: string[], node: BlockNode, keywords: Token[], spanNames: string[]): void {
-  if (node.type === 'image') pushPosition(tokens, lines, node.pos, 'string')
-  else collectBlock(tokens, lines, node, keywords, spanNames)
 }
 
 function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[], keywords: Token[], spanNames: string[]): void {
@@ -301,7 +300,7 @@ function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[], ke
       case 'link':
       case 'image':
       case 'autolink':
-      case 'heading_ref':
+      case 'xref':
         pushPosition(tokens, lines, node.pos, 'string')
         break
       case 'mention':
@@ -331,9 +330,6 @@ function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[], ke
       case 'delete':
       case 'critic_comment':
         pushPosition(tokens, lines, node.pos, 'comment')
-        break
-      case 'substitution':
-        pushPosition(tokens, lines, node.pos, 'keyword')
         break
       case 'comment':
         // An inline (trailing `%%`) comment node. Its span includes the
@@ -402,7 +398,7 @@ function pushFenceLines(tokens: Token[], lines: string[], pos: Position | undefi
 
 // Zero-based lines of fenced blocks, fences included, at any nesting depth.
 // pushFenceLines owns their tokens; the generic scanners must not add to them.
-function codeBlockLines(doc: Document): Set<number> {
+function codeBlockLines(doc: Document, lines: readonly string[]): Set<number> {
   const body = new Set<number>()
   const visit = (value: unknown): void => {
     if (Array.isArray(value)) {
@@ -411,14 +407,14 @@ function codeBlockLines(doc: Document): Set<number> {
     }
     if (value === null || typeof value !== 'object') return
     const node = value as { type?: unknown; pos?: Position }
-    if ((node.type === 'code_block' || node.type === 'raw_block' || (node.type === 'table' && 'sourceFormat' in node && node.sourceFormat)) && node.pos?.startLine !== undefined && node.pos.endLine !== undefined) {
-      for (let line = node.pos.startLine - 1; line < node.pos.endLine; line++) body.add(line)
+    if ((node.type === 'code_block' || node.type === 'raw_block' || delimitedTableFormat(node as { type?: string; pos?: Position }, lines) !== undefined) && node.pos?.startLine !== undefined && node.pos.endLine !== undefined) {
+      for (let line = ownStartLine(node.pos, lines); line < node.pos.endLine; line++) body.add(line)
       return
     }
     for (const key of Object.keys(node)) if (key !== 'pos') visit((node as Record<string, unknown>)[key])
   }
   visit(doc.children)
-  visit(Object.values(doc.footnoteDefs ?? {}))
+  visit(footnoteEntries(doc).map(([, body]) => body))
   return body
 }
 
@@ -802,7 +798,8 @@ function findTrailingComment(text: string): number {
       let end = i + 1
       while (text[end] === '`') end++
       const width = end - i
-      if (codeWidth === 0) codeWidth = width
+      // 0.2 C2-I-017: a run with no closing run of its length later on the line opens nothing.
+      if (codeWidth === 0) codeWidth = hasClosingRun(text, end, width) ? width : 0
       else if (codeWidth === width) codeWidth = 0
       i = end - 1
       continue
@@ -820,6 +817,17 @@ function findTrailingComment(text: string): number {
     }
   }
   return -1
+}
+
+function hasClosingRun(text: string, from: number, width: number): boolean {
+  for (let i = from; i < text.length; i++) {
+    if (text[i] !== '`') continue
+    let end = i + 1
+    while (text[end] === '`') end++
+    if (end - i === width) return true
+    i = end - 1
+  }
+  return false
 }
 
 function escapeRegExp(value: string): string {
@@ -840,4 +848,10 @@ function withoutOverlaps(tokens: Token[]): Token[] {
     filtered.push(token)
   }
   return filtered
+}
+
+function isFencedQuote(pos: Position | undefined, lines: string[]): boolean {
+  if (pos?.startLine === undefined || pos.startColumn === undefined) return false
+  const text = lines[pos.startLine - 1] ?? ''
+  return /^:{3,}[ \t]*>/.test(text.slice(astColumnToCharacter(text, pos.startColumn)))
 }

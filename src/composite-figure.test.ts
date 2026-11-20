@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { parse, resolve } from '@markup-carve/carve'
+import { parse } from './engine.js'
 import { completionAt } from './completion.js'
 import { foldingRanges } from './folding.js'
 import { hoverAt } from './hover.js'
@@ -29,7 +29,7 @@ const TITLED = '::: figure "A titled figure div"\n![one](a.png)\n^ (a) One\n:::\
 const LABELLED = '::: figure [g]\nBody.\n:::\n'
 
 const topLevelTypes = (source: string): string[] =>
-  resolve(parse(source, { positions: true })).children.map((node) => node.type)
+  parse(source).children.map((node) => node.type)
 
 test('the pinned engine normalizes a bare figure fence to a figure_group', () => {
   assert.deepEqual(topLevelTypes(GROUP), ['figure_group'])
@@ -39,8 +39,9 @@ test('a title or a label leaves it a generic container', () => {
   // The control for every case below. These two differ from GROUP only in the
   // tail of one line, so a reading that fires on the kind word alone would
   // report them as groups and nothing else here would notice.
-  assert.deepEqual(topLevelTypes(TITLED), ['admonition'])
-  assert.deepEqual(topLevelTypes(LABELLED), ['admonition'])
+  // 0.2 C2-B-127: `figure` with a title or a label is a plain div with the class `figure`.
+  assert.deepEqual(topLevelTypes(TITLED), ['div'])
+  assert.deepEqual(topLevelTypes(LABELLED), ['div'])
 })
 
 test('a composite figure folds', () => {
@@ -76,10 +77,11 @@ test('hovering a composite figure describes the group, not an admonition', () =>
   assert.match(text, /Composite Figure/)
 })
 
-test('a titled figure opener still hovers as an admonition', () => {
+// 0.2 C2-B-127: a titled `figure` opener is a plain div, no longer an admonition.
+test('a titled figure opener hovers as a div', () => {
   const hover = hoverAt(TITLED, { line: 0, character: 4 })
   const text = typeof hover?.contents === 'object' && 'value' in hover.contents ? hover.contents.value : ''
-  assert.match(text, /Admonition/)
+  assert.match(text, /Div/)
 })
 
 test('a colon fence offers figure, and not as a ninth admonition kind', () => {

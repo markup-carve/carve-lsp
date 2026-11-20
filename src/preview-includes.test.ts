@@ -9,8 +9,10 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { carveToHtml } from '@markup-carve/carve'
+import { render } from './engine.js'
 import { LspStdioClient } from './lsp-stdio-client.js'
+
+// 0.2 C2-N-013: a target the resolver does not find reports `include-not-found` (0.1 `include-unresolved`).
 
 const serverPath = fileURLToPath(new URL('./server.js', import.meta.url))
 
@@ -109,7 +111,7 @@ const off = await session((built) => ({ enabled: 'off', includeRoot: built.works
 const untrusted = await session((built) => ({ includeRoot: built.workspace }), false)
 
 test('with a configured includeRoot the preview renders the merged document', () => {
-  assert.equal(rooted.preview.expand, carveToHtml('# Book\n\nONE-BODY\n'))
+  assert.equal(rooted.preview.expand, render('# Book\n\nONE-BODY\n'))
 })
 
 test('a nested child is merged too', () => {
@@ -118,16 +120,16 @@ test('a nested child is merged too', () => {
 
 test('a directive escaping the root is not expanded in the preview', () => {
   assert.doesNotMatch(rooted.preview.escape, /SECRET/)
-  assert.equal(rooted.preview.escape, carveToHtml(DOCS.escape))
+  assert.equal(rooted.preview.escape, render(DOCS.escape))
 })
 
 test('a symlink out of the root is not expanded in the preview', () => {
   assert.doesNotMatch(rooted.preview.symlink, /SECRET/)
-  assert.equal(rooted.preview.symlink, carveToHtml(DOCS.symlink))
+  assert.equal(rooted.preview.symlink, render(DOCS.symlink))
 })
 
 test('a directory target is not expanded in the preview', () => {
-  assert.equal(rooted.preview.directory, carveToHtml(DOCS.directory))
+  assert.equal(rooted.preview.directory, render(DOCS.directory))
 })
 
 test('maxDepth bounds the preview', () => {
@@ -146,7 +148,7 @@ test('maxBytes bounds the preview', () => {
 })
 
 test('a document with no directive previews the same with or without a root', () => {
-  assert.equal(rooted.preview.plain, carveToHtml(DOCS.plain))
+  assert.equal(rooted.preview.plain, render(DOCS.plain))
 })
 
 test('preview uses unsaved text from an open included document', async () => {
@@ -193,7 +195,7 @@ test('editing an open child republishes diagnostics for its parent', async () =>
     client.notify('textDocument/didOpen', { textDocument: { uri: parent, languageId: 'carve', version: 1, text: DOCS.expand } })
     client.notify('textDocument/didOpen', { textDocument: { uri: child, languageId: 'carve', version: 1, text: '{{ missing.crv }}\n' } })
     const before = await client.request('textDocument/diagnostic', { textDocument: { uri: parent } }) as { items: Array<{ code?: string }> }
-    assert.ok(before.items.some((item) => item.code === 'include-unresolved'))
+    assert.ok(before.items.some((item) => item.code === 'include-not-found'))
     const notificationsBefore = client.notifications.length
     client.notify('textDocument/didChange', {
       textDocument: { uri: child, version: 2 }, contentChanges: [{ text: 'Clean body.\n' }],
@@ -204,7 +206,7 @@ test('editing an open child republishes diagnostics for its parent', async () =>
       republished = client.notifications.slice(notificationsBefore).some((entry) => {
         if (entry.method !== 'textDocument/publishDiagnostics') return false
         const params = entry.params as { uri?: string; diagnostics?: Array<{ code?: string }> }
-        return params.uri === parent && !params.diagnostics?.some((item) => item.code === 'include-unresolved')
+        return params.uri === parent && !params.diagnostics?.some((item) => item.code === 'include-not-found')
       })
       if (!republished) await new Promise((resolve) => setTimeout(resolve, 25))
     }
@@ -220,9 +222,9 @@ for (const [label, observed] of [
   ['includes switched off', off],
   ['an untrusted workspace', untrusted],
 ] as const) {
-  test(`${label} previews every document byte-identical to carveToHtml of its source`, () => {
+  test(`${label} previews every document byte-identical to render of its source`, () => {
     for (const [name, text] of Object.entries(DOCS) as Array<[DocName, string]>) {
-      assert.equal(observed.preview[name], carveToHtml(text), name)
+      assert.equal(observed.preview[name], render(text), name)
     }
   })
 }

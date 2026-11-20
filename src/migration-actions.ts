@@ -5,30 +5,63 @@ import {
   TextEdit,
   type Diagnostic,
 } from 'vscode-languageserver-types'
-import { applyMigrationFixes, djotMigrationWarnings } from '@markup-carve/carve'
+import { fix, fixableRules, fixEdits, lint, type LintOptions } from './engine.js'
+import { astOffsetToIndex } from './position.js'
 
 export interface MigrationFix {
   rule: string
+  /** What the fix replaces: its one edit, or the finding widened to every edit. */
   range: Range
+  /** The text that replaces `range`. */
   suggestion: string
 }
 
-// `MigrationWarning.start`/`end` are offsets into the line-ending-normalized
-// source, so positions are computed against the same normalization.
+interface LocatedFix extends MigrationFix {
+  /** Where the finding itself starts, which is what its diagnostic reports. */
+  at: Range['start']
+}
+
+// Engine offsets count UTF-8 bytes of the line-ending-normalized source, so
+// positions are computed against the same normalization.
 function normalize(source: string): string {
   return source.replace(/\r\n?/g, '\n')
 }
 
-export function migrationFixes(source: string): MigrationFix[] {
+const FIXABLE_ON = Object.fromEntries(fixableRules.map((id) => [id, 'on'])) as LintOptions['rules']
+
+function locatedFixes(source: string): LocatedFix[] {
   const norm = normalize(source)
-  return djotMigrationWarnings(source).map((warning) => ({
-    rule: warning.rule,
-    range: Range.create(
-      positionAt(norm, warning.start),
-      positionAt(norm, warning.end),
-    ),
-    suggestion: warning.suggestion,
-  }))
+  const at = (byte: number) => positionAt(norm, astOffsetToIndex(norm, byte))
+  const bytes = new TextEncoder().encode(norm)
+  const decoder = new TextDecoder()
+  const fixes: LocatedFix[] = []
+  for (const finding of lint(norm, { rules: FIXABLE_ON })) {
+    if (finding.channel !== 'lint' || finding.file !== undefined || finding.range === undefined) continue
+    const edits = fixEdits(norm, finding)
+    if (edits === null || edits.length === 0) continue
+    const range = finding.range
+    const [only] = edits
+    if (edits.length === 1 && only) {
+      fixes.push({ rule: finding.code, range: Range.create(at(only.startOffset), at(only.endOffset)), suggestion: only.text, at: at(range.startOffset) })
+      continue
+    }
+    const start = Math.min(range.startOffset, ...edits.map((edit) => edit.startOffset))
+    const end = Math.max(range.endOffset, ...edits.map((edit) => edit.endOffset))
+    let suggestion = ''
+    let cursor = start
+    for (const edit of [...edits].sort((a, b) => a.startOffset - b.startOffset)) {
+      suggestion += decoder.decode(bytes.subarray(cursor, edit.startOffset)) + edit.text
+      cursor = edit.endOffset
+    }
+    suggestion += decoder.decode(bytes.subarray(cursor, end))
+    fixes.push({ rule: finding.code, range: Range.create(at(start), at(end)), suggestion, at: at(range.startOffset) })
+  }
+  return fixes
+}
+
+/** The fix of each finding of a fixable lint rule, every such rule on (as `carve lint --fix` runs them). */
+export function migrationFixes(source: string): MigrationFix[] {
+  return locatedFixes(source).map(({ rule, range, suggestion }) => ({ rule, range, suggestion }))
 }
 
 export function migrationCodeActions(
@@ -36,7 +69,7 @@ export function migrationCodeActions(
   source: string,
   diagnostics: Diagnostic[],
 ): CodeAction[] {
-  const fixes = migrationFixes(source)
+  const fixes = locatedFixes(source)
   const actions: CodeAction[] = []
 
   for (const diagnostic of diagnostics) {
@@ -44,8 +77,8 @@ export function migrationCodeActions(
     const fix = fixes.find(
       (candidate) =>
         candidate.rule === diagnostic.code &&
-        candidate.range.start.line === diagnostic.range.start.line &&
-        candidate.range.start.character === diagnostic.range.start.character,
+        candidate.at.line === diagnostic.range.start.line &&
+        candidate.at.character === diagnostic.range.start.character,
     )
     if (!fix) continue
 
@@ -69,17 +102,17 @@ export function migrationCodeActions(
 }
 
 /**
- * A single source action that rewrites every auto-fixable collision in the
- * document via `applyMigrationFixes`. Offered only when something would
- * change. Crossing (ambiguous) collisions are left in place; they keep their
- * per-diagnostic warning for manual review.
+ * A single source action that rewrites every auto-fixable finding in the
+ * document, as `carve lint --fix` does. Offered only when something would
+ * change. Ambiguous findings are left in place; they keep their per-diagnostic
+ * warning for manual review.
  */
 export function migrationFixAllAction(
   uri: string,
   source: string,
 ): CodeAction | null {
-  const { output, applied } = applyMigrationFixes(source)
-  if (applied.length === 0) return null
+  const { output, applied } = fix(normalize(source))
+  if (applied.size === 0) return null
 
   // The whole-document range. Computed on the normalized text, whose
   // per-line character offsets match the live document (line endings differ
@@ -89,7 +122,7 @@ export function migrationFixAllAction(
     positionAt(norm, 0),
     positionAt(norm, norm.length),
   )
-  const n = applied.length
+  const n = [...applied.values()].reduce((sum, count) => sum + count, 0)
   return {
     title: `Fix all Carve migration collisions (${n})`,
     kind: CodeActionKind.SourceFixAll,

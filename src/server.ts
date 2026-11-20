@@ -37,7 +37,7 @@ import {
   type TextEdit,
 } from 'vscode-languageserver/node.js'
 import { TextDocument } from 'vscode-languageserver-textdocument'
-import { carveToCarve } from '@markup-carve/carve'
+import { encodeTree, format, parse } from './engine.js'
 import { analyzeCarve, type Analysis } from './analyze.js'
 import { previewHtml, previewMarkdown } from './preview.js'
 import { EXPORT_KIND, exportCodeActions, exportSupport, pdfCodeAction, resolveExportAction, type ExportFormat, type ExportSupport } from './export-actions.js'
@@ -107,6 +107,7 @@ let carveSettings: CarveSettings = DEFAULT_CARVE_SETTINGS
 let workspaceTrusted = false
 let exportClient: ExportSupport = { createFile: false, resolveEdit: false }
 let pdfOptions: PdfOptions = {}
+let pdfExportCommand = false
 let workspaceRoots: string[] = []
 // The last `carve` section the client sent; its keys override `.carverc.json` one by one.
 let clientCarveSection: Record<string, unknown> | undefined
@@ -149,6 +150,7 @@ connection.onInitialize((params) => {
   workspaceRoots = [...folders, legacyRoot].filter((root): root is string => root !== undefined)
   clientCarveSection = carveSection(params.initializationOptions)
   pdfOptions = readPdfOptions(clientCarveSection)
+  pdfExportCommand = clientCarveSection?.pdfExportCommand === true
   carveSettings = resolveCarveSettings()
 
   return {
@@ -174,7 +176,7 @@ connection.onInitialize((params) => {
       executeCommandProvider: { commands: [
         'carve.previewHtml', 'carve.showAst', 'carve.workspaceGraph',
         'carve.backlinks', 'carve.generatedNavigation', 'carve.rebuildImpact',
-        'carve.listIndent', 'carve.exportPdf',
+        'carve.listIndent', ...(pdfExportCommand ? ['carve.exportPdf'] : []),
       ] },
       referencesProvider: true,
       renameProvider: { prepareProvider: true },
@@ -398,9 +400,8 @@ connection.onRequest(ExecuteCommandRequest.type, async (params) => {
   if (params.command === 'carve.rebuildImpact') return uri ? rebuildImpact(workspaceIndex, uri) : []
   const document = uri ? documents.get(uri) : undefined
   if (!document) return null
-  const engine = await import('@markup-carve/carve')
   if (params.command === 'carve.previewHtml') return previewHtml(document.getText(), previewIncludeOptions(document))
-  if (params.command === 'carve.showAst') return engine.carveToAstJson(document.getText())
+  if (params.command === 'carve.showAst') return encodeTree(parse(document.getText()))
   return null
 })
 
@@ -432,7 +433,7 @@ connection.onRequest(CodeActionRequest.type, (params) => {
               ...tableConversionCodeActions(params.textDocument.uri, document.getText(), params.range.start.line)].filter(action => action !== null)
           : []),
         ...(carveSettings.exportActions ? exportCodeActions(params.textDocument.uri, exportClient, params.context.only, (format) => renderExport(document, format), readExportTarget) : []),
-        ...(carveSettings.exportActions ? [pdfCodeAction(params.textDocument.uri, params.context.only)].filter(action => action !== null) : []),
+        ...(carveSettings.exportActions && pdfExportCommand ? [pdfCodeAction(params.textDocument.uri, params.context.only)].filter(action => action !== null) : []),
       ]
     : []
 })
@@ -474,7 +475,7 @@ connection.onRequest(DocumentFormattingRequest.type, (params) => {
   if (!document) return []
   const text = document.getText()
   const formatted = carveSettings.formatter === 'migration'
-    ? (carveSettings.formatAlignTables ? alignTablesInDocument(carveToCarve(text)) : carveToCarve(text))
+    ? format(text, { alignTables: carveSettings.formatAlignTables === true })
     : formatDocument(carveSettings.formatAlignTables ? alignTablesInDocument(text) : text)
   if (formatted === text) return []
   return [

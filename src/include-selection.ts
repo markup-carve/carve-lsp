@@ -12,7 +12,8 @@
  * generates perfectly well, and a false diagnostic on a working document is
  * worse than a missing one.
  */
-import { parse, resolve, selectIncludeRegion, type BlockNode } from '@markup-carve/carve'
+import { includeRegion, parse, type BlockNode } from './engine.js'
+import { headingId, ownStartLine } from './tree.js'
 import type { Range } from 'vscode-languageserver-types'
 
 export interface Section {
@@ -27,18 +28,19 @@ export function sections(source: string): Section[] {
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   let document
   try {
-    document = resolve(parse(source, { positions: true }))
+    document = parse(source)
   } catch {
     return []
   }
   const found: Section[] = []
-  walk(document.children, (node) => {
-    if (node.type !== 'heading' || !node.pos || !node.attrs?.id) return
-    const line = node.pos.startLine - 1
+  walk(document.children as BlockNode[], (node) => {
+    const id = node.type === 'heading' ? headingId(node) : undefined
+    if (!id || !node.pos) return
+    const line = ownStartLine(node.pos, lines)
     const text = lines[line] ?? ''
     const character = Math.min(text.length, HEADING_MARKER_RE.exec(text)?.[0].length ?? 0)
     found.push({
-      id: node.attrs.id,
+      id,
       range: { start: { line, character }, end: { line, character: text.length } },
     })
   })
@@ -56,7 +58,7 @@ export function sectionRange(source: string, id: string): Range | undefined {
  * a Carve include knows `%% #region`, a `@code` include also source comments.
  */
 export function regionLines(source: string, selected: string, code = false): { start: number; end: number } | null {
-  const result = selectIncludeRegion(source, selected, code ? 'code' : 'carve')
+  const result = includeRegion(source, selected, { code })
   return result.ok ? { start: result.start, end: result.end } : null
 }
 
@@ -66,7 +68,7 @@ export function regionLines(source: string, selected: string, code = false): { s
  * `@code` include also the source-comment forms. Empty when any marker is
  * malformed, unpaired or duplicated, since the engine then rejects every name.
  *
- * Follows the marker rules of `selectIncludeRegion`, which answers one name but
+ * Follows the marker rules of `includeRegion`, which answers one name but
  * does not list them.
  */
 export function regionNames(source: string, code: boolean): string[] {
