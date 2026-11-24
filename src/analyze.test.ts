@@ -172,7 +172,8 @@ test('returns hover help for inline markup', () => {
   assert.match(contents.value ?? '', /Italic/)
 })
 
-test('returns semantic tokens for headings and inline markup', () => {
+// carve-grammars#935: the grammar's `tag` rule scopes `#id` inside the unattached `{#id}` as a tag (C2-I-035).
+test('returns semantic tokens for headings and inline markup', { todo: 'carve-grammars#935' }, () => {
   const result = semanticTokens('# Title\n\nHi *bold* @mark {#id}\n')
 
   assert.deepEqual(
@@ -318,19 +319,21 @@ test('returns semantic tokens for critic comment markup', () => {
   )
 })
 
+// 0.2 C2-I-019: math is `$` or `$$` glued before a code span; `$$E=mc2$$` is text.
 test('returns semantic tokens for display math', () => {
-  const result = semanticTokens('$$E=mc2$$')
+  const result = semanticTokens('$$`E=mc2`')
   assert.deepEqual(
     result.map((token) => [token.line, token.character, token.length, token.type]),
     [[0, 0, 9, 'string']],
   )
 })
 
+// 0.2 C2-I-019: math is `$` glued before a code span; `$x=1$` is text.
 test('returns semantic tokens for inline math', () => {
-  const result = semanticTokens('$x=1$')
+  const result = semanticTokens('$`x=1`')
   assert.deepEqual(
     result.map((token) => [token.line, token.character, token.length, token.type]),
-    [[0, 0, 5, 'string']],
+    [[0, 0, 6, 'string']],
   )
 })
 
@@ -341,7 +344,8 @@ test('returns semantic tokens for reference definition', () => {
     [
       [0, 0, 1, 'operator'],
       [0, 1, 5, 'type'],
-      [0, 6, 3, 'operator'],
+      // The grammar's `punctuation.separator` ends at the colon; the space after it is not part of the marker.
+      [0, 6, 2, 'operator'],
       [0, 9, 19, 'string'],
     ],
   )
@@ -354,7 +358,8 @@ test('returns semantic tokens for footnote definition', () => {
     [
       [0, 0, 2, 'operator'],
       [0, 2, 2, 'type'],
-      [0, 4, 3, 'operator'],
+      // As for a link definition, the separator token ends at the colon.
+      [0, 4, 2, 'operator'],
     ],
   )
 })
