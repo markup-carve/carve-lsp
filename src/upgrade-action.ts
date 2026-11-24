@@ -98,8 +98,21 @@ export function upgradeEdit(uri: string, plan: UpgradePlan, version?: number): W
 }
 
 /** One line per record that needs a person, for a message. */
-export function reviewSummary(plan: UpgradePlan): string {
-  return plan.review.map((item) => `line ${item.range.start.line + 1}: ${item.code} ${item.message}`).join('\n')
+export function reviewSummary(plan: UpgradePlan, applied = false): string {
+  return plan.review
+    .map((item) => `line ${(applied ? lineAfterEdits(item.range.start.line, plan.edits) : item.range.start.line) + 1}: ${item.code} ${item.message}`)
+    .join('\n')
+}
+
+/** Where 0-based `line` of the 0.1 source is once `edits` are applied. */
+function lineAfterEdits(line: number, edits: TextEdit[]): number {
+  let shift = 0
+  for (const { range, newText } of edits) {
+    if (range.end.line < line || (range.end.line === line && range.end.character === 0)) {
+      shift += newText.split('\n').length - 1 - (range.end.line - range.start.line)
+    }
+  }
+  return line + shift
 }
 
 /**
@@ -129,7 +142,7 @@ export function upgradeCodeAction(
   if (plan.review.length) {
     // The client runs the command after the edit, so what the upgrade left to a person is shown, not dropped.
     action.title = `${title} (${plan.review.length} to review)`
-    action.command = { title: 'Show what the upgrade left for review', command: UPGRADE_COMMAND, arguments: [uri, { review: reviewSummary(plan) }] }
+    action.command = { title: 'Show what the upgrade left for review', command: UPGRADE_COMMAND, arguments: [uri, { review: reviewSummary(plan, true) }] }
   }
   return action
 }

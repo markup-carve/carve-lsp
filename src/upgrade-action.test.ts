@@ -28,7 +28,8 @@ test('records that need a person become review diagnostics at their range', asyn
   const action = upgradeCodeAction(uri, plan, false)
   assert.equal(action?.title, 'Upgrade to Carve 0.2 (1 to review)')
   assert.equal(action?.command?.command, 'carve.upgrade')
-  assert.match(String((action?.command?.arguments?.[1] as { review: string }).review), /^line 6: U-415 /)
+  // The message follows the edit, which put a blank line above the heading.
+  assert.match(String((action?.command?.arguments?.[1] as { review: string }).review), /^line 7: U-415 /)
 })
 
 test('a document the upgrade would render differently gets no applicable action', async () => {
