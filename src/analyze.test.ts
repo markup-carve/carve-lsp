@@ -172,7 +172,6 @@ test('returns hover help for inline markup', () => {
   assert.match(contents.value ?? '', /Italic/)
 })
 
-// carve-grammars#935: the grammar's `tag` rule scopes `#id` inside the unattached `{#id}` as a tag (C2-I-035).
 test('returns semantic tokens for headings and inline markup', () => {
   const result = semanticTokens('# Title\n\nHi *bold* @mark {#id}\n')
 
