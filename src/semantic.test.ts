@@ -240,8 +240,7 @@ test('fence metadata is not scanned as inline markup', () => {
 })
 
 
-// carve-grammars#933: the grammar's `code_inline_unpartnered` rule scopes an unclosed backtick run as code to the end of the line (C2-I-017).
-test('heading and caption verbatim runs protect percent markers without hiding trailing comments', { todo: 'carve-grammars#933' }, () => {
+test('heading and caption verbatim runs protect percent markers without hiding trailing comments', () => {
   for (const prefix of ['# a ', '> # a ', '![alt](x.png)\n^ cap ', '> ![alt](x.png)\n> ^ cap ']) {
     for (const body of ['`x %% b` c', '``x %% b`` c', '!`x %% b` c', '$`x %% b` c', '`x %% b']) {
       const source = prefix + body + '\n\nplain tail'
@@ -267,8 +266,7 @@ test('heading and caption verbatim runs protect percent markers without hiding t
 })
 
 
-// carve-grammars#933, as above.
-test('heading comments respect delimiter widths and escaped openers', { todo: 'carve-grammars#933' }, () => {
+test('heading comments respect delimiter widths and escaped openers', () => {
   for (const prefix of ['# a ', '![alt](x.png)\n^ cap ']) {
     for (const body of ['`` x ` y `` %% hidden', '\\`x %% hidden']) {
       assert.ok(semanticTokens(prefix + body).some((token) => token.type === 'comment'), body)
@@ -280,8 +278,7 @@ test('heading comments respect delimiter widths and escaped openers', { todo: 'c
   }
 })
 
-// carve-grammars#934: the grammar's `frontmatter` rule opens on `--- foo_bar` (C2-B-164).
-test('frontmatter with a format token is colored like bare frontmatter', { todo: 'carve-grammars#934' }, () => {
+test('frontmatter with a format token is colored like bare frontmatter', () => {
   const lines = (source: string) => semanticTokens(source).filter((token) => token.type === 'string').map((token) => token.line)
   assert.deepEqual(lines('---\na: 1\n---\n# H\n'), [0, 1, 2])
   assert.deepEqual(lines('--- toml\na = 1\n---\n# H\n'), [0, 1, 2])
