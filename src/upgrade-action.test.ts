@@ -15,6 +15,11 @@ test('the plan is the engine upgrade as edits on the 0.1 source', async () => {
   assert.deepEqual((await planUpgrade('Plain text.\n')).edits, [])
 })
 
+test('a CRLF document gets CRLF in the edits', async () => {
+  const plan = await planUpgrade('Text\r\n# Heading\r\n')
+  assert.deepEqual(plan.edits, [{ range: { start: { line: 1, character: 0 }, end: { line: 1, character: 0 } }, newText: '\r\n' }])
+})
+
 test('records that need a person become review diagnostics at their range', async () => {
   const plan = await planUpgrade('Text\n# Heading\n\n[Label]\n:::: tabs\n::: tab\nx\n:::\n::::\n')
   assert.equal(plan.review.length, 1)

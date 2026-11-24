@@ -39,12 +39,7 @@ export interface UpgradePlan {
   review: Diagnostic[]
 }
 
-// Engine offsets count the line-ending-normalized source; its line and
-// character positions match the live document.
-function normalize(source: string): string {
-  return source.replace(/\r\n?/g, '\n')
-}
-
+// The upgrade reads the live text, so its CRLF line ends stay CRLF in the edits; an index never falls between `\r` and `\n`.
 function positionAt(source: string, index: number): Position {
   const before = source.slice(0, index)
   const lastNewline = before.lastIndexOf('\n')
@@ -59,7 +54,7 @@ function reviewDiagnostic(source: string, record: UpgradeRecord): Diagnostic {
   const line = Math.max(0, record.line - 1)
   const range = record.range
     ? Range.create(positionAt(source, record.range.startOffset), positionAt(source, record.range.endOffset))
-    : Range.create(line, 0, line, (source.split('\n')[line] ?? '').length)
+    : Range.create(line, 0, line, (source.split('\n')[line] ?? '').replace(/\r$/, '').length)
   return {
     range,
     severity: record.class === 'mismatch' ? DiagnosticSeverity.Warning : DiagnosticSeverity.Information,
@@ -72,22 +67,21 @@ function reviewDiagnostic(source: string, record: UpgradeRecord): Diagnostic {
 /** What the upgrade would do to `source`. */
 export async function planUpgrade(source: string): Promise<UpgradePlan> {
   const { upgrade } = await (engine ??= import('@markup-carve/carve/upgrade'))
-  const norm = normalize(source)
-  const result = upgrade(norm, { edits: true })
+  const result = upgrade(source, { edits: true })
   const records = result.records as UpgradeRecord[]
   const writable = result.check === 'pass' || result.check === 'explained'
-  const at = (byte: number) => positionAt(norm, astOffsetToIndex(norm, byte))
+  const at = (byte: number) => positionAt(source, astOffsetToIndex(source, byte))
   const edits = !result.changed
     ? []
     : result.edits
       ? result.edits.map((edit) => TextEdit.replace(Range.create(at(edit.range.startOffset), at(edit.range.endOffset)), edit.text))
-      : [TextEdit.replace(Range.create(positionAt(norm, 0), positionAt(norm, norm.length)), result.output)]
+      : [TextEdit.replace(Range.create(positionAt(source, 0), positionAt(source, source.length)), result.output)]
   return {
     edits,
     writable,
     check: result.check,
     records,
-    review: records.filter(needsReview).map((record) => reviewDiagnostic(norm, record)),
+    review: records.filter(needsReview).map((record) => reviewDiagnostic(source, record)),
   }
 }
 
