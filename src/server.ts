@@ -119,7 +119,11 @@ async function upgradePlan(document: TextDocument): Promise<{ plan: UpgradePlan,
     cached = { version, plan: planUpgrade(document.getText()) }
     upgradePlans.set(document.uri, cached)
   }
-  return { plan: await cached.plan, version: documentChangesSupport ? version : undefined }
+  const plan = await cached.plan
+  // A change that arrived while the plan was computed makes it stale: plan the current text instead.
+  const current = documents.get(document.uri)
+  if (current && current.version !== version) return upgradePlan(current)
+  return { plan, version: documentChangesSupport ? version : undefined }
 }
 let pdfOptions: PdfOptions = {}
 let pdfExportCommand = false
@@ -445,7 +449,8 @@ async function upgradeCommand(uri: string | undefined, options: unknown) {
     return result
   }
   if (plan.edits.length === 0) {
-    void connection.window.showInformationMessage('Nothing to upgrade: Carve 0.2 reads this document as it is.')
+    if (plan.review.length) void connection.window.showWarningMessage(`Nothing to rewrite, but left for review:\n${reviewSummary(plan)}`)
+    else void connection.window.showInformationMessage('Nothing to upgrade: Carve 0.2 reads this document as it is.')
     return result
   }
   const applied = (await connection.workspace.applyEdit({ label: 'Upgrade to Carve 0.2', edit: upgradeEdit(document.uri, plan, version) }))?.applied === true

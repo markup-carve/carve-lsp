@@ -36,6 +36,8 @@ test('a document the upgrade would render differently gets no applicable action'
   assert.equal(upgradeCodeAction(uri, blocked, false), null)
   assert.match(String(upgradeCodeAction(uri, blocked, true)?.disabled?.reason), /render/)
   assert.equal(upgradeCodeAction(uri, blocked, true)?.edit, undefined)
+  const blockedWithoutEdits = { ...blocked, edits: [] }
+  assert.match(String(upgradeCodeAction(uri, blockedWithoutEdits, true)?.disabled?.reason), /render/)
 })
 
 test('with a version the edit is pinned to the document it was planned on', async () => {

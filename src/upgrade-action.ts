@@ -104,8 +104,9 @@ export function reviewSummary(plan: UpgradePlan): string {
 
 /**
  * *Upgrade to Carve 0.2*, offered when the upgrade changes the document. A
- * document whose rendering the upgrade would change gets the action disabled
- * with the reason, where the client can show that, and no action otherwise.
+ * document 0.2 would render differently (with or without edits) gets the
+ * action disabled with the reason, where the client can show that, and no
+ * action otherwise.
  */
 export function upgradeCodeAction(
   uri: string,
@@ -113,7 +114,6 @@ export function upgradeCodeAction(
   disabledSupport: boolean,
   version?: number,
 ): CodeAction | null {
-  if (plan.edits.length === 0) return null
   const title = 'Upgrade to Carve 0.2'
   if (!plan.writable) {
     if (!disabledSupport) return null
@@ -124,6 +124,7 @@ export function upgradeCodeAction(
       disabled: { reason: `The upgrade would change how this document renders${first ? ` (line ${first.range.start.line + 1}: ${first.message})` : ''}; rewrite it by hand.` },
     }
   }
+  if (plan.edits.length === 0) return null
   const action: CodeAction = { title, kind: UPGRADE_KIND, edit: upgradeEdit(uri, plan, version) }
   if (plan.review.length) {
     // The client runs the command after the edit, so what the upgrade left to a person is shown, not dropped.
