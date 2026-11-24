@@ -25,7 +25,6 @@ export interface UpgradeRecord {
   class: string
   line: number
   message: string
-  range?: { startOffset: number, endOffset: number }
 }
 
 export interface UpgradePlan {
@@ -50,11 +49,10 @@ function needsReview(record: UpgradeRecord): boolean {
   return record.class === 'report' || record.class === 'mismatch' || record.class === 'unverified explanation'
 }
 
+// Only the record's line is used: its `range` counts code points of the 0.1 tree, not the UTF-16 its type says.
 function reviewDiagnostic(source: string, record: UpgradeRecord): Diagnostic {
   const line = Math.max(0, record.line - 1)
-  const range = record.range
-    ? Range.create(positionAt(source, record.range.startOffset), positionAt(source, record.range.endOffset))
-    : Range.create(line, 0, line, (source.split('\n')[line] ?? '').replace(/\r$/, '').length)
+  const range = Range.create(line, 0, line, (source.split('\n')[line] ?? '').replace(/\r$/, '').length)
   return {
     range,
     severity: record.class === 'mismatch' ? DiagnosticSeverity.Warning : DiagnosticSeverity.Information,

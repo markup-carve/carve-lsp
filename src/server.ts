@@ -443,9 +443,9 @@ async function upgradeCommand(uri: string | undefined, options: unknown) {
     void connection.window.showInformationMessage('Nothing to upgrade: Carve 0.2 reads this document as it is.')
     return result
   }
-  const applied = await connection.workspace.applyEdit({ label: 'Upgrade to Carve 0.2', edit: { changes: { [document.uri]: plan.edits } } })
-  if (plan.review.length) void connection.window.showWarningMessage(`Upgraded to Carve 0.2. Left for review:\n${reviewSummary(plan)}`)
-  return { ...result, applied: applied?.applied === true }
+  const applied = (await connection.workspace.applyEdit({ label: 'Upgrade to Carve 0.2', edit: { changes: { [document.uri]: plan.edits } } }))?.applied === true
+  if (applied && plan.review.length) void connection.window.showWarningMessage(`Upgraded to Carve 0.2. Left for review:\n${reviewSummary(plan)}`)
+  return { ...result, applied }
 }
 
 /**

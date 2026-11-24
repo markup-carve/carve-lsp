@@ -21,10 +21,10 @@ test('a CRLF document gets CRLF in the edits', async () => {
 })
 
 test('records that need a person become review diagnostics at their range', async () => {
-  const plan = await planUpgrade('Text\n# Heading\n\n[Label]\n:::: tabs\n::: tab\nx\n:::\n::::\n')
+  const plan = await planUpgrade('Über text\n# Heading\n\n[Label]\n:::: tabs\n::: tab\nx\n:::\n::::\n')
   assert.equal(plan.review.length, 1)
   assert.equal(plan.review[0]?.code, 'U-415')
-  assert.deepEqual(plan.review[0]?.range.start, { line: 5, character: 0 })
+  assert.deepEqual(plan.review[0]?.range, { start: { line: 5, character: 0 }, end: { line: 5, character: 7 } })
   const action = upgradeCodeAction(uri, plan, false)
   assert.equal(action?.title, 'Upgrade to Carve 0.2 (1 to review)')
   assert.equal(action?.command?.command, 'carve.upgrade')
