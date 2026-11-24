@@ -38,6 +38,12 @@ test('a document the upgrade would render differently gets no applicable action'
   assert.equal(upgradeCodeAction(uri, blocked, true)?.edit, undefined)
 })
 
+test('with a version the edit is pinned to the document it was planned on', async () => {
+  const plan = await planUpgrade('Text\n# Heading\n')
+  const edit = upgradeCodeAction(uri, plan, false, 7)?.edit
+  assert.deepEqual(edit, { documentChanges: [{ textDocument: { uri, version: 7 }, edits: plan.edits }] })
+})
+
 test('only a request for source actions runs the upgrade', () => {
   assert.equal(wantsUpgrade(undefined), false)
   assert.equal(wantsUpgrade(['quickfix']), false)

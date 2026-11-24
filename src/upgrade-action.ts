@@ -6,9 +6,12 @@
 import {
   CodeActionKind,
   DiagnosticSeverity,
+  OptionalVersionedTextDocumentIdentifier,
   Range,
+  TextDocumentEdit,
   TextEdit,
   type CodeAction,
+  type WorkspaceEdit,
   type Diagnostic,
   type Position,
 } from 'vscode-languageserver-types'
@@ -83,6 +86,17 @@ export async function planUpgrade(source: string): Promise<UpgradePlan> {
   }
 }
 
+/**
+ * The plan's edits as one workspace edit. With the document `version` the plan
+ * was made from (for a client with `documentChanges`), a client refuses to
+ * apply it to text edited since.
+ */
+export function upgradeEdit(uri: string, plan: UpgradePlan, version?: number): WorkspaceEdit {
+  return version === undefined
+    ? { changes: { [uri]: plan.edits } }
+    : { documentChanges: [TextDocumentEdit.create(OptionalVersionedTextDocumentIdentifier.create(uri, version), plan.edits)] }
+}
+
 /** One line per record that needs a person, for a message. */
 export function reviewSummary(plan: UpgradePlan): string {
   return plan.review.map((item) => `line ${item.range.start.line + 1}: ${item.code} ${item.message}`).join('\n')
@@ -97,6 +111,7 @@ export function upgradeCodeAction(
   uri: string,
   plan: UpgradePlan,
   disabledSupport: boolean,
+  version?: number,
 ): CodeAction | null {
   if (plan.edits.length === 0) return null
   const title = 'Upgrade to Carve 0.2'
@@ -109,7 +124,7 @@ export function upgradeCodeAction(
       disabled: { reason: `The upgrade would change how this document renders${first ? ` (line ${first.range.start.line + 1}: ${first.message})` : ''}; rewrite it by hand.` },
     }
   }
-  const action: CodeAction = { title, kind: UPGRADE_KIND, edit: { changes: { [uri]: plan.edits } } }
+  const action: CodeAction = { title, kind: UPGRADE_KIND, edit: upgradeEdit(uri, plan, version) }
   if (plan.review.length) {
     // The client runs the command after the edit, so what the upgrade left to a person is shown, not dropped.
     action.title = `${title} (${plan.review.length} to review)`

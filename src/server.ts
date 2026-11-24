@@ -62,7 +62,7 @@ import { alignTableCodeAction, alignTablesInDocument, tableAlignmentEdits } from
 import { tableConversionCodeActions } from './table-conversion.js'
 import { hoverAt } from './hover.js'
 import { migrationCodeActions } from './migration-actions.js'
-import { planUpgrade, reviewSummary, upgradeCodeAction, UPGRADE_COMMAND, UPGRADE_KIND, wantsUpgrade, type UpgradePlan } from './upgrade-action.js'
+import { planUpgrade, reviewSummary, upgradeCodeAction, upgradeEdit, UPGRADE_COMMAND, UPGRADE_KIND, wantsUpgrade, type UpgradePlan } from './upgrade-action.js'
 import { lintCodeActions } from './lint-actions.js'
 import { prepareRename, renameEdits } from './rename.js'
 import { DiagnosticScheduler } from './diagnostic-scheduler.js'
@@ -108,14 +108,18 @@ let carveSettings: CarveSettings = DEFAULT_CARVE_SETTINGS
 let workspaceTrusted = false
 let exportClient: ExportSupport = { createFile: false, resolveEdit: false }
 let codeActionDisabledSupport = false
+let documentChangesSupport = false
 const upgradePlans = new Map<string, { version: number, plan: Promise<UpgradePlan> }>()
 
-function upgradePlan(document: TextDocument): Promise<UpgradePlan> {
-  const cached = upgradePlans.get(document.uri)
-  if (cached?.version === document.version) return cached.plan
-  const plan = planUpgrade(document.getText())
-  upgradePlans.set(document.uri, { version: document.version, plan })
-  return plan
+/** The upgrade plan of the document as it is now, and the version it was made from when the client can pin edits to one. */
+async function upgradePlan(document: TextDocument): Promise<{ plan: UpgradePlan, version: number | undefined }> {
+  const version = document.version
+  let cached = upgradePlans.get(document.uri)
+  if (cached?.version !== version) {
+    cached = { version, plan: planUpgrade(document.getText()) }
+    upgradePlans.set(document.uri, cached)
+  }
+  return { plan: await cached.plan, version: documentChangesSupport ? version : undefined }
 }
 let pdfOptions: PdfOptions = {}
 let pdfExportCommand = false
@@ -155,6 +159,7 @@ connection.onInitialize((params) => {
   workspaceTrusted = readWorkspaceTrusted(params.initializationOptions)
   exportClient = exportSupport(params.capabilities)
   codeActionDisabledSupport = params.capabilities.textDocument?.codeAction?.disabledSupport === true
+  documentChangesSupport = params.capabilities.workspace?.workspaceEdit?.documentChanges === true
   // Every folder, not just the first: a multi-root session roots each document
   // at the folder it actually lives in.
   const folders = (params.workspaceFolders ?? []).map((folder) => fsPath(folder.uri))
@@ -433,7 +438,7 @@ async function upgradeCommand(uri: string | undefined, options: unknown) {
   }
   const document = uri ? documents.get(uri) : undefined
   if (!document) return null
-  const plan = await upgradePlan(document)
+  const { plan, version } = await upgradePlan(document)
   const result = { applied: false, check: plan.check, records: plan.records }
   if (!plan.writable) {
     void connection.window.showWarningMessage(`Not upgraded: Carve 0.2 would render this document differently. Rewrite these lines by hand:\n${reviewSummary(plan)}`)
@@ -443,7 +448,7 @@ async function upgradeCommand(uri: string | undefined, options: unknown) {
     void connection.window.showInformationMessage('Nothing to upgrade: Carve 0.2 reads this document as it is.')
     return result
   }
-  const applied = (await connection.workspace.applyEdit({ label: 'Upgrade to Carve 0.2', edit: { changes: { [document.uri]: plan.edits } } }))?.applied === true
+  const applied = (await connection.workspace.applyEdit({ label: 'Upgrade to Carve 0.2', edit: upgradeEdit(document.uri, plan, version) }))?.applied === true
   if (applied && plan.review.length) void connection.window.showWarningMessage(`Upgraded to Carve 0.2. Left for review:\n${reviewSummary(plan)}`)
   return { ...result, applied }
 }
@@ -467,9 +472,8 @@ connection.onRequest(HoverRequest.type, (params) => {
 
 connection.onRequest(CodeActionRequest.type, async (params) => {
   const document = documents.get(params.textDocument.uri)
-  const upgrade = document && wantsUpgrade(params.context.only)
-    ? upgradeCodeAction(params.textDocument.uri, await upgradePlan(document), codeActionDisabledSupport)
-    : null
+  const planned = document && wantsUpgrade(params.context.only) ? await upgradePlan(document) : null
+  const upgrade = planned ? upgradeCodeAction(params.textDocument.uri, planned.plan, codeActionDisabledSupport, planned.version) : null
   return document
     ? [
         ...(upgrade ? [upgrade] : []),
