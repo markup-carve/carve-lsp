@@ -62,6 +62,7 @@ import { alignTableCodeAction, alignTablesInDocument, tableAlignmentEdits } from
 import { tableConversionCodeActions } from './table-conversion.js'
 import { hoverAt } from './hover.js'
 import { migrationCodeActions } from './migration-actions.js'
+import { planUpgrade, reviewSummary, upgradeCodeAction, UPGRADE_COMMAND, UPGRADE_KIND, wantsUpgrade, type UpgradePlan } from './upgrade-action.js'
 import { lintCodeActions } from './lint-actions.js'
 import { prepareRename, renameEdits } from './rename.js'
 import { DiagnosticScheduler } from './diagnostic-scheduler.js'
@@ -106,6 +107,16 @@ let includeSettings: IncludeSettings = DEFAULT_INCLUDE_SETTINGS
 let carveSettings: CarveSettings = DEFAULT_CARVE_SETTINGS
 let workspaceTrusted = false
 let exportClient: ExportSupport = { createFile: false, resolveEdit: false }
+let codeActionDisabledSupport = false
+const upgradePlans = new Map<string, { version: number, plan: Promise<UpgradePlan> }>()
+
+function upgradePlan(document: TextDocument): Promise<UpgradePlan> {
+  const cached = upgradePlans.get(document.uri)
+  if (cached?.version === document.version) return cached.plan
+  const plan = planUpgrade(document.getText())
+  upgradePlans.set(document.uri, { version: document.version, plan })
+  return plan
+}
 let pdfOptions: PdfOptions = {}
 let pdfExportCommand = false
 let workspaceRoots: string[] = []
@@ -143,6 +154,7 @@ connection.onInitialize((params) => {
   includeSettings = readIncludeSettings(params.initializationOptions, logIncludeSettings)
   workspaceTrusted = readWorkspaceTrusted(params.initializationOptions)
   exportClient = exportSupport(params.capabilities)
+  codeActionDisabledSupport = params.capabilities.textDocument?.codeAction?.disabledSupport === true
   // Every folder, not just the first: a multi-root session roots each document
   // at the folder it actually lives in.
   const folders = (params.workspaceFolders ?? []).map((folder) => fsPath(folder.uri))
@@ -160,7 +172,7 @@ connection.onInitialize((params) => {
       workspaceSymbolProvider: true,
       hoverProvider: true,
       codeActionProvider: {
-        codeActionKinds: [CodeActionKind.QuickFix, CodeActionKind.SourceFixAll, CodeActionKind.RefactorRewrite, EXPORT_KIND],
+        codeActionKinds: [CodeActionKind.QuickFix, CodeActionKind.SourceFixAll, CodeActionKind.RefactorRewrite, EXPORT_KIND, UPGRADE_KIND],
         resolveProvider: true,
       },
       documentFormattingProvider: true,
@@ -176,7 +188,7 @@ connection.onInitialize((params) => {
       executeCommandProvider: { commands: [
         'carve.previewHtml', 'carve.showAst', 'carve.workspaceGraph',
         'carve.backlinks', 'carve.generatedNavigation', 'carve.rebuildImpact',
-        'carve.listIndent', ...(pdfExportCommand ? ['carve.exportPdf'] : []),
+        'carve.listIndent', UPGRADE_COMMAND, ...(pdfExportCommand ? ['carve.exportPdf'] : []),
       ] },
       referencesProvider: true,
       renameProvider: { prepareProvider: true },
@@ -267,6 +279,7 @@ documents.onDidChangeContent((event) => {
 })
 documents.onDidClose((event) => {
   editedLines.delete(event.document.uri)
+  upgradePlans.delete(event.document.uri)
   diagnostics.cancel(event.document.uri)
   // Closing an editor buffer must not make an on-disk workspace document
   // disappear from cross-file navigation.
@@ -394,6 +407,7 @@ connection.onRequest(ExecuteCommandRequest.type, async (params) => {
       return null
     }
   }
+  if (params.command === UPGRADE_COMMAND) return upgradeCommand(uri, params.arguments?.[1])
   if (params.command === 'carve.workspaceGraph') return workspaceGraph(workspaceIndex)
   if (params.command === 'carve.backlinks') return uri ? backlinks(workspaceIndex, uri) : []
   if (params.command === 'carve.generatedNavigation') return generatedNavigation(workspaceIndex, uri)
@@ -404,6 +418,35 @@ connection.onRequest(ExecuteCommandRequest.type, async (params) => {
   if (params.command === 'carve.showAst') return encodeTree(parse(document.getText()))
   return null
 })
+
+/**
+ * `carve.upgrade` with `[uri]`: rewrites the open document from Carve 0.1 to 0.2
+ * as one edit and shows what the upgrade left for a person. A document the
+ * upgrade would render differently is not touched. With `[uri, { review }]`
+ * (the follow-up of the source action) it only shows that text.
+ */
+async function upgradeCommand(uri: string | undefined, options: unknown) {
+  const review = (options as { review?: unknown } | undefined)?.review
+  if (typeof review === 'string') {
+    if (review) void connection.window.showWarningMessage(`Carve 0.2 upgrade, left for review:\n${review}`)
+    return null
+  }
+  const document = uri ? documents.get(uri) : undefined
+  if (!document) return null
+  const plan = await upgradePlan(document)
+  const result = { applied: false, check: plan.check, records: plan.records }
+  if (!plan.writable) {
+    void connection.window.showWarningMessage(`Not upgraded: Carve 0.2 would render this document differently. Rewrite these lines by hand:\n${reviewSummary(plan)}`)
+    return result
+  }
+  if (plan.edits.length === 0) {
+    void connection.window.showInformationMessage('Nothing to upgrade: Carve 0.2 reads this document as it is.')
+    return result
+  }
+  const applied = await connection.workspace.applyEdit({ label: 'Upgrade to Carve 0.2', edit: { changes: { [document.uri]: plan.edits } } })
+  if (plan.review.length) void connection.window.showWarningMessage(`Upgraded to Carve 0.2. Left for review:\n${reviewSummary(plan)}`)
+  return { ...result, applied: applied?.applied === true }
+}
 
 /**
  * `carve.listIndent` with `{ uri, line, direction }`: the edits for that
@@ -422,10 +465,14 @@ connection.onRequest(HoverRequest.type, (params) => {
   return document ? hoverAt(document.getText(), params.position) : null
 })
 
-connection.onRequest(CodeActionRequest.type, (params) => {
+connection.onRequest(CodeActionRequest.type, async (params) => {
   const document = documents.get(params.textDocument.uri)
+  const upgrade = document && wantsUpgrade(params.context.only)
+    ? upgradeCodeAction(params.textDocument.uri, await upgradePlan(document), codeActionDisabledSupport)
+    : null
   return document
     ? [
+        ...(upgrade ? [upgrade] : []),
         ...migrationCodeActions(params.textDocument.uri, document.getText(), params.context.diagnostics),
         ...lintCodeActions(params.textDocument.uri, document.getText(), params.context.diagnostics),
         ...(!params.context.only || params.context.only.some(kind => CodeActionKind.RefactorRewrite === kind || CodeActionKind.RefactorRewrite.startsWith(kind + '.'))

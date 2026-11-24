@@ -59,13 +59,13 @@ The server communicates over **stdio** (`--stdio` flag).
 | Completion | Container kinds (admonitions, placement markers, extension containers), code fence languages, attributes, semantic spans, citations, references, heading titles as `[Heading][]` links, workspace anchors, and contained include paths, sections and options |
 | Navigation | Document links, go-to-definition, highlights, and references for anchors, captions, footnotes, citations, and link labels |
 | Rename | Namespace-aware rename: anchors, captions and citation keys across the workspace, footnote and link labels within their document; generated heading ids become explicit when renamed |
-| Code actions | Migration and lint quick-fixes, table marker repair, table conversion, creation of missing definitions, and export to Markdown or HTML |
+| Code actions | Migration and lint quick-fixes, table marker repair, table conversion, creation of missing definitions, export to Markdown or HTML, and the Carve 0.1 to 0.2 upgrade (`source.upgrade`) |
 | Code lens | Reference counts for anchors, captions, citations, footnotes, and link labels |
 | Selection and folding | Syntax-aware selection expansion and folding, with tolerant fallbacks during incomplete edits |
 | Formatting | Conservative document/range formatting, on-type continuation (see below), or explicit migration formatting |
 | Semantic tokens | Full, ranged, and delta token updates, including table structure and alignment metadata |
 | Inlay hints | Generated heading ids, colon-fence closers, and a `list item` / `task` hint after a bare list marker on the line being edited (configurable) |
-| Commands | Preview/AST output, list indent/outdent (`carve.listIndent`), workspace graph, backlinks, generated navigation, and transitive rebuild impact |
+| Commands | Preview/AST output, list indent/outdent (`carve.listIndent`), the 0.1 to 0.2 upgrade (`carve.upgrade`), workspace graph, backlinks, generated navigation, and transitive rebuild impact |
 | File inclusion | Resolves `{{ path }}` directives, watches dependencies, and reports failures as diagnostics - **off by default**, see below |
 
 ### Table code actions
@@ -144,6 +144,32 @@ exported `BARE_CONTINUATION_MARKER`.
 The heading list stays empty until the text after `[` matches a heading, so
 ordinary link text and bracketed prose get no popup. `![`, `[[`, `\[`, `[^`
 and `[@` are left to their own completions.
+
+## Upgrade from Carve 0.1
+
+*Upgrade to Carve 0.2* (kind `source.upgrade`) rewrites a Carve 0.1 document
+with the engine's upgrade tool (`upgrade` from `@markup-carve/carve/upgrade`)
+and applies the changes as one edit. It is listed among the source actions
+when the upgrade would change the document; a request without `only`, such as
+a cursor move, does not run the upgrade. The `carve.upgrade` command does the
+same for a host that binds it to a menu entry:
+
+```json
+{ "command": "carve.upgrade", "arguments": ["file:///notes.crv"] }
+```
+
+It returns `{ applied, check, records }`, the engine's check and upgrade
+records.
+
+- What the upgrade cannot decide for you (a `report` entry such as a tab
+  without a title, or an `unverified explanation`) is not applied; the action
+  title counts those places and a message lists them by line after the edit.
+- When the engine's self-check finds that 0.2 would render the document
+  differently (`check: mismatch`), nothing is applied: the action is shown
+  disabled with the reason where the client supports that, and the command
+  shows the lines to rewrite by hand.
+- The input is read as Carve 0.1. Running the upgrade on text that already
+  uses 0.2-only syntax, such as `= Heading`, escapes it.
 
 ## List indent and outdent
 
