@@ -44,6 +44,8 @@
   },
   "dependencies": {
     "@markup-carve/carve": "github:markup-carve/carve-js#edd6e00a76729cb086dcb15c38818e1cc34159fb",
+    "@shikijs/core": "^4.6.0",
+    "@shikijs/engine-javascript": "^4.6.0",
     "vscode-languageserver": "^9.0.1",
     "vscode-languageserver-textdocument": "^1.0.12",
     "vscode-languageserver-types": "^3.17.5"

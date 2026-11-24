@@ -63,7 +63,7 @@ The server communicates over **stdio** (`--stdio` flag).
 | Code lens | Reference counts for anchors, captions, citations, footnotes, and link labels |
 | Selection and folding | Syntax-aware selection expansion and folding, with tolerant fallbacks during incomplete edits |
 | Formatting | Conservative document/range formatting, on-type continuation (see below), or explicit migration formatting |
-| Semantic tokens | Full, ranged, and delta token updates, including table structure and alignment metadata |
+| Semantic tokens | Full, ranged, and delta token updates, read from the carve-grammars TextMate grammar, so the server and an editor using that grammar color a line the same way; the document tree adds the attribute keys a block consumes and the semantic span names |
 | Inlay hints | Generated heading ids, colon-fence closers, and a `list item` / `task` hint after a bare list marker on the line being edited (configurable) |
 | Commands | Preview/AST output, list indent/outdent (`carve.listIndent`), workspace graph, backlinks, generated navigation, and transitive rebuild impact |
 | File inclusion | Resolves `{{ path }}` directives, watches dependencies, and reports failures as diagnostics - **off by default**, see below |

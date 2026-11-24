@@ -74,6 +74,7 @@ import {
   semanticTokenTypes,
   updateSemanticTokens,
 } from './semantic.js'
+import { grammarTokens } from './grammar-tokens.js'
 import { documentLinks } from './document-links.js'
 import { documentHighlights } from './document-highlights.js'
 import { inlayHints } from './inlay-hints.js'
@@ -214,6 +215,8 @@ connection.onInitialized(() => {
   connection.client.register(DidChangeWatchedFilesNotification.type, {
     watchers: [{ globPattern: '**/*.crv' }, { globPattern: '**/.carverc.json' }],
   }).catch(warnUnregistered('file watchers'))
+  // Compiling the highlighting grammar takes about half a second; do it before the first token request.
+  setTimeout(() => grammarTokens(''), 0)
 })
 
 connection.onDidChangeConfiguration((change) => {
