@@ -62,6 +62,7 @@ import { alignTableCodeAction, alignTablesInDocument, tableAlignmentEdits } from
 import { tableConversionCodeActions } from './table-conversion.js'
 import { hoverAt } from './hover.js'
 import { migrationCodeActions } from './migration-actions.js'
+import { planUpgrade, reviewSummary, upgradeCodeAction, upgradeEdit, UPGRADE_COMMAND, UPGRADE_KIND, wantsUpgrade, type UpgradePlan } from './upgrade-action.js'
 import { lintCodeActions } from './lint-actions.js'
 import { prepareRename, renameEdits } from './rename.js'
 import { DiagnosticScheduler } from './diagnostic-scheduler.js'
@@ -106,6 +107,24 @@ let includeSettings: IncludeSettings = DEFAULT_INCLUDE_SETTINGS
 let carveSettings: CarveSettings = DEFAULT_CARVE_SETTINGS
 let workspaceTrusted = false
 let exportClient: ExportSupport = { createFile: false, resolveEdit: false }
+let codeActionDisabledSupport = false
+let documentChangesSupport = false
+const upgradePlans = new Map<string, { version: number, plan: Promise<UpgradePlan> }>()
+
+/** The upgrade plan of the document as it is now, and the version it was made from when the client can pin edits to one. */
+async function upgradePlan(document: TextDocument): Promise<{ plan: UpgradePlan, version: number | undefined }> {
+  const version = document.version
+  let cached = upgradePlans.get(document.uri)
+  if (cached?.version !== version) {
+    cached = { version, plan: planUpgrade(document.getText()) }
+    upgradePlans.set(document.uri, cached)
+  }
+  const plan = await cached.plan
+  // A change that arrived while the plan was computed makes it stale: plan the current text instead.
+  const current = documents.get(document.uri)
+  if (current && current.version !== version) return upgradePlan(current)
+  return { plan, version: documentChangesSupport ? version : undefined }
+}
 let pdfOptions: PdfOptions = {}
 let pdfExportCommand = false
 let workspaceRoots: string[] = []
@@ -143,6 +162,8 @@ connection.onInitialize((params) => {
   includeSettings = readIncludeSettings(params.initializationOptions, logIncludeSettings)
   workspaceTrusted = readWorkspaceTrusted(params.initializationOptions)
   exportClient = exportSupport(params.capabilities)
+  codeActionDisabledSupport = params.capabilities.textDocument?.codeAction?.disabledSupport === true
+  documentChangesSupport = params.capabilities.workspace?.workspaceEdit?.documentChanges === true
   // Every folder, not just the first: a multi-root session roots each document
   // at the folder it actually lives in.
   const folders = (params.workspaceFolders ?? []).map((folder) => fsPath(folder.uri))
@@ -160,7 +181,7 @@ connection.onInitialize((params) => {
       workspaceSymbolProvider: true,
       hoverProvider: true,
       codeActionProvider: {
-        codeActionKinds: [CodeActionKind.QuickFix, CodeActionKind.SourceFixAll, CodeActionKind.RefactorRewrite, EXPORT_KIND],
+        codeActionKinds: [CodeActionKind.QuickFix, CodeActionKind.SourceFixAll, CodeActionKind.RefactorRewrite, EXPORT_KIND, UPGRADE_KIND],
         resolveProvider: true,
       },
       documentFormattingProvider: true,
@@ -176,7 +197,7 @@ connection.onInitialize((params) => {
       executeCommandProvider: { commands: [
         'carve.previewHtml', 'carve.showAst', 'carve.workspaceGraph',
         'carve.backlinks', 'carve.generatedNavigation', 'carve.rebuildImpact',
-        'carve.listIndent', ...(pdfExportCommand ? ['carve.exportPdf'] : []),
+        'carve.listIndent', UPGRADE_COMMAND, ...(pdfExportCommand ? ['carve.exportPdf'] : []),
       ] },
       referencesProvider: true,
       renameProvider: { prepareProvider: true },
@@ -267,6 +288,7 @@ documents.onDidChangeContent((event) => {
 })
 documents.onDidClose((event) => {
   editedLines.delete(event.document.uri)
+  upgradePlans.delete(event.document.uri)
   diagnostics.cancel(event.document.uri)
   // Closing an editor buffer must not make an on-disk workspace document
   // disappear from cross-file navigation.
@@ -394,6 +416,7 @@ connection.onRequest(ExecuteCommandRequest.type, async (params) => {
       return null
     }
   }
+  if (params.command === UPGRADE_COMMAND) return upgradeCommand(uri, params.arguments?.[1])
   if (params.command === 'carve.workspaceGraph') return workspaceGraph(workspaceIndex)
   if (params.command === 'carve.backlinks') return uri ? backlinks(workspaceIndex, uri) : []
   if (params.command === 'carve.generatedNavigation') return generatedNavigation(workspaceIndex, uri)
@@ -404,6 +427,36 @@ connection.onRequest(ExecuteCommandRequest.type, async (params) => {
   if (params.command === 'carve.showAst') return encodeTree(parse(document.getText()))
   return null
 })
+
+/**
+ * `carve.upgrade` with `[uri]`: rewrites the open document from Carve 0.1 to 0.2
+ * as one edit and shows what the upgrade left for a person. A document the
+ * upgrade would render differently is not touched. With `[uri, { review }]`
+ * (the follow-up of the source action) it only shows that text.
+ */
+async function upgradeCommand(uri: string | undefined, options: unknown) {
+  const review = (options as { review?: unknown } | undefined)?.review
+  if (typeof review === 'string') {
+    if (review) void connection.window.showWarningMessage(`Carve 0.2 upgrade, left for review:\n${review}`)
+    return null
+  }
+  const document = uri ? documents.get(uri) : undefined
+  if (!document) return null
+  const { plan, version } = await upgradePlan(document)
+  const result = { applied: false, check: plan.check, records: plan.records }
+  if (!plan.writable) {
+    void connection.window.showWarningMessage(`Not upgraded: Carve 0.2 would render this document differently. Rewrite these lines by hand:\n${reviewSummary(plan)}`)
+    return result
+  }
+  if (plan.edits.length === 0) {
+    if (plan.review.length) void connection.window.showWarningMessage(`Nothing to rewrite, but left for review:\n${reviewSummary(plan)}`)
+    else void connection.window.showInformationMessage('Nothing to upgrade: Carve 0.2 reads this document as it is.')
+    return result
+  }
+  const applied = (await connection.workspace.applyEdit({ label: 'Upgrade to Carve 0.2', edit: upgradeEdit(document.uri, plan, version) }))?.applied === true
+  if (applied && plan.review.length) void connection.window.showWarningMessage(`Upgraded to Carve 0.2. Left for review:\n${reviewSummary(plan, true)}`)
+  return { ...result, applied }
+}
 
 /**
  * `carve.listIndent` with `{ uri, line, direction }`: the edits for that
@@ -422,10 +475,13 @@ connection.onRequest(HoverRequest.type, (params) => {
   return document ? hoverAt(document.getText(), params.position) : null
 })
 
-connection.onRequest(CodeActionRequest.type, (params) => {
+connection.onRequest(CodeActionRequest.type, async (params) => {
   const document = documents.get(params.textDocument.uri)
+  const planned = document && wantsUpgrade(params.context.only) ? await upgradePlan(document) : null
+  const upgrade = planned ? upgradeCodeAction(params.textDocument.uri, planned.plan, codeActionDisabledSupport, planned.version) : null
   return document
     ? [
+        ...(upgrade ? [upgrade] : []),
         ...migrationCodeActions(params.textDocument.uri, document.getText(), params.context.diagnostics),
         ...lintCodeActions(params.textDocument.uri, document.getText(), params.context.diagnostics),
         ...(!params.context.only || params.context.only.some(kind => CodeActionKind.RefactorRewrite === kind || CodeActionKind.RefactorRewrite.startsWith(kind + '.'))
