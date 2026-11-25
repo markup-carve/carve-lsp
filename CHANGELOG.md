@@ -4,6 +4,13 @@ All notable changes to carve-lsp are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- Parser offsets convert to string indices through a per-document table instead of a scan from the start, so indexing and position lookups no longer grow quadratically with file size. Indexing a 2,800-file workspace drops from about 27 s to 3 s.
+- `workspace/diagnostic` answers with result ids, reports unchanged documents as `unchanged`, and holds the request open until the workspace changes. Before, every pull returned a full report for every indexed file, and clients that re-pull right away kept the server busy indefinitely.
+
 ## [0.1.16] - 2026-11-12
 
 The server follows the carve-js 0.1.16 readings: braced table alignment, the renamed lint rules and the new lint severities.

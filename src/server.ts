@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createHash } from 'node:crypto'
 import {
   CodeActionKind,
   CodeActionRequest,
@@ -8,6 +9,7 @@ import {
   createConnection,
   DefinitionRequest,
   DocumentDiagnosticReportKind,
+  type WorkspaceDocumentDiagnosticReport,
   DocumentFormattingRequest,
   DocumentHighlightRequest,
   DocumentLinkRequest,
@@ -338,14 +340,53 @@ connection.languages.diagnostics.on((params) => {
   }
 })
 
-connection.languages.diagnostics.onWorkspace(() => ({
-  items: workspaceIndex.documents().map((document) => ({
-    uri: document.uri,
-    version: null,
-    kind: DocumentDiagnosticReportKind.Full,
-    items: workspaceIndex.diagnostics(document.uri),
-  })),
-}))
+// Clients re-pull as soon as a reply arrives, so a reply that is neither
+// "unchanged" nor held open turns into a busy loop over the whole workspace.
+// Result ids hash the report itself: a diagnostic can depend on any other file,
+// so only recomputing tells whether one document's report changed.
+const WORKSPACE_DIAGNOSTIC_SETTLE_MS = 300
+let reportedGeneration = -1
+let reportedIds = new Map<string, string>()
+connection.languages.diagnostics.onWorkspace(async (params, token) => {
+  const known = new Map(params.previousResultIds.map((previous) => [previous.uri, previous.value]))
+  // Hold only a re-pull from a client that already has every current report.
+  const uris = new Set([...known.keys(), ...workspaceIndex.documents().map((document) => document.uri)])
+  const repull = reportedGeneration === workspaceIndex.generation
+    && [...uris].every((uri) => known.get(uri) === reportedIds.get(uri))
+  if (repull && !token.isCancellationRequested) {
+    await new Promise<void>((resolve) => {
+      const stop = workspaceIndex.onceChanged(resolve)
+      token.onCancellationRequested(() => { stop(); resolve() })
+    })
+    // A typing burst bumps the generation per keystroke; answer once it settles.
+    for (let seen = -1; seen !== workspaceIndex.generation && !token.isCancellationRequested;) {
+      seen = workspaceIndex.generation
+      await new Promise((resolve) => setTimeout(resolve, WORKSPACE_DIAGNOSTIC_SETTLE_MS))
+    }
+  }
+  reportedGeneration = workspaceIndex.generation
+  reportedIds = new Map()
+  const current = workspaceIndex.documents()
+  const indexed = new Set(current.map((document) => document.uri))
+  // An empty report is what clears a deleted file's old entries in the client.
+  const removed = [...known.keys()].filter((uri) => !indexed.has(uri))
+    .map((uri): WorkspaceDocumentDiagnosticReport => {
+      // Its own id: a recreated file with the old report must not read as unchanged.
+      const resultId = `removed:${workspaceIndex.generation}`
+      reportedIds.set(uri, resultId)
+      return { uri, version: null, kind: DocumentDiagnosticReportKind.Full, resultId, items: [] }
+    })
+  return {
+    items: [...removed, ...current.map((document): WorkspaceDocumentDiagnosticReport => {
+      const items = workspaceIndex.diagnostics(document.uri)
+      const resultId = createHash('sha1').update(JSON.stringify(items)).digest('base64url')
+      reportedIds.set(document.uri, resultId)
+      return known.get(document.uri) === resultId
+        ? { uri: document.uri, version: null, kind: DocumentDiagnosticReportKind.Unchanged, resultId }
+        : { uri: document.uri, version: null, kind: DocumentDiagnosticReportKind.Full, resultId, items }
+    })],
+  }
+})
 
 connection.onRequest(DocumentLinkRequest.type, (params) => {
   const document = documents.get(params.textDocument.uri)

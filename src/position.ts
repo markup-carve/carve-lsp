@@ -185,15 +185,43 @@ export function characterToAstColumn(lineText: string, character: number): numbe
  */
 export function astOffsetToIndex(source: string, offset: number): number {
   if (engineColumnUnit() !== 'codepoint') return offset
+  if (offset <= 0) return 0
 
-  let index = 0
-  let counted = 0
-  while (index < source.length && counted < offset) {
-    index += (source.codePointAt(index) ?? 0) > 0xffff ? 2 : 1
-    counted += 1
-  }
-
+  const { table, codepoints } = codepointIndex(source)
   // An offset past the end keeps its distance rather than collapsing onto it,
   // for the same reason the column conversion does: an end offset is exclusive.
-  return index + Math.max(0, offset - counted)
+  if (offset >= codepoints) return source.length + (offset - codepoints)
+  return table === null ? offset : table[offset]!
+}
+
+// Callers convert every node of one document in turn, so rescanning from the
+// start per call made each document quadratic (seconds per large file).
+let indexedSource: string | undefined
+let indexedTable: { table: Uint32Array | null; codepoints: number } = { table: null, codepoints: 0 }
+
+function codepointIndex(source: string): { table: Uint32Array | null; codepoints: number } {
+  if (source === indexedSource) return indexedTable
+
+  let astral = false
+  let codepoints = 0
+  for (let index = 0; index < source.length; codepoints += 1) {
+    const wide = (source.codePointAt(index) ?? 0) > 0xffff
+    if (wide) astral = true
+    index += wide ? 2 : 1
+  }
+
+  let table: Uint32Array | null = null
+  if (astral) {
+    table = new Uint32Array(codepoints + 1)
+    let index = 0
+    for (let counted = 0; counted < codepoints; counted += 1) {
+      table[counted] = index
+      index += (source.codePointAt(index) ?? 0) > 0xffff ? 2 : 1
+    }
+    table[codepoints] = index
+  }
+
+  indexedSource = source
+  indexedTable = { table, codepoints }
+  return indexedTable
 }
