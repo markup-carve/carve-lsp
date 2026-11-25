@@ -15,6 +15,7 @@ import {
   probeEndColumn,
 } from './position.js'
 import { pathToFileURL } from 'node:url'
+import { stringOffsetOfByte } from './engine.js'
 import type { IncludeResolved, IncludeResolver } from './include-path.js'
 import type { Hover } from 'vscode-languageserver/node.js'
 
@@ -284,4 +285,28 @@ test('an offset past the end keeps its distance instead of collapsing', () => {
   // past the last character. Clamping it would invert the range.
   // 0.2 C2-A-141: the offset counts UTF-8 bytes.
   assert.equal(astOffsetToIndex(LINE, Buffer.byteLength(LINE) + 1), LINE.length + 1)
+})
+
+test('offset conversion matches the engine byte walk across astral, lone-surrogate and plain text', () => {
+  // The engine's own conversion is the reference; the table must agree at every byte, mid-character included.
+  const reference = (source: string, offset: number): number => {
+    const total = Buffer.byteLength(source)
+    return offset > total ? source.length + (offset - total) : stringOffsetOfByte(source, Math.max(0, offset))
+  }
+  for (const source of ['', 'plain ascii', `${LINE}\nmid 😀 line\n𝒳𝒴 end`, 'lone \ud83d high', 'äöü 😀 €']) {
+    for (let offset = -1; offset <= Buffer.byteLength(source) + 2; offset += 1) {
+      assert.equal(astOffsetToIndex(source, offset), reference(source, offset), `${JSON.stringify(source)} @ ${offset}`)
+    }
+  }
+})
+
+test('offset conversion stays linear on a large document', () => {
+  const source = `${'😀 word '.repeat(50_000)}`
+  try {
+    const started = performance.now()
+    for (let offset = 0; offset < 400_000; offset += 7) astOffsetToIndex(source, offset)
+    assert.ok(performance.now() - started < 1_000, 'per-call cost must not depend on the offset')
+  } finally {
+    setEngineColumnUnit(undefined)
+  }
 })
