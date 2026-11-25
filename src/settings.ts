@@ -11,6 +11,8 @@ export interface CarveSettings {
   exportActions: boolean
   formatter: 'conservative' | 'migration'
   formatAlignTables: boolean
+  /** `lint.upgrade`: run the 0.1 migration rules (C2-W-156), which are off by default. */
+  lintUpgrade: boolean
   severities: Record<string, 'error' | 'warning' | 'information' | 'hint' | 'off'>
 }
 
@@ -22,6 +24,7 @@ export const DEFAULT_CARVE_SETTINGS: CarveSettings = {
   exportActions: true,
   formatter: 'conservative',
   formatAlignTables: false,
+  lintUpgrade: false,
   severities: {},
 }
 
@@ -42,15 +45,21 @@ export function readCarveSettings(raw: unknown): CarveSettings {
     exportActions: carve['exportActions'] !== false,
     formatter: carve['formatter'] === 'migration' ? 'migration' : 'conservative',
     formatAlignTables: formatAlignTables(carve),
+    lintUpgrade: nestedTrue(carve, 'lint', 'upgrade'),
     severities: severitySettings(carve['severities']),
   }
 }
 
 function formatAlignTables(carve: Record<string, unknown>): boolean {
-  const format = carve['format']
-  return (format !== null && typeof format === 'object' && !Array.isArray(format)
-    && (format as Record<string, unknown>)['alignTables'] === true)
-    || carve['format.alignTables'] === true
+  return nestedTrue(carve, 'format', 'alignTables')
+}
+
+// `{ "format": { "alignTables": true } }` or the dotted `"format.alignTables": true`.
+function nestedTrue(carve: Record<string, unknown>, section: string, key: string): boolean {
+  const value = carve[section]
+  return (value !== null && typeof value === 'object' && !Array.isArray(value)
+    && (value as Record<string, unknown>)[key] === true)
+    || carve[`${section}.${key}`] === true
 }
 
 // `inlayHints` is a boolean, or an object of per-hint switches that default to on.
@@ -73,15 +82,17 @@ export function carveSection(raw: unknown): CarveSection | undefined {
   return carve !== null && typeof carve === 'object' && !Array.isArray(carve) ? carve as CarveSection : undefined
 }
 
-// Folds the dotted `format.alignTables` spelling into `format`, so a client
-// `false` can override a project `true` key by key.
+// Folds the dotted `format.alignTables` and `lint.upgrade` spellings into their
+// objects, so a client `false` can override a project `true` key by key.
 function normalizeSection(carve: CarveSection): CarveSection {
-  const { 'format.alignTables': dotted, ...rest } = carve
+  return foldDotted(foldDotted(carve, 'format', 'alignTables'), 'lint', 'upgrade')
+}
+
+function foldDotted(carve: CarveSection, section: string, key: string): CarveSection {
+  const { [`${section}.${key}`]: dotted, ...rest } = carve
   if (dotted === undefined) return rest
-  const format = rest['format'] !== null && typeof rest['format'] === 'object' && !Array.isArray(rest['format'])
-    ? rest['format'] as CarveSection
-    : {}
-  return { ...rest, format: { ...format, alignTables: dotted } }
+  const object = isPlainObject(rest[section]) ? rest[section] : {}
+  return { ...rest, [section]: { ...object, [key]: dotted } }
 }
 
 /**
@@ -95,7 +106,7 @@ export function mergeCarveSettings(client: CarveSection | undefined, project: Ca
   const merged: CarveSection = { ...fromProject }
   for (const [key, value] of Object.entries(fromClient)) {
     const base = merged[key]
-    // Object settings (`format`, `severities`, `inlayHints`) merge one level deep.
+    // Object settings (`format`, `lint`, `severities`, `inlayHints`) merge one level deep.
     merged[key] = isPlainObject(base) && isPlainObject(value) ? { ...base, ...value } : value
   }
   return readCarveSettings({ carve: merged })

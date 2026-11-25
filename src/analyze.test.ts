@@ -5,6 +5,7 @@ import { analyzeCarve, parseErrorRange, tolerantHeadingSymbols } from './analyze
 import { hoverAt } from './hover.js'
 import { migrationCodeActions, migrationFixes } from './migration-actions.js'
 import { semanticTokens } from './semantic.js'
+import { CarveOptionError, lint, type LintOptions } from './engine.js'
 
 // 0.2 C2-N-013: a target the resolver does not find reports `include-not-found` (0.1 `include-unresolved`).
 
@@ -73,11 +74,27 @@ test('does not diagnose djot-shift constructs (valid Carve)', () => {
     )
   }
   // 0.2 C2-I-046: a bare `_` pair is text; lint-rules.json replaces `markdown-italic-underline` with `deprecated-bare-underline`.
-  assert.deepEqual(analyzeCarve('_italic_').diagnostics.map((d) => d.code), ['deprecated-bare-underline'])
+  assert.deepEqual(analyzeCarve('_italic_', { lint: { upgrade: true } }).diagnostics.map((d) => d.code), ['deprecated-bare-underline'])
+})
+
+// C2-W-156: the 0.1 migration rules run only when the lint upgrade setting is on.
+test('lint upgrade mode turns on the deprecated-* migration rules', (t) => {
+  const codes = (upgrade?: boolean) => analyzeCarve('|=> Price |\n', upgrade === undefined ? {} : { lint: { upgrade } })
+    .diagnostics.map((d) => d.code)
+  assert.ok(codes(true).includes('deprecated-cell-alignment'))
+  try {
+    lint('', { upgrade: true } as LintOptions)
+  } catch (error) {
+    if (!(error instanceof CarveOptionError)) throw error
+    t.skip('the pinned engine predates the upgrade option and runs these rules unasked')
+    return
+  }
+  assert.ok(!codes().includes('deprecated-cell-alignment'))
+  assert.ok(!codes(false).includes('deprecated-cell-alignment'))
 })
 
 test('an engine Hint finding is published as a Hint', () => {
-  const [hint] = analyzeCarve('a\n\n---\n\nb\n').diagnostics.filter((d) => d.code === 'thematic-break-spelling')
+  const [hint] = analyzeCarve('a\n\n---\n\nb\n', { lint: { upgrade: true } }).diagnostics.filter((d) => d.code === 'thematic-break-spelling')
   assert.equal(hint?.severity, DiagnosticSeverity.Hint)
   assert.equal(analyzeCarve('See [x][r].\n').diagnostics[0]?.severity, DiagnosticSeverity.Warning)
 })

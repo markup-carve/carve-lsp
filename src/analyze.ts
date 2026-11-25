@@ -48,6 +48,8 @@ export interface AnalyzeOptions {
   lint?: {
     platforms?: readonly 'github'[]
     extensions?: readonly string[]
+    /** Run the 0.1 migration rules (`deprecated-*`, C2-W-156), which 0.2 lint keeps off by default. */
+    upgrade?: boolean
     severities?: Readonly<Record<string, 'error' | 'warning' | 'information' | 'hint' | 'off'>>
   }
   /**
@@ -101,8 +103,9 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
     ...(includeConfig ? { includes: includeConfig } : {}),
   }
   const rules = lintRules(options.lint?.severities)
+  const engineOptions: LintOptions = rules ? { ...lintOptions, rules: rules as LintOptions['rules'] } : lintOptions
   try {
-    lintDiagnostics = lint(source, rules ? { ...lintOptions, rules: rules as LintOptions['rules'] } : lintOptions)
+    lintDiagnostics = lintWithUpgrade(source, engineOptions, options.lint?.upgrade === true)
   } catch (error) {
     if (!(error instanceof CarveOptionError)) throw error
   }
@@ -559,6 +562,17 @@ function lintRules(severities: NonNullable<AnalyzeOptions['lint']>['severities']
   const known = entries.filter(([id]) => isLintRule(id))
   if (known.length === 0) return undefined
   return Object.fromEntries(known.map(([id, severity]) => [id, severity === 'off' ? 'off' : 'on']))
+}
+
+// An engine without the `upgrade` option predates C2-W-156 and runs the migration rules unasked.
+function lintWithUpgrade(source: string, options: LintOptions, upgrade: boolean): EngineDiagnostic[] {
+  if (!upgrade) return lint(source, options)
+  try {
+    return lint(source, { ...options, upgrade: true } as LintOptions)
+  } catch (error) {
+    if (error instanceof CarveOptionError && error.option === 'upgrade') return lint(source, options)
+    throw error
+  }
 }
 
 const lintRuleIds = new Map<string, boolean>()
