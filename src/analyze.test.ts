@@ -73,8 +73,9 @@ test('does not diagnose djot-shift constructs (valid Carve)', () => {
       `expected no diagnostic for ${JSON.stringify(src)}`,
     )
   }
-  // 0.2 C2-I-046: a bare `_` pair is text; lint-rules.json replaces `markdown-italic-underline` with `deprecated-bare-underline`.
-  assert.deepEqual(analyzeCarve('_italic_', { lint: { upgrade: true } }).diagnostics.map((d) => d.code), ['deprecated-bare-underline'])
+  // 0.2 C2-I-046: a bare `_` pair is text; lint-rules.json replaces `markdown-italic-underline` with `deprecated-bare-underline`,
+  // and the upgrade-only `djot-emphasis-underscore` row (C2-W-156) reports the same pair.
+  assert.deepEqual(analyzeCarve('_italic_', { lint: { upgrade: true } }).diagnostics.map((d) => d.code), ['deprecated-bare-underline', 'djot-emphasis-underscore'])
 })
 
 // C2-W-156: the 0.1 migration rules run only when the lint upgrade setting is on.
