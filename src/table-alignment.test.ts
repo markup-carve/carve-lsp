@@ -16,6 +16,7 @@ const CHANGED_IN_0_2: Record<string, string> = {
   'attributes spans and empty cells': '0.2 C2-B-171, C2-B-182: the writer escapes a cell that starts with `<`',
   'authored separator': '0.2 U-055: a GFM separator row is an ordinary row and pads like one',
   'separator colons': '0.2 U-055: a GFM separator row is an ordinary row and pads like one',
+  'colspan continuation': '0.2 C2-B-173, C2-B-184: a span mark on a continued cell\'s first line is text, and the writer escapes it',
   'rowspan continuation': '0.2 C2-B-173, C2-B-184: a continuation fragment under a span mark joins the spanning cell',
 }
 
