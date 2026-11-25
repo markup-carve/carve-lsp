@@ -53,8 +53,11 @@ test('a created definition is separated from a trailing paragraph', () => {
   assert.equal(newText('Some text[^x]\r\n', 'unresolved-footnote'), '\r\n[^x]: ')
 })
 
+// C2-W-156: the `deprecated-*` migration rules fire only in lint upgrade mode.
+const UPGRADE = { lint: { upgrade: true } }
+
 function applyFirst(source: string, title?: string): string | undefined {
-  const diagnostics = analyzeCarve(source).diagnostics
+  const diagnostics = analyzeCarve(source, UPGRADE).diagnostics
   const actions = lintCodeActions('file:///a.crv', source, diagnostics)
   const action = title ? actions.find((candidate) => candidate.title.startsWith(title)) : actions[0]
   const edit = action?.edit?.changes?.['file:///a.crv']?.[0]
@@ -69,7 +72,7 @@ function applyFirst(source: string, title?: string): string | undefined {
 // `deprecated-continuation-marker` replaces the 0.1 refusal codes, with no escape to offer.
 test('a 0.2 plus line is text and gets no escape action', () => {
   for (const source of ['[^n]: a\n+\n', '- a\n+\n- b\n', '- a\n+\n\n- b\n']) {
-    assert.ok(analyzeCarve(source).diagnostics.some((d) => d.code === 'deprecated-continuation-marker'), source)
+    assert.ok(analyzeCarve(source, UPGRADE).diagnostics.some((d) => d.code === 'deprecated-continuation-marker'), source)
     assert.equal(applyFirst(source, 'Escape the +'), undefined, source)
   }
 })
@@ -85,7 +88,7 @@ test('rewrites a deprecated alignment prefix in the braced spelling (carve#5091 
     // 0.2 C2-B-171, C2-B-182: the old prefix is cell text, so the rewrite restores the 0.1 alignment
     // and the rendering changes; it no longer matches the unfixed source.
     assert.notEqual(render(fixed!), render(source), source)
-    assert.deepEqual(analyzeCarve(fixed!).diagnostics.filter((d) => d.code === 'deprecated-cell-alignment'), [], source)
+    assert.deepEqual(analyzeCarve(fixed!, UPGRADE).diagnostics.filter((d) => d.code === 'deprecated-cell-alignment'), [], source)
   }
 })
 

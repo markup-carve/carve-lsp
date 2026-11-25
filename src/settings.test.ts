@@ -11,7 +11,7 @@ test('reads safe project settings and rejects unknown platform names', () => {
     platforms: ['github', 'unknown'], extensions: ['semantic-span'], inlayHints: false, exportActions: false, formatter: 'migration',
     severities: { 'table-width-total': 'error', bogus: 'loud' },
   } }), {
-    platforms: ['github'], extensions: ['semantic-span'], inlayHints: false, bareListMarkerHints: false, exportActions: false, formatter: 'migration', formatAlignTables: false,
+    platforms: ['github'], extensions: ['semantic-span'], inlayHints: false, bareListMarkerHints: false, exportActions: false, formatter: 'migration', formatAlignTables: false, lintUpgrade: false,
     severities: { 'table-width-total': 'error' },
   })
 })
@@ -20,6 +20,15 @@ test('reads the optional table alignment setting', () => {
   assert.equal(readCarveSettings({ carve: { format: { alignTables: true } } }).formatAlignTables, true)
   assert.equal(readCarveSettings({ carve: { 'format.alignTables': true } }).formatAlignTables, true)
   assert.equal(readCarveSettings({ carve: { format: { alignTables: 'true' } } }).formatAlignTables, false)
+})
+
+test('reads the opt-in lint upgrade setting (C2-W-156)', () => {
+  assert.equal(DEFAULT_CARVE_SETTINGS.lintUpgrade, false)
+  assert.equal(readCarveSettings({ carve: { lint: { upgrade: true } } }).lintUpgrade, true)
+  assert.equal(readCarveSettings({ carve: { 'lint.upgrade': true } }).lintUpgrade, true)
+  assert.equal(readCarveSettings({ carve: { lint: { upgrade: 'true' } } }).lintUpgrade, false)
+  assert.equal(mergeCarveSettings({ 'lint.upgrade': false }, { lint: { upgrade: true } }).lintUpgrade, false)
+  assert.equal(mergeCarveSettings({ formatter: 'migration' }, { lint: { upgrade: true } }).lintUpgrade, true)
 })
 
 test('inlayHints takes a boolean or per-hint switches', () => {

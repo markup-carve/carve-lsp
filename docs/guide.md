@@ -11,10 +11,12 @@ This branch serves Carve 0.2. Every engine call goes through the 0.2 API
 user notices:
 
 - Diagnostics use the 0.2 lint catalog. Renamed rules keep their meaning under
-  the new id, for example `duplicate-id` (was `duplicate-heading-id`) and
-  `deprecated-bare-underline` (was `markdown-italic-underline`). A `+` line is
-  text in 0.2 and reports `deprecated-continuation-marker`, so the "Escape the
-  `+`" quick fix is gone.
+  the new id, for example `duplicate-id` (was `duplicate-heading-id`).
+- The 0.1 migration findings (`deprecated-bare-underline`,
+  `deprecated-continuation-marker`, `deprecated-cell-alignment`,
+  `thematic-break-spelling` and the rest of the engine's upgrade rules) are
+  upgrade help and stay off until the `lint.upgrade` setting is on. A `+` line
+  is text in 0.2, so the "Escape the `+`" quick fix is gone.
 - Opt-in 0.2 rules, such as `djot-plus-bullet`, stay off until the `severities`
   setting names them.
 - Shapes 0.2 reads differently are followed as the engine reads them: a
@@ -78,7 +80,7 @@ Use **Align table** to line up pipe table cells. **Convert to pipe table** chang
 |---|---|
 | `blockquote-marker-without-space` | Insert the space after `>` |
 | `table-marker-run-padding` | Insert the space that ends a table cell's marker run |
-| `deprecated-cell-alignment` | Rewrite a 0.1.13 alignment prefix in the braced spelling, `\|=>` as `\|={>}` |
+| `deprecated-cell-alignment` | Rewrite a 0.1.13 alignment prefix in the braced spelling, `\|=>` as `\|={>}` (upgrade mode only, see `lint.upgrade`) |
 | `colon-fence-length-mismatch` | Resize the colon run, or keep it as literal text |
 | `unresolved-footnote`, `unresolved-reference-link` | Append the missing definition |
 | `list-marker-below-content-column` | Indent the marker to the deeper list's column, or outdent it to the outer list's column |
@@ -205,7 +207,7 @@ Clients can send these under `carve` in initialization options or
 `.carverc.json` in the workspace roots and watches it for changes. Settings
 merge key by key: a key the client sends wins, a key it leaves out comes from
 `.carverc.json`, and anything set in neither uses the default. Object
-settings (`format`, `severities`, `inlayHints`) merge one level deeper, so a
+settings (`format`, `lint`, `severities`, `inlayHints`) merge one level deeper, so a
 client severity for one code keeps the project severities for the others.
 
 | Setting | Default | Meaning |
@@ -216,6 +218,7 @@ client severity for one code keeps the project severities for the others.
 | `exportActions` | `true` | Offer the *Export as Markdown* and *Export as HTML* source actions, plus *Export as PDF* when the client opts in to its server command. Editors with their own export commands can turn this off. |
 | `formatter` | `"conservative"` | Use whitespace-only conservative formatting; `"migration"` opts into canonical whole-document conversion. |
 | `format.alignTables` | `false` | Align table cells in document, range, and on-type formatting. The *Align table* action works without this setting. |
+| `lint.upgrade` | `false` | Lint upgrade mode: run the 0.1 migration rules (`deprecated-*`, `thematic-break-spelling` and the other upgrade rules) and offer their quick fixes. Turn it on while moving a 0.1 document to 0.2. A document whose line-1 frontmatter declares Carve 0.1 gets these findings without it. |
 | `severities` | `{}` | Override a diagnostic code with `"error"`, `"warning"`, `"information"`, `"hint"`, or `"off"`. Any value but `"off"` also turns an opt-in 0.2 rule on, and `"off"` turns a rule off in the engine. |
 
 When table alignment is enabled, the selected table uses canonical Carve cell spelling before padding. Other source remains in the conservative formatter's form.
@@ -230,6 +233,7 @@ Example `.carverc.json`:
     "inlayHints": { "bareListMarkers": true },
     "formatter": "conservative",
     "format": { "alignTables": true },
+    "lint": { "upgrade": false },
     "severities": { "table-width-total": "error" }
   }
 }

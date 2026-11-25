@@ -682,6 +682,7 @@ function analysisFor(document: TextDocument, includes = includeOptions(document)
     lint: {
       platforms: carveSettings.platforms,
       extensions: carveSettings.extensions,
+      upgrade: carveSettings.lintUpgrade,
       severities: carveSettings.severities,
     },
     ...(includes ? { includes } : {}),
