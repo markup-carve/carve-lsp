@@ -282,3 +282,37 @@ test('an offset past the end keeps its distance instead of collapsing', () => {
   // past the last character. Clamping it would invert the range.
   assert.equal(astOffsetToIndex(LINE, [...LINE].length + 1), LINE.length + 1)
 })
+
+test('offset conversion matches a codepoint walk across astral, lone-surrogate and plain text', () => {
+  const reference = (source: string, offset: number): number => {
+    let index = 0
+    let counted = 0
+    while (index < source.length && counted < offset) {
+      index += (source.codePointAt(index) ?? 0) > 0xffff ? 2 : 1
+      counted += 1
+    }
+    return index + Math.max(0, offset - counted)
+  }
+  try {
+    setEngineColumnUnit('codepoint')
+    for (const source of ['', 'plain ascii', `${LINE}\nmid 😀 line\n𝒳𝒴 end`, 'lone \ud83d high', 'äöü 😀']) {
+      for (let offset = -1; offset <= [...source].length + 2; offset += 1) {
+        assert.equal(astOffsetToIndex(source, offset), reference(source, offset), `${JSON.stringify(source)} @ ${offset}`)
+      }
+    }
+  } finally {
+    setEngineColumnUnit(undefined)
+  }
+})
+
+test('offset conversion stays linear on a large document', () => {
+  const source = `${'😀 word '.repeat(50_000)}`
+  try {
+    setEngineColumnUnit('codepoint')
+    const started = performance.now()
+    for (let offset = 0; offset < 100_000; offset += 7) astOffsetToIndex(source, offset)
+    assert.ok(performance.now() - started < 1_000, 'per-call cost must not depend on the offset')
+  } finally {
+    setEngineColumnUnit(undefined)
+  }
+})

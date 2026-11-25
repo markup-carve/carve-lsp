@@ -69,3 +69,21 @@ test('reports workspace-wide dead references and duplicate declarations', () => 
   ])
   assert.equal(diagnostics[0]?.relatedInformation?.[0]?.location.uri, 'file:///a.crv')
 })
+
+test('every change bumps the generation and wakes a waiting listener once', () => {
+  const index = new WorkspaceIndex()
+  let woken = 0
+  index.onceChanged(() => { woken += 1 })
+  const before = index.generation
+  index.update('file:///a.crv', '# A', 1)
+  index.update('file:///a.crv', '# A', 1)
+  assert.equal(index.generation, before + 1, 'an identical update is not a change')
+  assert.equal(woken, 1)
+  index.remove('file:///missing.crv')
+  assert.equal(index.generation, before + 1, 'removing an unknown uri is not a change')
+  const stop = index.onceChanged(() => { woken += 1 })
+  stop()
+  index.remove('file:///a.crv')
+  assert.equal(index.generation, before + 2)
+  assert.equal(woken, 1, 'a cancelled listener is not called')
+})

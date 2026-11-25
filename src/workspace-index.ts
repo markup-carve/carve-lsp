@@ -48,19 +48,41 @@ export interface WorkspaceDocument {
  */
 export class WorkspaceIndex {
   readonly #documents = new Map<string, IndexedDocument>()
+  readonly #listeners = new Set<() => void>()
+  #generation = 0
+
+  /** Bumped on every change: a diagnostic in one file can depend on any other. */
+  get generation(): number {
+    return this.#generation
+  }
+
+  /** Calls `listener` once, on the next change; the returned function cancels it. */
+  onceChanged(listener: () => void): () => void {
+    this.#listeners.add(listener)
+    return () => this.#listeners.delete(listener)
+  }
 
   update(uri: string, source: string, version: number | string): void {
     const current = this.#documents.get(uri)
     if (current?.version === version && current.source === source) return
     this.#documents.set(uri, { version, source, tokens: scanDocument(uri, source) })
+    this.#changed()
   }
 
   remove(uri: string): void {
-    this.#documents.delete(uri)
+    if (this.#documents.delete(uri)) this.#changed()
   }
 
   clear(): void {
     this.#documents.clear()
+    this.#changed()
+  }
+
+  #changed(): void {
+    this.#generation += 1
+    const listeners = [...this.#listeners]
+    this.#listeners.clear()
+    for (const listener of listeners) listener()
   }
 
   tokens(uri?: string): IndexedToken[] {
