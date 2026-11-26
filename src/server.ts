@@ -134,6 +134,12 @@ let workspaceRoots: string[] = []
 // The last `carve` section the client sent; its keys override `.carverc.json` one by one.
 let clientCarveSection: Record<string, unknown> | undefined
 let semanticTokensRefreshSupported = false
+// A client that pulls keeps pulled reports in their own collection, so pushing
+// the same findings as well shows each one twice. Pull needs refresh support:
+// without it, a change in an included file could never reach the client.
+let pullDiagnostics = false
+// The result id each open document's last pulled report carried.
+const pulledIds = new Map<string, string>()
 const includeCache = new IncludeSourceCache()
 const includeParseCache = new IncludeParseCache()
 const dependencyIndex = new DependencyIndex()
@@ -162,6 +168,8 @@ function logIncludeSettings(message: string): void {
 
 connection.onInitialize((params) => {
   semanticTokensRefreshSupported = params.capabilities.workspace?.semanticTokens?.refreshSupport === true
+  pullDiagnostics = params.capabilities.textDocument?.diagnostic !== undefined
+    && params.capabilities.workspace?.diagnostics?.refreshSupport === true
   includeSettings = readIncludeSettings(params.initializationOptions, logIncludeSettings)
   workspaceTrusted = readWorkspaceTrusted(params.initializationOptions)
   exportClient = exportSupport(params.capabilities)
@@ -295,6 +303,7 @@ documents.onDidClose((event) => {
   editedLines.delete(event.document.uri)
   upgradePlans.delete(event.document.uri)
   diagnostics.cancel(event.document.uri)
+  pulledIds.delete(event.document.uri)
   // Closing an editor buffer must not make an on-disk workspace document
   // disappear from cross-file navigation.
   const target = fsPath(event.document.uri)
@@ -308,7 +317,7 @@ documents.onDidClose((event) => {
   invalidateIncludedParse(event.document.uri)
   semanticBuilders.delete(event.document.uri)
   if (dependencyIndex.remove(event.document.uri)) refreshWatchers()
-  connection.sendDiagnostics({ uri: event.document.uri, diagnostics: [] })
+  if (!pullDiagnostics) connection.sendDiagnostics({ uri: event.document.uri, diagnostics: [] })
   revalidateIncludingDocuments(event.document.uri)
 })
 
@@ -361,11 +370,19 @@ connection.onRequest(WorkspaceSymbolRequest.type, (params) => workspaceIndex.sym
 
 connection.languages.diagnostics.on((params) => {
   const document = documents.get(params.textDocument.uri)
-  return {
-    kind: DocumentDiagnosticReportKind.Full,
-    items: document ? analysisFor(document).diagnostics : [],
-  }
+  const items = document ? analysisFor(document).diagnostics : []
+  const resultId = reportId(items)
+  if (document) pulledIds.set(document.uri, resultId)
+  return params.previousResultId === resultId
+    ? { kind: DocumentDiagnosticReportKind.Unchanged, resultId }
+    : { kind: DocumentDiagnosticReportKind.Full, resultId, items }
 })
+
+// Result ids hash the report itself: a report can change without a new version
+// (an included file or a setting changed), so the version cannot stand in.
+function reportId(items: unknown[]): string {
+  return createHash('sha1').update(JSON.stringify(items)).digest('base64url')
+}
 
 // Clients re-pull as soon as a reply arrives, so a reply that is neither
 // "unchanged" nor held open turns into a busy loop over the whole workspace.
@@ -406,7 +423,7 @@ connection.languages.diagnostics.onWorkspace(async (params, token) => {
   return {
     items: [...removed, ...current.map((document): WorkspaceDocumentDiagnosticReport => {
       const items = workspaceIndex.diagnostics(document.uri)
-      const resultId = createHash('sha1').update(JSON.stringify(items)).digest('base64url')
+      const resultId = reportId(items)
       reportedIds.set(document.uri, resultId)
       return known.get(document.uri) === resultId
         ? { uri: document.uri, version: null, kind: DocumentDiagnosticReportKind.Unchanged, resultId }
@@ -711,10 +728,19 @@ function validate(document: TextDocument) {
     ),
   )
   if (changed) refreshWatchers()
-  connection.sendDiagnostics({
-    uri: document.uri,
-    diagnostics: analysis.diagnostics,
-  })
+  if (!pullDiagnostics) {
+    connection.sendDiagnostics({
+      uri: document.uri,
+      diagnostics: analysis.diagnostics,
+    })
+    return
+  }
+  // The client pulls on its own edits and on open; ask it to re-pull only when
+  // a report it already holds changed under it (an included file, a setting).
+  const pulled = pulledIds.get(document.uri)
+  if (pulled !== undefined && pulled !== reportId(analysis.diagnostics)) {
+    connection.languages.diagnostics.refresh()
+  }
 }
 
 function analysisFor(document: TextDocument, includes = includeOptions(document)): Analysis {
