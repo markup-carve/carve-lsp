@@ -216,6 +216,40 @@ test('editing an open child republishes diagnostics for its parent', async () =>
   }
 })
 
+test('editing an open child asks a pulling client to re-pull its parent', async () => {
+  const built = tree()
+  const client = LspStdioClient.spawnServer(serverPath, built.project)
+  const rootUri = pathToFileURL(built.workspace).toString()
+  const parent = pathToFileURL(path.join(built.workspace, 'main.crv')).toString()
+  const child = pathToFileURL(path.join(built.workspace, 'chapters/one.crv')).toString()
+  try {
+    await client.request('initialize', {
+      processId: null, rootUri,
+      capabilities: { textDocument: { diagnostic: {} }, workspace: { diagnostics: { refreshSupport: true } } },
+      workspaceFolders: [{ uri: rootUri, name: 'ws' }],
+      initializationOptions: { workspaceTrusted: true, carve: { includes: { enabled: 'on', includeRoot: built.workspace } } },
+    })
+    client.notify('initialized', {})
+    client.notify('textDocument/didOpen', { textDocument: { uri: parent, languageId: 'carve', version: 1, text: DOCS.expand } })
+    client.notify('textDocument/didOpen', { textDocument: { uri: child, languageId: 'carve', version: 1, text: '{{ missing.crv }}\n' } })
+    const before = await client.request('textDocument/diagnostic', { textDocument: { uri: parent } }) as { items: Array<{ code?: string }> }
+    assert.ok(before.items.some((item) => item.code === 'include-not-found'))
+    const notificationsBefore = client.notifications.length
+    client.notify('textDocument/didChange', {
+      textDocument: { uri: child, version: 2 }, contentChanges: [{ text: 'Clean body.\n' }],
+    })
+    const deadline = Date.now() + 3000
+    const refreshed = () => client.notifications.slice(notificationsBefore).some((entry) => entry.method === 'workspace/diagnostic/refresh')
+    while (Date.now() < deadline && !refreshed()) await new Promise((resolve) => setTimeout(resolve, 25))
+    assert.equal(refreshed(), true)
+    assert.equal(client.notifications.some((entry) => entry.method === 'textDocument/publishDiagnostics'), false)
+    const after = await client.request('textDocument/diagnostic', { textDocument: { uri: parent } }) as { items: Array<{ code?: string }> }
+    assert.equal(after.items.some((item) => item.code === 'include-not-found'), false)
+  } finally {
+    await client.stop()
+  }
+})
+
 for (const [label, observed] of [
   ['an omitted includeRoot', omitted],
   ['a blank includeRoot', blank],
