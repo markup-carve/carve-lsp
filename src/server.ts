@@ -37,6 +37,8 @@ import {
   type DocumentSymbol,
   type SymbolInformation,
   type TextEdit,
+  LSPErrorCodes,
+  ResponseError,
 } from 'vscode-languageserver/node.js'
 import { TextDocument } from 'vscode-languageserver-textdocument'
 import { encodeTree, format, parse } from './engine.js'
@@ -140,6 +142,8 @@ let semanticTokensRefreshSupported = false
 let pullDiagnostics = false
 // The result id each open document's last pulled report carried.
 const pulledIds = new Map<string, string>()
+// Pulls waiting on the debounced run that the client has not cancelled.
+const livePulls = new Map<string, number>()
 const includeCache = new IncludeSourceCache()
 const includeParseCache = new IncludeParseCache()
 const dependencyIndex = new DependencyIndex()
@@ -368,7 +372,32 @@ connection.onRequest(DocumentSymbolRequest.type, (params) => {
 
 connection.onRequest(WorkspaceSymbolRequest.type, (params) => workspaceIndex.symbols(params.query))
 
-connection.languages.diagnostics.on((params) => {
+connection.languages.diagnostics.on(async (params, token) => {
+  // vscode-languageclient pulls on every change. Waiting for the debounced
+  // run turns a burst of pulls into one analysis; a pull the client gives up
+  // on (it cancels it on the next change) is answered as cancelled, unanalyzed.
+  const uri = params.textDocument.uri
+  // Cancelled before dispatch: the token's listener would never fire, and the
+  // pull must not count as one that will deliver the next report.
+  if (token.isCancellationRequested) throw new ResponseError(LSPErrorCodes.RequestCancelled, 'superseded by a newer change')
+  livePulls.set(uri, (livePulls.get(uri) ?? 0) + 1)
+  let live = true
+  const release = () => {
+    if (!live) return
+    live = false
+    const count = (livePulls.get(uri) ?? 1) - 1
+    if (count > 0) livePulls.set(uri, count)
+    else livePulls.delete(uri)
+  }
+  // A cancelled pull no longer counts as one that will deliver the next report.
+  const subscription = token.onCancellationRequested(release)
+  try {
+    await diagnostics.settled(uri)
+  } finally {
+    subscription.dispose()
+    release()
+  }
+  if (token.isCancellationRequested) throw new ResponseError(LSPErrorCodes.RequestCancelled, 'superseded by a newer change')
   const document = documents.get(params.textDocument.uri)
   const items = document ? analysisFor(document).diagnostics : []
   const resultId = reportId(items)
@@ -737,8 +766,9 @@ function validate(document: TextDocument) {
   }
   // The client pulls on its own edits and on open; ask it to re-pull only when
   // a report it already holds changed under it (an included file, a setting).
+  // A pull waiting on this run will carry the new report itself.
   const pulled = pulledIds.get(document.uri)
-  if (pulled !== undefined && pulled !== reportId(analysis.diagnostics)) {
+  if (pulled !== undefined && !livePulls.has(document.uri) && pulled !== reportId(analysis.diagnostics)) {
     connection.languages.diagnostics.refresh()
   }
 }

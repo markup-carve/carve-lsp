@@ -54,6 +54,11 @@ export class LspStdioClient {
     return new Promise((resolve) => this.#pending.set(id, resolve))
   }
 
+  /** The id the next `request` will carry, for a test that cancels it. */
+  get nextId(): number {
+    return this.#next
+  }
+
   notify(method: string, params: unknown): void {
     this.#send({ jsonrpc: '2.0', method, params })
   }

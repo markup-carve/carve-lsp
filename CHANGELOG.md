@@ -22,6 +22,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A diagnostic pull waits for the debounced analysis instead of analyzing at once. vscode-languageclient pulls on every change, so typing ran one full analysis per keystroke and the debounce never applied. A pull the client cancels is answered as cancelled without analysis. Over 20 keystrokes on a 270 KB document, the last report now arrives 0.8 s after the last keystroke instead of 5.2 s (#670).
 - Pointing a duplicate id or footnote back to its first declaration no longer rescans the document once per duplicate. A 1 MB document full of duplicates analyzes in 1.4 s instead of 3.3 s, the same as one without (#670).
 - A client that pulls diagnostics no longer also receives them pushed. VS Code keeps pulled and pushed reports in separate collections, so every finding showed twice. A change in an included file or a setting now sends `workspace/diagnostic/refresh` instead. Clients that cannot pull, or cannot take a refresh, still get pushed diagnostics.
 - A document pull carries a result id, and a pull whose report has not changed is answered `unchanged` instead of resending every diagnostic.
