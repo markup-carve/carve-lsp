@@ -90,3 +90,33 @@ test('defaults to a delay inside the interactive range', () => {
   assert.ok(DEFAULT_DIAGNOSTIC_DELAY_MS >= 100)
   assert.ok(DEFAULT_DIAGNOSTIC_DELAY_MS <= 150)
 })
+
+test('settled resolves at once when nothing is queued', async () => {
+  const scheduler = new DiagnosticScheduler({ delayMs: 100, run: () => {} })
+  await scheduler.settled('file:///a')
+})
+
+test('settled resolves after the queued run, once, for every waiter', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const events: string[] = []
+  const scheduler = new DiagnosticScheduler({ delayMs: 100, run: (_u, v) => events.push(`run ${v}`) })
+  scheduler.schedule('file:///a', 1)
+  const first = scheduler.settled('file:///a').then(() => events.push('first'))
+  scheduler.schedule('file:///a', 2)
+  const second = scheduler.settled('file:///a').then(() => events.push('second'))
+  t.mock.timers.tick(100)
+  await Promise.all([first, second])
+  assert.deepEqual(events, ['run 2', 'first', 'second'])
+})
+
+test('settled resolves when the document is cancelled', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const runs: number[] = []
+  const scheduler = new DiagnosticScheduler({ delayMs: 100, run: (_u, v) => runs.push(v) })
+  scheduler.schedule('file:///a', 1)
+  const waiting = scheduler.settled('file:///a')
+  scheduler.cancel('file:///a')
+  await waiting
+  t.mock.timers.tick(100)
+  assert.deepEqual(runs, [])
+})

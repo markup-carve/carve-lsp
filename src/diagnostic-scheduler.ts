@@ -34,6 +34,7 @@ export const DEFAULT_DIAGNOSTIC_DELAY_MS = 120
 export class DiagnosticScheduler {
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly versions = new Map<string, number>()
+  private readonly waiters = new Map<string, Array<() => void>>()
   private readonly delayMs: number
   private readonly run: (uri: string, version: number) => void
 
@@ -60,6 +61,7 @@ export class DiagnosticScheduler {
       // waiting produces no diagnostics for a document that is gone.
       if (latest === undefined) return
       this.run(uri, latest)
+      this.release(uri)
     }, this.delayMs)
 
     this.timers.set(uri, timer)
@@ -79,6 +81,7 @@ export class DiagnosticScheduler {
     }
     this.versions.set(uri, version)
     this.run(uri, version)
+    this.release(uri)
   }
 
   /** Forget `uri` entirely: no queued run of it will fire. */
@@ -89,6 +92,7 @@ export class DiagnosticScheduler {
       this.timers.delete(uri)
     }
     this.versions.delete(uri)
+    this.release(uri)
   }
 
   /** Drop every queued run. */
@@ -96,6 +100,29 @@ export class DiagnosticScheduler {
     for (const timer of this.timers.values()) clearTimeout(timer)
     this.timers.clear()
     this.versions.clear()
+    for (const uri of [...this.waiters.keys()]) this.release(uri)
+  }
+
+  /**
+   * Resolves once the queued run for `uri` has finished, or at once when none
+   * is queued. A pull waits here so a client that pulls on every keystroke
+   * gets one analysis per burst, not one per pull. Also resolves when `uri`
+   * is cancelled, so a waiter never hangs on a closed document.
+   */
+  settled(uri: string): Promise<void> {
+    if (!this.timers.has(uri)) return Promise.resolve()
+    return new Promise((resolve) => {
+      const list = this.waiters.get(uri)
+      if (list) list.push(resolve)
+      else this.waiters.set(uri, [resolve])
+    })
+  }
+
+  private release(uri: string): void {
+    const list = this.waiters.get(uri)
+    if (!list) return
+    this.waiters.delete(uri)
+    for (const resolve of list) resolve()
   }
 
   /** Is a run queued for `uri`? Test and diagnostic aid. */

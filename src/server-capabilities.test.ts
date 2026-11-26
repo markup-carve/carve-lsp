@@ -80,3 +80,44 @@ test('a document pull with the current result id is answered unchanged', async (
   assert.equal(third.kind, 'full')
   assert.deepEqual(third.items, [])
 })
+
+test('pulls sent during a burst of edits all wait for the newest version', async (context) => {
+  const client = await openBroken(pullCapabilities, context)
+  const uri = 'untitled:broken.crv'
+  const pulls: Array<Promise<unknown>> = []
+  for (let version = 2; version <= 6; version++) {
+    // The last version is clean; any pull answered before the burst settles would still carry a finding.
+    const text = version === 6 ? 'Clean text.\n' : `**bold ${version}**\n`
+    client.notify('textDocument/didChange', { textDocument: { uri, version }, contentChanges: [{ text }] })
+    pulls.push(client.request('textDocument/diagnostic', { textDocument: { uri } }))
+  }
+  const reports = await Promise.all(pulls) as Array<{ kind: string, items: unknown[] }>
+  assert.deepEqual(reports.map((report) => [report.kind, report.items.length]), Array(5).fill(['full', 0]))
+  assert.equal(client.notifications.some((entry) => entry.method === 'workspace/diagnostic/refresh'), false)
+})
+
+test('a pull the client cancels during a burst is answered as cancelled', async (context) => {
+  const client = await openBroken(pullCapabilities, context)
+  const uri = 'untitled:broken.crv'
+  client.notify('textDocument/didChange', { textDocument: { uri, version: 2 }, contentChanges: [{ text: '**more**\n' }] })
+  const id = client.nextId
+  const pull = client.request('textDocument/diagnostic', { textDocument: { uri } })
+  client.notify('$/cancelRequest', { id })
+  await assert.rejects(pull, (error: { code?: number }) => error.code === -32800)
+})
+
+for (const [label, delayMs] of [['before the server reads it', 0], ['while it waits', 40]] as const) test(`a client that cancels its only pull ${label} still hears that the report changed`, async (context) => {
+  const client = await openBroken(pullCapabilities, context)
+  const uri = 'untitled:broken.crv'
+  await client.request('textDocument/diagnostic', { textDocument: { uri } })
+  client.notify('textDocument/didChange', { textDocument: { uri, version: 2 }, contentChanges: [{ text: 'Clean text.\n' }] })
+  const id = client.nextId
+  const pull = client.request('textDocument/diagnostic', { textDocument: { uri } })
+  if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
+  client.notify('$/cancelRequest', { id })
+  await assert.rejects(pull, (error: { code?: number }) => error.code === -32800)
+  const deadline = Date.now() + 3000
+  const refreshed = () => client.notifications.some((entry) => entry.method === 'workspace/diagnostic/refresh')
+  while (Date.now() < deadline && !refreshed()) await new Promise((resolve) => setTimeout(resolve, 25))
+  assert.equal(refreshed(), true)
+})
