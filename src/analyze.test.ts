@@ -554,6 +554,19 @@ test('duplicate diagnostics point back to the first declaration', () => {
     ?.relatedInformation?.[0]?.location.range.start.line, 0)
 })
 
+test('every repeat of an id or footnote points back to the same first declaration', () => {
+  const uri = 'file:///document.crv'
+  const source = ['{#same}', '# One', '', '[^n]: one', '', '{#same}', '# Two', '', '[^n]: two', '', '{#same}', '# Three', ''].join('\r\n')
+  const related = analyzeCarve(source, { uri }).diagnostics
+    .filter((item) => item.code === 'duplicate-id' || item.code === 'duplicate-footnote-definition')
+    .map((item) => [item.code, item.relatedInformation?.[0]?.location.range.start])
+  assert.deepEqual(related, [
+    ['duplicate-id', { line: 0, character: 2 }],
+    ['duplicate-footnote-definition', { line: 3, character: 2 }],
+    ['duplicate-id', { line: 0, character: 2 }],
+  ])
+})
+
 test('diagnostic severity overrides can promote or suppress individual rules', () => {
   const source = '{widths="70,60"}\n| a | b |\n'
   const promoted = analyzeCarve(source, { lint: { severities: { 'table-width-total': 'error' } } })
