@@ -77,6 +77,7 @@ export interface Analysis {
 
 export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Analysis {
   sourceOfLastAnalysis = source
+  linesOfLastAnalysis = undefined
   const diagnostics: Diagnostic[] = []
   let doc: Document | null = null
 
@@ -113,6 +114,7 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
   const included = includeConfig && lintDiagnostics.some((entry) => entry.file !== undefined)
     ? safeParse(source, v2IncludeConfig(options.includes ?? {})!)
     : undefined
+  const declarations = new DeclarationIndex(norm)
   for (const entry of lintDiagnostics) {
     if (entry.code.startsWith('include-')) continue
     const site = entry.file === undefined || !included ? undefined : includeSiteOf(included, entry.path)
@@ -132,7 +134,7 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
       location: { uri: paths.toUri(child.watch), range: byteRange(child.source, entry.range.startOffset, entry.range.endOffset) },
       message: entry.message,
     }]
-    const related = entry.file === undefined && options.uri ? firstDuplicateDeclaration(source, entry.code, entry.message, range.start.line) : null
+    const related = entry.file === undefined && options.uri ? firstDuplicateDeclaration(declarations, entry.code, entry.message, range.start.line) : null
     if (options.uri && related) diagnostic.relatedInformation = [{
       location: { uri: options.uri, range: related },
       message: 'First declaration is here.',
@@ -218,13 +220,16 @@ function includeSiteOf(document: Document, pointer: string | undefined): Range |
       if (source === undefined) return undefined
       const range = byteRange(source, typed.pos.startOffset, typed.pos.endOffset)
       // The directive's own line, below any attribute lines its span starts at (C2-A-148).
-      const line = ownStartLine({ startLine: range.start.line + 1, endLine: range.end.line + 1 }, source.split(/\r\n?|\n/))
+      linesOfLastAnalysis ??= source.split(/\r\n?|\n/)
+      const line = ownStartLine({ startLine: range.start.line + 1, endLine: range.end.line + 1 }, linesOfLastAnalysis)
       return line === range.start.line ? range : { start: { line, character: range.start.character }, end: range.end }
     }
   }
   return undefined
 }
 let sourceOfLastAnalysis: string | undefined
+// Split once per analysis, not once per included finding.
+let linesOfLastAnalysis: string[] | undefined
 
 function configuredDiagnostics(
   diagnostics: Diagnostic[],
@@ -264,27 +269,48 @@ export function tolerantHeadingSymbols(source: string): DocumentSymbol[] {
   return symbols
 }
 
-function firstDuplicateDeclaration(source: string, rule: string, message: string, repeatedLine: number): Range | null {
+// Built on the first duplicate finding and reused for the rest: scanning the
+// source once per finding made a document with many duplicates quadratic.
+class DeclarationIndex {
+  readonly #source: string
+  #ids?: Map<string, Range>
+  #footnotes?: Map<string, Range>
+
+  constructor(normalizedSource: string) {
+    this.#source = normalizedSource
+  }
+
+  /** The first line that declares `key`, as an authored id or a footnote label. */
+  first(kind: 'id' | 'footnote', key: string): Range | undefined {
+    if (!this.#ids || !this.#footnotes) this.#build()
+    return (kind === 'id' ? this.#ids : this.#footnotes)!.get(key)
+  }
+
+  #build(): void {
+    const ids = new Map<string, Range>()
+    const footnotes = new Map<string, Range>()
+    const lines = this.#source.split('\n')
+    for (let line = 0; line < lines.length; line += 1) {
+      const text = lines[line]!
+      for (const [map, pattern] of [[ids, /^\{[^}]*#([^\s}]+)[^}]*\}\s*$/], [footnotes, /^(?: {0,3})\[\^([^\]]+)\]:/]] as const) {
+        const key = pattern.exec(text)?.[1]
+        if (key === undefined || map.has(key)) continue
+        const character = text.indexOf(key)
+        map.set(key, { start: { line, character }, end: { line, character: character + key.length } })
+      }
+    }
+    this.#ids = ids
+    this.#footnotes = footnotes
+  }
+}
+
+function firstDuplicateDeclaration(index: DeclarationIndex, rule: string, message: string, repeatedLine: number): Range | null {
   const headingKey = rule === 'duplicate-id' ? /authored id "([^"]+)"/.exec(message)?.[1] : undefined
   const footnoteKey = rule === 'duplicate-footnote-definition' ? /\[\^([^\]]+)\]/.exec(message)?.[1] : undefined
-  const key = headingKey ?? footnoteKey
-  if (!key) return null
-  const lines = source.replace(/\r\n?/g, '\n').split('\n')
-  const declarations: Range[] = []
-  for (let line = 0; line < lines.length; line += 1) {
-    const text = lines[line]!
-    const match = headingKey
-      ? /^\{[^}]*#([^\s}]+)[^}]*\}\s*$/.exec(text)
-      : /^(?: {0,3})\[\^([^\]]+)\]:/.exec(text)
-    if (!match || match[1] !== key) continue
-    const character = text.indexOf(match[1]!)
-    if (line >= repeatedLine - 1) break
-    declarations.push({
-      start: { line, character },
-      end: { line, character: character + match[1]!.length },
-    })
-  }
-  return declarations[0] ?? null
+  const first = headingKey !== undefined ? index.first('id', headingKey)
+    : footnoteKey !== undefined ? index.first('footnote', footnoteKey) : undefined
+  // Only a declaration above the repeated one counts as the first.
+  return first !== undefined && first.start.line < repeatedLine - 1 ? first : null
 }
 
 function includedSymbols(
