@@ -47,8 +47,33 @@ export interface CaptionTarget {
   pos: SourcePosition | undefined
 }
 
+// One walk per parsed tree. Hover resolves every crossref in the document, so
+// walking per lookup made a single hover quadratic in the number of crossrefs.
+const targetsByDoc = new WeakMap<Document, { list: readonly CaptionTarget[], byId: Map<string, CaptionTarget> }>()
+
 /** Every captioned host in the document that carries an id, in source order. */
-export function captionTargets(doc: Document): CaptionTarget[] {
+export function captionTargets(doc: Document): readonly CaptionTarget[] {
+  return indexed(doc).list
+}
+
+/** The target an id names, or null. Ids compare exactly; the first host wins. */
+export function captionTargetById(doc: Document, id: string): CaptionTarget | null {
+  return indexed(doc).byId.get(id) ?? null
+}
+
+function indexed(doc: Document): { list: readonly CaptionTarget[], byId: Map<string, CaptionTarget> } {
+  let entry = targetsByDoc.get(doc)
+  if (!entry) {
+    const list = collectTargets(doc)
+    const byId = new Map<string, CaptionTarget>()
+    for (const target of list) if (!byId.has(target.id)) byId.set(target.id, target)
+    entry = { list, byId }
+    targetsByDoc.set(doc, entry)
+  }
+  return entry
+}
+
+function collectTargets(doc: Document): CaptionTarget[] {
   const targets: CaptionTarget[] = []
   const panels = new Set<unknown>()
   // Every container is walked, list items and footnote bodies included: a
@@ -67,11 +92,6 @@ export function captionTargets(doc: Document): CaptionTarget[] {
     }
   })
   return targets
-}
-
-/** The target an id names, or null. Ids compare exactly. */
-export function captionTargetById(doc: Document, id: string): CaptionTarget | null {
-  return captionTargets(doc).find((target) => target.id === id) ?? null
 }
 
 /**

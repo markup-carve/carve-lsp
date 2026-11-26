@@ -131,8 +131,12 @@ function astHoverAt(doc: Document, position: Position, lines: string[]): Hover |
   // Every node, footnote bodies and line blocks included.
   walkNodes(doc, (node) => {
     if (node.type === 'document') return
+    // Only a node under the cursor can match; building help text for the rest
+    // resolved every crossref in the document on each hover.
+    const pos = node.pos as SourcePosition | undefined
+    if (!pos || !contains(pos, cursor)) return
     const contents = blockContents(node as unknown as BlockNode) ?? inlineContents(node as unknown as InlineNode, resolveRef)
-    addMatch(matches, node.pos as SourcePosition | undefined, cursor, contents)
+    addMatch(matches, pos, cursor, contents)
   })
   matches.sort((a, b) => spanSize(a.pos) - spanSize(b.pos))
   const match = matches[0]
