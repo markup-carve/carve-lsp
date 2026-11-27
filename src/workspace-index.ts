@@ -11,7 +11,7 @@ import {
 } from 'vscode-languageserver-types'
 import { inVerbatim, referenceModel } from './reference-sites.js'
 
-export type IndexedKind = 'heading' | 'caption' | 'footnote' | 'linkref' | 'citation'
+export type IndexedKind = 'heading' | 'caption' | 'footnote' | 'linkref' | 'citation' | 'snippet'
 
 export interface IndexedToken {
   kind: IndexedKind
@@ -150,6 +150,8 @@ export class WorkspaceIndex {
     const diagnostics: Diagnostic[] = []
     const tokens = this.tokens(uri)
     for (const token of tokens) {
+      // The engine reports snippet findings over the expanded tree (C2-N-090, C2-N-093).
+      if (token.kind === 'snippet') continue
       if (!token.declaration && this.definitions(token.kind, token.key, uri).length === 0) {
         diagnostics.push({
           range: token.range,
@@ -180,6 +182,7 @@ export class WorkspaceIndex {
 
   rename(uri: string, position: Position, newName: string): WorkspaceEdit | null {
     const target = this.tokenAt(uri, position)
+    if (target?.kind === 'snippet' && newName.startsWith('$')) newName = newName.slice(1)
     if (!target || !isValidName(target.kind, newName)) return null
     const edits = new Map<string, TextEdit[]>()
     for (const token of this.tokens()) {
@@ -208,6 +211,7 @@ export function scanDocument(uri: string, source: string): IndexedToken[] {
     if (site.generated) token.generated = true
     if (site.prefix) token.prefix = site.prefix
     if (site.kind === 'heading' && site.declaration && site.label) token.label = site.label
+    if (site.kind === 'snippet' && site.declaration) token.label = `$${site.key}`
     tokens.push(token)
   }
   // Citations are an extension the core parser does not build, so they are
@@ -291,6 +295,7 @@ function symbolKind(kind: IndexedKind): SymbolKind {
   if (kind === 'heading') return SymbolKind.Namespace
   if (kind === 'caption') return SymbolKind.Object
   if (kind === 'citation') return SymbolKind.Key
+  if (kind === 'snippet') return SymbolKind.Constant
   return SymbolKind.Variable
 }
 
@@ -298,6 +303,8 @@ function isValidName(kind: IndexedKind, value: string): boolean {
   if (value.length === 0 || /[\[\]\r\n]/.test(value)) return false
   // An id is written as `{#id}`, which admits only the lexical explicit_identifier.
   if (kind === 'heading' || kind === 'caption') return /^[A-Za-z0-9_][A-Za-z0-9_-]*$/.test(value)
+  // A snippet name is ASCII only (C2-B-236).
+  if (kind === 'snippet') return /^[A-Za-z0-9_][A-Za-z0-9_-]*$/.test(value)
   if (kind === 'citation') return !/\s/.test(value)
   if (kind === 'linkref') return !/^[@^]/.test(value)
   return true

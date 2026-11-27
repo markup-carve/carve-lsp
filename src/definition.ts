@@ -21,6 +21,7 @@ import { implicitKey, inVerbatim, referenceModel, siteAt, type ReferenceModel } 
  * - Collapsed ref    `[Heading][]`     -> the heading, when no `[Heading]:` is defined
  * - Citation         `[@key]`          -> the `[@key]:` definition line
  * - Wikilink         `[[Page]]`        -> heading whose text matches Page (best-effort)
+ * - Snippet use      `{{ $name }}`     -> the winning `{$name}:` definition, here or in an include
  */
 export function definitionAt(
   uri: string,
@@ -63,7 +64,11 @@ export function definitionAt(
     return target ? locationAtLine(uri, target.range.start.line) : null
   }
 
-  // 5. Wikilink [[Page]] (the Wikilinks extension)
+  // 5. Snippet use {{ $name }}: the first definition of the expanded tree wins (C2-N-090).
+  const snippet = siteAt(model, position, (site) => site.kind === 'snippet' && !site.declaration)
+  if (snippet) return snippetDefinition(uri, source, model, snippet.key, includes)
+
+  // 6. Wikilink [[Page]] (the Wikilinks extension)
   const wikilinkTarget = resolveWikilinkAt(uri, source, model, line, position)
   if (wikilinkTarget !== null) return wikilinkTarget
 
@@ -173,6 +178,36 @@ function resolveCrossrefAcrossSeam(
             : astColumnToCharacter(sourceLines(child.source)[childLine] ?? '', pos.endColumn),
       },
     },
+  }
+}
+
+/**
+ * The winning definition: the expanded tree holds the root's definitions and
+ * those its includes append, in document order, so the first one there wins.
+ */
+function snippetDefinition(uri: string, source: string, model: ReferenceModel, name: string, includes: IncludeOptions | undefined): Location | null {
+  const local = model.sites.find((site) => site.kind === 'snippet' && site.declaration && site.key === name)
+  const config = includes?.resolver ? v2IncludeConfig(includes) : undefined
+  if (!config) return local ? { uri, range: local.keyRange! } : null
+  let merged: Document
+  try {
+    merged = parse(source, { includes: config })
+  } catch {
+    return local ? { uri, range: local.keyRange! } : null
+  }
+  let pos: { file?: string; startLine?: number; endLine?: number } | undefined
+  walkNodes(merged, (node) => {
+    if (pos) return false
+    if (node.type === 'snippet_definition' && node.name === name) pos = node.pos
+  })
+  if (pos?.file === undefined) return local ? { uri, range: local.keyRange! } : null
+  const child = resolveIncludes(source, includes!).documents.find((document) => document.id === pos!.file)
+  if (child?.watch === undefined) return local ? { uri, range: local.keyRange! } : null
+  // The marker is the last line of the definition's span (C2-B-236).
+  const line = (pos.endLine ?? pos.startLine ?? 1) - 1
+  return {
+    uri: (includes!.paths ?? portableIncludePaths).toUri(child.watch),
+    range: { start: { line, character: 2 }, end: { line, character: 2 + name.length } },
   }
 }
 
