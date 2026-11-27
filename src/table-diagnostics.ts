@@ -1,7 +1,7 @@
 import { DiagnosticSeverity, type Diagnostic } from 'vscode-languageserver-types'
-import { parse } from './engine.js'
 import { walkNodes } from './ast-walk.js'
 import { ownStartLine, tableRows } from './tree.js'
+import { resolvedDocument } from './parse-cache.js'
 
 /**
  * The draft #1344 table check the engine lint does not run: a positional
@@ -12,7 +12,7 @@ import { ownStartLine, tableRows } from './tree.js'
 export function tableDiagnostics(source: string): Diagnostic[] {
   let document: unknown
   try {
-    document = parse(source, { positions: true })
+    document = resolvedDocument(source)
   } catch {
     return []
   }

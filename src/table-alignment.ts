@@ -1,7 +1,8 @@
-import { format, render, parse } from './engine.js'
+import { format, render } from './engine.js'
 import { CodeAction, CodeActionKind, Range, TextEdit } from 'vscode-languageserver-types'
 import { walkNodes } from './ast-walk.js'
 import { tableDisplayWidth } from './table-display-width.js'
+import { resolvedDocument } from './parse-cache.js'
 
 function splitRow(line: string): { marker: string, cells: string[], attrs: string } | null {
   const marker = line[0]
@@ -89,7 +90,7 @@ function findTableAlignmentEdits(source: string, firstLine: number, lastLine: nu
     offset += text.length + eol.length
   }
   const edits: TableAlignmentEdit[] = []
-  walkNodes(parse(source, { positions: true }), node => {
+  walkNodes(resolvedDocument(source), node => {
     if (node.type !== 'table' || node.pos?.startLine === undefined || node.pos.endLine === undefined || node.pos.startColumn === undefined) return
     const startLine = node.pos.startLine - 1
     const endLine = node.pos.endLine - 1
