@@ -14,6 +14,8 @@ export interface CarveSettings {
   /** `lint.upgrade`: run the 0.1 migration rules (C2-W-156), which are off by default. */
   lintUpgrade: boolean
   severities: Record<string, 'error' | 'warning' | 'information' | 'hint' | 'off'>
+  /** `render.headingShift`: levels the preview and the HTML and Markdown exports move headings down (C2-H-208). */
+  headingShift?: number
 }
 
 export const DEFAULT_CARVE_SETTINGS: CarveSettings = {
@@ -47,7 +49,15 @@ export function readCarveSettings(raw: unknown): CarveSettings {
     formatAlignTables: formatAlignTables(carve),
     lintUpgrade: nestedTrue(carve, 'lint', 'upgrade'),
     severities: severitySettings(carve['severities']),
+    ...headingShift(carve),
   }
+}
+
+// A count from 0 to 5 (C2-H-208); the engine refuses any other value, so it reads as 0.
+function headingShift(carve: Record<string, unknown>): { headingShift?: number } {
+  const render = carve['render']
+  const value = isPlainObject(render) && render['headingShift'] !== undefined ? render['headingShift'] : carve['render.headingShift']
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= 5 ? { headingShift: value } : {}
 }
 
 function formatAlignTables(carve: Record<string, unknown>): boolean {
@@ -85,7 +95,7 @@ export function carveSection(raw: unknown): CarveSection | undefined {
 // Folds the dotted `format.alignTables` and `lint.upgrade` spellings into their
 // objects, so a client `false` can override a project `true` key by key.
 function normalizeSection(carve: CarveSection): CarveSection {
-  return foldDotted(foldDotted(carve, 'format', 'alignTables'), 'lint', 'upgrade')
+  return foldDotted(foldDotted(foldDotted(carve, 'format', 'alignTables'), 'lint', 'upgrade'), 'render', 'headingShift')
 }
 
 function foldDotted(carve: CarveSection, section: string, key: string): CarveSection {
@@ -106,7 +116,7 @@ export function mergeCarveSettings(client: CarveSection | undefined, project: Ca
   const merged: CarveSection = { ...fromProject }
   for (const [key, value] of Object.entries(fromClient)) {
     const base = merged[key]
-    // Object settings (`format`, `lint`, `severities`, `inlayHints`) merge one level deep.
+    // Object settings (`format`, `lint`, `render`, `severities`, `inlayHints`) merge one level deep.
     merged[key] = isPlainObject(base) && isPlainObject(value) ? { ...base, ...value } : value
   }
   return readCarveSettings({ carve: merged })

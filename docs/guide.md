@@ -233,7 +233,7 @@ Clients can send these under `carve` in initialization options or
 `.carverc.json` in the workspace roots and watches it for changes. Settings
 merge key by key: a key the client sends wins, a key it leaves out comes from
 `.carverc.json`, and anything set in neither uses the default. Object
-settings (`format`, `lint`, `severities`, `inlayHints`) merge one level deeper, so a
+settings (`format`, `lint`, `render`, `severities`, `inlayHints`) merge one level deeper, so a
 client severity for one code keeps the project severities for the others.
 
 | Setting | Default | Meaning |
@@ -245,6 +245,7 @@ client severity for one code keeps the project severities for the others.
 | `formatter` | `"conservative"` | Use whitespace-only conservative formatting; `"migration"` opts into canonical whole-document conversion. |
 | `format.alignTables` | `false` | Align table cells in document, range, and on-type formatting. The *Align table* action works without this setting. |
 | `lint.upgrade` | `false` | Lint upgrade mode: run the 0.1 migration rules (`deprecated-*`, `thematic-break-spelling` and the other upgrade rules) and offer their quick fixes. Turn it on while moving a 0.1 document to 0.2. A document whose line-1 frontmatter declares Carve 0.1 gets these findings without it. |
+| `render.headingShift` | `0` | Move every heading of the HTML preview and of the HTML and Markdown exports down by this many levels, `0` to `5` (the engine's `headingShift` render option). Use it when the page around the document has its own title. Any other value counts as `0`. It is not an include parameter: an include's own `@shift` still applies first, and the two add. |
 | `severities` | `{}` | Override a diagnostic code with `"error"`, `"warning"`, `"information"`, `"hint"`, or `"off"`. Any value but `"off"` also turns an opt-in 0.2 rule on, and `"off"` turns a rule off in the engine. |
 
 When table alignment is enabled, the selected table uses canonical Carve cell spelling before padding. Other source remains in the conservative formatter's form.
@@ -260,6 +261,7 @@ Example `.carverc.json`:
     "formatter": "conservative",
     "format": { "alignTables": true },
     "lint": { "upgrade": false },
+    "render": { "headingShift": 1 },
     "severities": { "table-width-total": "error" }
   }
 }
