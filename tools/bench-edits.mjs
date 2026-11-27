@@ -22,6 +22,7 @@ const modes = option('--modes', 'push,pull').split(',')
 const dist = resolve(option('--dist', fileURLToPath(new URL('../dist', import.meta.url))))
 const EDITS = 20
 const EDIT_GAP_MS = 60
+const QUIET_MS = 1000
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
 
 try {
@@ -107,7 +108,16 @@ async function run(text, mode) {
     await sleep(EDIT_GAP_MS)
   }
   if (pull) await Promise.all(pulls)
-  else while (published() <= seen) await sleep(2)
+  else {
+    // Publishes carry no version, so an earlier edit's report can land after
+    // the last edit: wait until reports stop for longer than one debounce plus
+    // one analysis of the largest size.
+    while (published() <= seen) await sleep(2)
+    for (let count = published(); ; count = published()) {
+      await sleep(QUIET_MS)
+      if (published() === count) break
+    }
+  }
 
   await client.request('shutdown', null)
   client.notify('exit', null)
