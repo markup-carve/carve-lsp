@@ -22,6 +22,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Analysis runs in a worker thread, so hover, completion and semantic tokens keep answering while a large document is linted. During a burst of 20 keystrokes, the longest event-loop block drops from 387 ms to 2 ms on a 270 KB document and from 1.3 s to 7 ms on 1 MB. A queued analysis is dropped when a newer version of the same document arrives. Without the worker script, analysis runs on the main thread as before (#670).
 - Hover no longer resolves every crossref in the document to answer for the one under the cursor, and caption targets are indexed once per parsed tree instead of walked per lookup. On a 270 KB document with 238 crossrefs, a hover takes 76 ms instead of 2.2 s; on 1 MB, 310 ms instead of 28 s (#670).
 - A diagnostic pull waits for the debounced analysis instead of analyzing at once. vscode-languageclient pulls on every change, so typing ran one full analysis per keystroke and the debounce never applied. A pull the client cancels is answered as cancelled without analysis. Over 20 keystrokes on a 270 KB document, the last report now arrives 0.8 s after the last keystroke instead of 5.2 s (#670).
 - Pointing a duplicate id or footnote back to its first declaration no longer rescans the document once per duplicate. A 1 MB document full of duplicates analyzes in 1.4 s instead of 3.3 s, the same as one without (#670).
