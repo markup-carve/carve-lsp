@@ -3,6 +3,7 @@ import { CodeAction, CodeActionKind, Range, TextEdit } from 'vscode-languageserv
 import { walkNodes, type AstNode } from './ast-walk.js'
 import { alignCanonicalTable } from './table-alignment.js'
 import { delimitedTableFormat, ownStartLine, tableRows } from './tree.js'
+import { resolvedDocument } from './parse-cache.js'
 
 const rowsOf = (table: { children?: unknown }): Row[] => tableRows(table) as unknown as Row[]
 
@@ -46,7 +47,7 @@ function linesOf(source: string): { text: string; start: number; eol: string }[]
 function selected(source: string, line: number, format: 'csv' | 'pipe'): { table: Table; lines: ReturnType<typeof linesOf>; first: number; last: number; attrs: string | null } | null {
   const lines = linesOf(source)
   let found: ReturnType<typeof selected> = null
-  walkNodes(parse(source, { positions: true }), node => {
+  walkNodes(resolvedDocument(source), node => {
     if (node.type !== 'table' || !node.pos?.startLine || !node.pos.endLine) return
     const table = node as Table
     const texts = lines.map((item) => item.text)

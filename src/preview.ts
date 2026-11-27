@@ -1,5 +1,6 @@
 import { createWriterRegistry, parse, registerExports, render } from './engine.js'
 import { v2IncludeConfig, type IncludeOptions } from './includes.js'
+import { resolvedDocument } from './parse-cache.js'
 
 /**
  * HTML for `carve.previewHtml`. With include options the preview renders the
@@ -18,6 +19,6 @@ export function previewHtml(source: string, includes?: IncludeOptions): string {
 export function previewMarkdown(source: string, includes?: IncludeOptions): string {
   const registry = registerExports(createWriterRegistry())
   const config = includes === undefined ? undefined : v2IncludeConfig(includes)
-  const tree = config === undefined ? parse(source) : parse(source, { includes: config })
+  const tree = config === undefined ? resolvedDocument(source) : parse(source, { includes: config })
   return registry.write('markdown', tree).output
 }

@@ -1,5 +1,6 @@
-import { parse, type Position } from './engine.js'
+import { type Position } from './engine.js'
 import { codepointColumnToUtf16, sourceLines } from './position.js'
+import { resolvedDocument } from './parse-cache.js'
 
 export interface ItemSite {
   /** UTF-16 offset of the item's marker in its line; the text before it is the container lead. */
@@ -50,7 +51,7 @@ function listStyle(list: { olType?: string; marker?: { style?: string } }): stri
 export function listItems(source: string): ListItems | null {
   let doc: unknown
   try {
-    doc = parse(source, { positions: true })
+    doc = resolvedDocument(source)
   } catch {
     return null
   }
@@ -151,7 +152,7 @@ export interface TreeItem {
 export function listTree(source: string): Map<number, TreeItem> | null {
   let doc: unknown
   try {
-    doc = parse(source, { positions: true })
+    doc = resolvedDocument(source)
   } catch {
     return null
   }
