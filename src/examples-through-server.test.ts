@@ -75,7 +75,7 @@ test('engine drift uses 0.2 examples in both comparison runs', () => {
   assert.doesNotMatch(workflow, /node tools\/corpus-through-server\.mjs/)
 })
 
-test('the population check rejects a nonempty truncated 0.2 example set', () => {
+test('the population check rejects truncated or inputless 0.2 example sets', () => {
   const root = mkdtempSync(join(tmpdir(), 'example-population-'))
   const spec = join(repoRoot, 'tests', 'spec')
   try {
@@ -86,15 +86,22 @@ test('the population check rejects a nonempty truncated 0.2 example set', () => 
       copyFileSync(join(spec, 'spec', '0.2', `${name}.md`), join(root, 'spec', '0.2', `${name}.md`))
     }
     const data = JSON.parse(readFileSync(join(spec, 'spec', '0.2', 'conformance', 'examples.json'), 'utf8'))
-    data.examples.pop()
-    writeFileSync(join(root, 'spec', '0.2', 'conformance', 'examples.json'), JSON.stringify(data))
-    let status = 0
-    try {
-      execFileSync(process.execPath, [join(repoRoot, 'tools', 'verify-example-population.mjs'), root], { encoding: 'utf8' })
-    } catch (error) {
-      status = (error as { status?: number }).status ?? -1
+    const examplesPath = join(root, 'spec', '0.2', 'conformance', 'examples.json')
+    const verify = () => {
+      try {
+        execFileSync(process.execPath, [join(repoRoot, 'tools', 'verify-example-population.mjs'), root], { encoding: 'utf8' })
+        return 0
+      } catch (error) {
+        return (error as { status?: number }).status ?? -1
+      }
     }
-    assert.equal(status, 1)
+    data.examples.pop()
+    writeFileSync(examplesPath, JSON.stringify(data))
+    assert.equal(verify(), 1)
+    data.examples = JSON.parse(readFileSync(join(spec, 'spec', '0.2', 'conformance', 'examples.json'), 'utf8')).examples
+    delete data.examples[0].input
+    writeFileSync(examplesPath, JSON.stringify(data))
+    assert.equal(verify(), 1)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

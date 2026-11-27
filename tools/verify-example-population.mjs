@@ -12,10 +12,15 @@ if (!specRoot) {
 
 const { allExamples } = await import(pathToFileURL(resolve(specRoot, 'scripts/lib/spec2-examples.mjs')).href)
 const declared = allExamples(join(specRoot, 'spec/0.2')).map(({ document, number }) => `${document}-${number}`)
-const shipped = JSON.parse(readFileSync(join(specRoot, 'spec/0.2/conformance/examples.json'), 'utf8'))
-  .examples.map(({ id }) => id)
+const entries = JSON.parse(readFileSync(join(specRoot, 'spec/0.2/conformance/examples.json'), 'utf8')).examples
+const shipped = entries.map(({ id }) => id)
 if (declared.length !== shipped.length || declared.some((id, index) => id !== shipped[index])) {
   stdout.write(`0.2 examples differ from the spec documents: ${declared.length} declared, ${shipped.length} shipped\n`)
+  exit(1)
+}
+const missingInputs = entries.filter(({ kind, input }) => kind !== 'import' && typeof input !== 'string')
+if (missingInputs.length > 0) {
+  stdout.write(`0.2 examples lack input: ${missingInputs.map(({ id }) => id).join(', ')}\n`)
   exit(1)
 }
 stdout.write(`verified=${shipped.length}\n`)
