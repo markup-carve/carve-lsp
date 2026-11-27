@@ -443,6 +443,11 @@ function documentSymbols(doc: Document, source: string): DocumentSymbol[] {
       place(figureGroupSymbol(entry, lines))
       continue
     }
+    if (entry.type === 'snippet_definition') {
+      // Like a composite figure, a definition hangs under its section and takes no level.
+      place(snippetSymbol(entry, lines))
+      continue
+    }
     while (stack.length && stack[stack.length - 1]!.level >= entry.level) {
       stack.pop()
     }
@@ -454,7 +459,8 @@ function documentSymbols(doc: Document, source: string): DocumentSymbol[] {
   return roots
 }
 
-type OutlineEntry = Heading | Extract<BlockNode, { type: 'figure_group' }>
+type SnippetDefinitionNode = Extract<Document['children'][number], { type: 'snippet_definition' }>
+type OutlineEntry = Heading | Extract<BlockNode, { type: 'figure_group' }> | SnippetDefinitionNode
 
 /**
  * The outline's entries in source order: headings, and composite figures, at
@@ -468,8 +474,8 @@ type OutlineEntry = Heading | Extract<BlockNode, { type: 'figure_group' }>
 function walkOutline(doc: Document): OutlineEntry[] {
   const entries: OutlineEntry[] = []
   walkNodes(doc.children, (node) => {
-    if (node.type === 'heading' || node.type === 'figure_group') entries.push(node as unknown as OutlineEntry)
-    return node.type !== 'heading' && node.type !== 'paragraph'
+    if (node.type === 'heading' || node.type === 'figure_group' || node.type === 'snippet_definition') entries.push(node as unknown as OutlineEntry)
+    return node.type !== 'heading' && node.type !== 'paragraph' && node.type !== 'snippet_definition'
   })
   return entries.sort((a, b) => (a.pos?.startLine ?? 0) - (b.pos?.startLine ?? 0))
 }
@@ -525,6 +531,21 @@ function lineSpan(lines: readonly string[], start: number, end: number): Range {
 }
 
 /** `range` spans the section when `sectionEnd` is known; `selectionRange` is the heading's own lines. */
+function snippetSymbol(definition: SnippetDefinitionNode, lines: readonly string[]): DocumentSymbol {
+  // The marker is the last line of the span; an attribute line above it belongs to the definition (C2-B-236).
+  const line = (definition.pos?.endLine ?? 1) - 1
+  const range = definition.pos ? lineSpan(lines, definition.pos.startLine - 1, line) : lineSpan(lines, 0, 0)
+  const name = definition.name
+  const nameStart = (lines[line] ?? '').startsWith(`{$${name}`) ? 2 : 0
+  return {
+    name: `$${name}`,
+    detail: plainText(definition.children as InlineNode[]),
+    kind: SymbolKind.Constant,
+    range,
+    selectionRange: { start: { line, character: nameStart }, end: { line, character: nameStart + name.length } },
+  }
+}
+
 function headingSymbol(heading: Heading, lines: readonly string[], sectionEnd?: number): DocumentSymbol {
   const selectionRange = heading.pos
     ? lineSpan(lines, ownStartLine(heading.pos, lines), heading.pos.endLine - 1)

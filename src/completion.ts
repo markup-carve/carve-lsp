@@ -10,6 +10,8 @@ import { captionTargets, type CaptionTarget } from './captions.js'
 import { walkNodes } from './ast-walk.js'
 import type { IndexedToken } from './workspace-index.js'
 import { resolvedDocument } from './parse-cache.js'
+import type { IncludeOptions } from './includes.js'
+import { snippetCompletions } from './snippets.js'
 
 /** The eight canonical admonition kinds (grammar PART 9 §12, Tier 1). */
 const ADMONITIONS = ['note', 'tip', 'warning', 'danger', 'info', 'success', 'example', 'quote']
@@ -57,9 +59,12 @@ const SEMANTIC_SPANS = [
  *   - `</#`  cross-reference     -> heading ids in the document
  *   - `[^`   footnote reference  -> defined footnote labels
  *   - `][`   reference link      -> defined link reference labels
+ *   - `{{ $` snippet use         -> snippet names, local and from includes
  */
 export interface CompletionContext {
   workspaceTokens?: IndexedToken[]
+  /** Lets snippet completion see the definitions included files contribute. */
+  includes?: IncludeOptions
 }
 
 export function completionAt(source: string, position: Position, context: CompletionContext = {}): CompletionItem[] {
@@ -124,6 +129,7 @@ export function completionAt(source: string, position: Position, context: Comple
     return [...new Set([...local, ...workspace])].map((label) =>
       completion(label, CompletionItemKind.Reference, match![1], position, 'Citation key'))
   }
+  if (/\{\{ +\$[A-Za-z0-9_-]*$/.test(prefix)) return snippetCompletions(source, position, context.includes)
   // Inside `{{ ... }}` the include completions own the slot; nothing below applies.
   if (prefix.lastIndexOf('{{') > prefix.lastIndexOf('}}')) return []
   // `[My` with a heading `# My Head`: complete the collapsed reference `[My Head][]`.

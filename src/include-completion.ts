@@ -97,7 +97,8 @@ export function includeCompletions(
   const line = source.replace(/\r\n?/g, '\n').split('\n')[position.line] ?? ''
   const prefix = line.slice(0, position.character)
   const inner = directiveInner(prefix)
-  if (inner === null) return []
+  // `{{ $name` is a snippet use (C2-B-237), never a path.
+  if (inner === null || /^ +\$/.test(inner)) return []
   // A directive in code, a raw block or a comment is literal text (I9).
   const model = referenceModel(source)
   if (inVerbatim(model, model.offsetAt({ line: position.line, character: prefix.lastIndexOf('{{') }))) return []
