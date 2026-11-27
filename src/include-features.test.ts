@@ -9,7 +9,7 @@ import { DependencyIndex, watcherFor } from './dependencies.js'
 import { definitionAt } from './definition.js'
 import { IncludeSourceCache } from './include-cache.js'
 import { fileSystemResolver } from './include-path.js'
-import { parse, resolve } from '@markup-carve/carve'
+import { parse } from './engine.js'
 import { IncludeParseCache } from './include-cache.js'
 
 function fixture(): string {
@@ -31,7 +31,7 @@ test('include cache is metadata-validated and LRU-bounded', () => {
 
 test('parsed-child cache is version-validated', () => {
   const cache = new IncludeParseCache()
-  const document = resolve(parse('# Cached\n'))
+  const document = parse('# Cached\n')
   cache.set('/child', '1:9', document)
   assert.equal(cache.get('/child', '1:9'), document)
   assert.equal(cache.get('/child', '2:9'), undefined)

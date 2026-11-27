@@ -1,4 +1,4 @@
-import { carveToHtml } from '@markup-carve/carve'
+import { render } from './engine.js'
 import { CodeActionKind, type CodeAction, type Diagnostic, type TextEdit } from 'vscode-languageserver-types'
 
 /** Safe, local rewrites for diagnostics emitted by lintCarve. */
@@ -6,7 +6,7 @@ export function lintCodeActions(uri: string, source: string, diagnostics: Diagno
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   const actions: CodeAction[] = []
   let rendered: string | undefined
-  const original = () => (rendered ??= carveToHtml(lines.join('\n')))
+  const original = () => (rendered ??= render(lines.join('\n')))
   for (const diagnostic of diagnostics) {
     const code = String(diagnostic.code ?? '')
     const line = lines[diagnostic.range.start.line] ?? ''
@@ -18,18 +18,6 @@ export function lintCodeActions(uri: string, source: string, diagnostics: Diagno
         const character = marker[0].length
         edit = { range: point(diagnostic.range.start.line, character), newText: ' ' }
         title = 'Insert the block-quote separator'
-      }
-    } else if (code === 'continuation-marker-refused' || code === 'refused-continuation-marker') {
-      const lineNo = diagnostic.range.start.line
-      const at = diagnostic.range.start.character
-      if (line[at] === '+') {
-        const escaped = [...lines]
-        escaped[lineNo] = `${line.slice(0, at)}\\${line.slice(at)}`
-        // The refused marker already reads as text; the escape only states that.
-        if (original() === carveToHtml(escaped.join('\n'))) {
-          edit = { range: point(lineNo, at), newText: '\\' }
-          title = 'Escape the + as literal text'
-        }
       }
     } else if (code === 'list-marker-below-content-column') {
       actions.push(...markerColumnActions(uri, line, diagnostic, 'marker'))
@@ -97,13 +85,18 @@ export function lintCodeActions(uri: string, source: string, diagnostics: Diagno
  * so a reworded message offers nothing rather than a guess.
  */
 function markerColumnActions(uri: string, line: string, diagnostic: Diagnostic, what: 'marker' | 'separator'): CodeAction[] {
-  const nest = /Indent it to column (\d+)/.exec(diagnostic.message)
-  const level = /start it at column (\d+)/.exec(diagnostic.message)
+  // 0.2 messages count 1-based columns inside the line's containers.
+  const nest = /(?:Indent it to|Start it at) column (\d+)/.exec(diagnostic.message)
+  const level = /or at column (\d+) to put it in the outer list/.exec(diagnostic.message)
+  const own = /starts at column (\d+)/.exec(diagnostic.message)
   const at = diagnostic.range.start.character
-  if (!nest || line.slice(0, at).includes('\t')) return []
+  if (!nest || !own || line.slice(0, at).includes('\t')) return []
+  const base = at - (Number(own[1]) - 1)
+  if (base < 0) return []
   const lineNo = diagnostic.range.start.line
   const actions: CodeAction[] = []
-  const move = (title: string, column: number, isPreferred: boolean) => {
+  const move = (title: string, written: number, isPreferred: boolean) => {
+    const column = base + written - 1
     let edit: TextEdit | null = null
     if (column > at) edit = { range: point(lineNo, at), newText: ' '.repeat(column - at) }
     else if (column < at && /^ +$/.test(line.slice(column, at))) {
@@ -160,10 +153,12 @@ function bracedAlignmentEdit(line: string, diagnostic: Diagnostic): { edit: Text
   if (!match) return null
   const [, old, braced] = match as unknown as [string, string, string]
   const pipe = line.lastIndexOf('|', diagnostic.range.start.character)
-  if (pipe < 0 || line.slice(pipe + 1, pipe + 1 + old.length) !== old) return null
+  // The 0.2 message names the alignment run alone; a header cell keeps its `=` before it.
+  const start = pipe < 0 ? -1 : pipe + 1 + (line[pipe + 1] === '=' && !old.startsWith('=') ? 1 : 0)
+  if (start < 0 || line.slice(start, start + old.length) !== old) return null
   const lineNo = diagnostic.range.start.line
   return {
-    edit: { range: { start: { line: lineNo, character: pipe + 1 }, end: { line: lineNo, character: pipe + 1 + old.length } }, newText: braced },
+    edit: { range: { start: { line: lineNo, character: start }, end: { line: lineNo, character: start + old.length } }, newText: braced },
     title: `Write the alignment as ${braced}`,
   }
 }

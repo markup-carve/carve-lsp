@@ -8,9 +8,9 @@
  * line ending, and only when the render confirms it changes nothing.
  */
 
-import { carveToHtml, lintCarve, parse } from '@markup-carve/carve'
+import { render, lint, parse } from './engine.js'
 import { colonFenceStructure, type FenceSite } from './colon-fences.js'
-import { astColumnToCharacter, sourceLines } from './position.js'
+import { astColumnToCharacter, astOffsetToIndex, sourceLines } from './position.js'
 import { walkNodes } from './ast-walk.js'
 import { bareMarkerItem, completedItem, listItems, listTree, type ItemSite, type TreeItem } from './list-items.js'
 
@@ -19,7 +19,7 @@ export function formatDocument(source: string): string {
   const formatted = source + (source.includes('\r\n') ? '\r\n' : '\n')
   // An unclosed code block at the end takes the line ending into its content.
   try {
-    return carveToHtml(formatted) === carveToHtml(source) ? formatted : source
+    return render(formatted) === render(source) ? formatted : source
   } catch {
     return source
   }
@@ -143,8 +143,8 @@ function verbatimColumn(source: string, lines: string[], line: number): number |
   let column: number | null = null
   walkAst(source, (node) => {
     const { startLine, endLine, startColumn } = node.pos ?? {}
-    // A `%%` line comment is inline: the text before it is ordinary.
-    if (!VERBATIM_TYPES.has(node.type ?? '') || node.block === false || startLine === undefined || endLine === undefined || startColumn === undefined) return
+    // Only a `%%%` comment block is verbatim (C2-A-074); a `%%` or braced comment is inline.
+    if (!VERBATIM_TYPES.has(node.type ?? '') || (node.type === 'comment' && node.form !== 'block') || startLine === undefined || endLine === undefined || startColumn === undefined) return
     if (line + 1 < startLine || line + 1 > endLine) return
     const at = astColumnToCharacter(lines[startLine - 1] ?? '', startColumn)
     column = column === null ? at : Math.min(column, at)
@@ -157,7 +157,7 @@ function inVerbatim(source: string, line: number): boolean {
   let found = false
   walkAst(source, (node) => {
     const { startLine, endLine } = node.pos ?? {}
-    if (VERBATIM_TYPES.has(node.type ?? '') && startLine !== undefined && endLine !== undefined && line + 1 >= startLine && line + 1 <= endLine) found = true
+    if (VERBATIM_TYPES.has(node.type ?? '') && !(node.type === 'comment' && node.form !== 'block') && startLine !== undefined && endLine !== undefined && line + 1 >= startLine && line + 1 <= endLine) found = true
   })
   return found
 }
@@ -299,10 +299,12 @@ const BARE_DESCRIPTION = /^: +$/
 function descriptionLines(source: string): Map<number, AstNode> {
   const lines = new Map<number, AstNode>()
   walkAst(source, (node) => {
-    if (node.type !== 'definition_list' || !Array.isArray(node.items)) return
-    for (const item of node.items as Array<{ termSpans?: Array<{ startLine: number }>; definitionLines?: number[] }>) {
-      for (const span of item.termSpans ?? []) lines.set(span.startLine - 1, node)
-      for (const line of item.definitionLines ?? []) lines.set(line - 1, node)
+    // 0.2 C2-A-062: the list holds `definition_term` and `definition_description` nodes; each opens on its marker line.
+    if (node.type !== 'definition_list' || !Array.isArray(node.children)) return
+    for (const child of node.children as AstNode[]) {
+      if ((child.type === 'definition_term' || child.type === 'definition_description') && child.pos?.startLine !== undefined) {
+        lines.set(child.pos.startLine - 1, node)
+      }
     }
   })
   return lines
@@ -450,7 +452,8 @@ export function listIndentEdits(source: string, line: number, direction: ListInd
 
 /** A partial outdent can land between two columns, which the engine reads but lints (PART 9 §24). */
 function markerOffColumn(text: string, line: number): boolean {
-  return lintCarve(text).some((warning) => warning.rule === 'list-marker-below-content-column' && warning.line === line + 1)
+  return lint(text).some((entry) => entry.code === 'list-marker-below-content-column' && entry.range !== undefined &&
+    lineOfIndex(text, astOffsetToIndex(text, entry.range.startOffset)) === line)
 }
 
 /** Every item nested in `item` before the move is still nested in it, as deep as before. */
@@ -621,4 +624,10 @@ function columns(run: string): number {
   let width = 0
   for (const char of run) width = char === '\t' ? width + 4 - (width % 4) : width + 1
   return width
+}
+
+function lineOfIndex(text: string, index: number): number {
+  let line = 0
+  for (let at = 0; at < index && at < text.length; at++) if (text[at] === '\n') line++
+  return line
 }

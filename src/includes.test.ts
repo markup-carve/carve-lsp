@@ -175,9 +175,10 @@ test('a missing target is reported as an unresolved dependency (i11-missing-targ
   const result = resolveIncludes('{{ present }}\n\n{{ absent }}', {
     resolver: virtualResolver({ present: 'Here.' }),
   })
+  // 0.2 C2-N-013: a target the resolver does not find reports `include-not-found`.
   assert.deepEqual(
     result.warnings.map((w) => w.rule),
-    ['include-unresolved'],
+    ['include-not-found'],
   )
   assert.deepEqual(result.dependencies, [
     { id: 'present', resolved: true },
@@ -193,7 +194,8 @@ test('a resolver that throws yields a warning whose message carries no raw error
   })
   const [warning] = result.warnings
   assert.ok(warning)
-  assert.equal(warning.rule, 'include-unresolved')
+  // 0.2 C2-N-007, C2-N-013: a resolver that throws refuses the target as `include-unreadable`.
+  assert.equal(warning.rule, 'include-unreadable')
   assert.ok(!warning.message.includes('/home/someone'))
   // The raw text is kept out of `message` but available for a log sink.
   assert.ok(warning.detail?.includes('/home/someone'))
@@ -228,11 +230,13 @@ test('an unknown option warns and resolves nothing (i01-unknown-option-literal)'
   const result = resolveIncludes('{{ child @nope:1 }}', {
     resolver: virtualResolver({ child: 'text' }, reads),
   })
+  // 0.2 C2-N-025, C2-B-206: an invalid option reports `include-option-invalid`, and the
+  // include node it leaves is a dependency like any other (C2-N-083).
   assert.deepEqual(
     result.warnings.map((w) => w.rule),
-    ['include-unknown-option'],
+    ['include-option-invalid'],
   )
-  assert.deepEqual(result.dependencies, [])
+  assert.deepEqual(result.dependencies, [{ id: 'child', resolved: false }])
   assert.deepEqual(reads, [])
 })
 
@@ -244,4 +248,30 @@ test('a directive inside a fence is not resolved even with a resolver active (i0
   assert.deepEqual(result.warnings, [])
   assert.deepEqual(result.dependencies, [])
   assert.deepEqual(reads, [])
+})
+
+test('a repeated directive keeps its own refusal for each occurrence', () => {
+  const result = resolveIncludes('{{ gone }}\n\n{{ gone }}\n', {
+    resolver: virtualResolver({}),
+    maxResolverCalls: 1,
+  })
+  assert.deepEqual(result.warnings.map((w) => w.rule), ['include-not-found', 'include-call-limit'])
+})
+
+test('a child reached through two branches gets the same parent stack on each visit', () => {
+  const seen: Array<{ path: string; stack: string[]; depth: number }> = []
+  const files: Record<string, string> = { a: '{{ s }}', b: '{{ s }}', s: '{{ x }}', x: 'X.' }
+  resolveIncludes('{{ a }}\n\n{{ b }}\n', {
+    resolver: (includePath, ctx) => {
+      seen.push({ path: includePath, stack: [...ctx.stack], depth: ctx.depth })
+      const source = files[includePath]
+      return source === undefined
+        ? { ok: false, id: includePath, denial: 'not-found' }
+        : { ok: true, id: includePath, source, bytes: Buffer.byteLength(source, 'utf8') }
+    },
+  })
+  assert.deepEqual(seen.filter((call) => call.path === 'x'), [
+    { path: 'x', stack: ['s'], depth: 2 },
+    { path: 'x', stack: ['s'], depth: 2 },
+  ])
 })

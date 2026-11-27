@@ -60,7 +60,8 @@ test('a section the child does not declare is reported', () => {
 
 test('the missing-section message names the section that was asked for', () => {
   const result = resolveIncludes('{{ a #Gamma }}', { resolver: virtualResolver({ a: CHILD }) })
-  assert.match(result.warnings[0]?.message ?? '', /#Gamma/)
+  // 0.2 C2-N-030: the engine's `include-section` message names the id without the `#`.
+  assert.match(result.warnings[0]?.message ?? '', /\bGamma\b/)
 })
 
 test('a section the child DOES declare is silent', () => {

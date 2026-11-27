@@ -5,6 +5,9 @@ import { analyzeCarve, parseErrorRange, tolerantHeadingSymbols } from './analyze
 import { hoverAt } from './hover.js'
 import { migrationCodeActions, migrationFixes } from './migration-actions.js'
 import { semanticTokens } from './semantic.js'
+import { CarveOptionError, lint, type LintOptions } from './engine.js'
+
+// 0.2 C2-N-013: a target the resolver does not find reports `include-not-found` (0.1 `include-unresolved`).
 
 test('returns heading document symbols', () => {
   const result = analyzeCarve('# One\n\n## Two\n')
@@ -70,12 +73,29 @@ test('does not diagnose djot-shift constructs (valid Carve)', () => {
       `expected no diagnostic for ${JSON.stringify(src)}`,
     )
   }
-  // `_x_` is underline too, but the authoring lint hints at it (PART 13 `markdown-italic-underline`).
-  assert.deepEqual(analyzeCarve('_italic_').diagnostics.map((d) => d.code), ['markdown-italic-underline'])
+  // 0.2 C2-I-046: a bare `_` pair is text; lint-rules.json replaces `markdown-italic-underline` with `deprecated-bare-underline`,
+  // and the upgrade-only `djot-emphasis-underscore` row (C2-W-156) reports the same pair.
+  assert.deepEqual(analyzeCarve('_italic_', { lint: { upgrade: true } }).diagnostics.map((d) => d.code), ['deprecated-bare-underline', 'djot-emphasis-underscore'])
+})
+
+// C2-W-156: the 0.1 migration rules run only when the lint upgrade setting is on.
+test('lint upgrade mode turns on the deprecated-* migration rules', (t) => {
+  const codes = (upgrade?: boolean) => analyzeCarve('|=> Price |\n', upgrade === undefined ? {} : { lint: { upgrade } })
+    .diagnostics.map((d) => d.code)
+  assert.ok(codes(true).includes('deprecated-cell-alignment'))
+  try {
+    lint('', { upgrade: true } as LintOptions)
+  } catch (error) {
+    if (!(error instanceof CarveOptionError)) throw error
+    t.skip('the pinned engine predates the upgrade option and runs these rules unasked')
+    return
+  }
+  assert.ok(!codes().includes('deprecated-cell-alignment'))
+  assert.ok(!codes(false).includes('deprecated-cell-alignment'))
 })
 
 test('an engine Hint finding is published as a Hint', () => {
-  const [hint] = analyzeCarve('a\n\n---\n\nb\n').diagnostics.filter((d) => d.code === 'thematic-break-spelling')
+  const [hint] = analyzeCarve('a\n\n---\n\nb\n', { lint: { upgrade: true } }).diagnostics.filter((d) => d.code === 'thematic-break-spelling')
   assert.equal(hint?.severity, DiagnosticSeverity.Hint)
   assert.equal(analyzeCarve('See [x][r].\n').diagnostics[0]?.severity, DiagnosticSeverity.Warning)
 })
@@ -106,9 +126,10 @@ test('returns quick fixes for migration warnings', () => {
 
   const fixAll = actions.find((action) => action.title.startsWith('Fix all'))
   assert.ok(fixAll)
+  // 0.2 U-066: a bare strike needs braces, so the fix writes `{~strike~}`.
   assert.equal(
     fixAll.edit?.changes?.['file:///demo.crv']?.[0]?.newText,
-    '*bold* and ~strike~',
+    '*bold* and {~strike~}',
   )
 })
 
@@ -120,10 +141,11 @@ test('migration quick fixes use canonical single-char Carve delimiters', () => {
   // bare comma or caret is always literal text), so the only spelling is the
   // brace-forced `{,x,}` / `{^x^}`. Suggestions are therefore `{=x=}` and
   // `{,x,}`, never a bare or doubled delimiter form.
+  // Djot highlight `{=x=}` is also valid Carve highlight. 0.2 lint has no
+  // `djot-highlight-braces` identity rule, so nothing is offered for it, and in
+  // particular never a doubled `==x==` (which is literal).
+  assert.deepEqual(migrationFixes('{=mark=}'), [])
   const cases: Array<{ source: string; code: string; newText: string }> = [
-    // Djot highlight `{=x=}` is also valid Carve highlight: kept as the
-    // identity brace form, NOT reduced to a doubled `==x==` (which is literal).
-    { source: '{=mark=}', code: 'djot-highlight-braces', newText: '{=mark=}' },
     // Djot subscript `~x~` would render as Carve strikethrough; the gated
     // `djot-subscript-tilde` rule rewrites it to the brace-forced subscript.
     { source: 'H~2~O', code: 'djot-subscript-tilde', newText: '{,2,}' },
@@ -144,7 +166,9 @@ test('migration quick fixes use canonical single-char Carve delimiters', () => {
 
 test('offers a quick fix for + bullets (was missing from the old span map)', () => {
   const source = '+ item'
-  const diagnostics = analyzeCarve(source).diagnostics
+  // 0.2 lint-rules.json: `djot-plus-bullet` is opt-in (default off), so the setting turns it on.
+  assert.deepEqual(analyzeCarve(source).diagnostics, [])
+  const diagnostics = analyzeCarve(source, { lint: { severities: { 'djot-plus-bullet': 'warning' } } }).diagnostics
   assert.equal(diagnostics[0]!.code, 'djot-plus-bullet')
   const actions = migrationCodeActions('file:///demo.crv', source, diagnostics)
   const quickFix = actions.find((a) => a.title === 'Convert to Carve syntax: -')
@@ -176,10 +200,7 @@ test('returns semantic tokens for headings and inline markup', () => {
       [0, 2, 5, 'type'],
       [2, 3, 6, 'keyword'],
       [2, 10, 5, 'variable'],
-      // carve-js parses the trailing `{#id}` here as a literal `#id` hashtag
-      // (tag node) rather than an attribute attachment, so it surfaces as a
-      // `variable` token like any other hashtag.
-      [2, 17, 3, 'variable'],
+      // 0.2 U-275 (C2-I-035): the unattached `{#id}` is one literal atom, no `#id` tag.
     ],
   )
 })
@@ -315,19 +336,21 @@ test('returns semantic tokens for critic comment markup', () => {
   )
 })
 
+// 0.2 C2-I-019: math is `$` or `$$` glued before a code span; `$$E=mc2$$` is text.
 test('returns semantic tokens for display math', () => {
-  const result = semanticTokens('$$E=mc2$$')
+  const result = semanticTokens('$$`E=mc2`')
   assert.deepEqual(
     result.map((token) => [token.line, token.character, token.length, token.type]),
     [[0, 0, 9, 'string']],
   )
 })
 
+// 0.2 C2-I-019: math is `$` glued before a code span; `$x=1$` is text.
 test('returns semantic tokens for inline math', () => {
-  const result = semanticTokens('$x=1$')
+  const result = semanticTokens('$`x=1`')
   assert.deepEqual(
     result.map((token) => [token.line, token.character, token.length, token.type]),
-    [[0, 0, 5, 'string']],
+    [[0, 0, 6, 'string']],
   )
 })
 
@@ -338,7 +361,8 @@ test('returns semantic tokens for reference definition', () => {
     [
       [0, 0, 1, 'operator'],
       [0, 1, 5, 'type'],
-      [0, 6, 3, 'operator'],
+      // The grammar's `punctuation.separator` ends at the colon; the space after it is not part of the marker.
+      [0, 6, 2, 'operator'],
       [0, 9, 19, 'string'],
     ],
   )
@@ -351,7 +375,8 @@ test('returns semantic tokens for footnote definition', () => {
     [
       [0, 0, 2, 'operator'],
       [0, 2, 2, 'type'],
-      [0, 4, 3, 'operator'],
+      // As for a link definition, the separator token ends at the colon.
+      [0, 4, 2, 'operator'],
     ],
   )
 })
@@ -409,19 +434,20 @@ test('an enabled include publishes its warning as a diagnostic on the directive 
       sourcePath: '/doc.crv',
     },
   })
-  const diagnostic = result.diagnostics.find((d) => d.code === 'include-unresolved')
-  assert.ok(diagnostic, 'expected an include-unresolved diagnostic')
+  const diagnostic = result.diagnostics.find((d) => d.code === 'include-not-found')
+  assert.ok(diagnostic, 'expected an include-not-found diagnostic')
   assert.deepEqual(diagnostic.range, {
     start: { line: 2, character: 0 },
     end: { line: 2, character: 16 },
   })
   assert.equal(diagnostic.source, 'carve')
   assert.deepEqual(result.dependencies, [{ id: 'absent.crv', resolved: false }])
-  assert.equal(result.diagnostics.filter((d) => d.code === 'include-unresolved').length, 1)
+  assert.equal(result.diagnostics.filter((d) => d.code === 'include-not-found').length, 1)
 })
 
 test('lints a CSV code include at its directive', () => {
-  const child = 'Plan,Seats,Price\nStarter,1,"$0"\nTeam,10,"$49" billed yearly\n'
+  // 0.2 C2-B-180/C2-B-181: only an unclosed quote makes a delimited table malformed.
+  const child = 'Plan,Seats,Price\nStarter,1,"$0"\nTeam,10,"$49 billed yearly\n'
   const source = '{table}\n{{ data/plans.csv @code:csv }}\n'
   const options = {
     includes: {
@@ -496,7 +522,7 @@ test('a nested warning names the child relative to the include root, not absolut
       includeRoot: '/ws',
     },
   })
-  const diagnostic = result.diagnostics.find((d) => d.code === 'include-unresolved')
+  const diagnostic = result.diagnostics.find((d) => d.code === 'include-not-found')
   assert.ok(diagnostic)
   assert.ok(diagnostic.message.includes('(in a.crv)'), diagnostic.message)
   assert.ok(!diagnostic.message.includes('/ws/a.crv'))
@@ -516,7 +542,8 @@ test('keeps a usable heading outline when resolved analysis is unavailable', () 
 test('duplicate diagnostics point back to the first declaration', () => {
   const uri = 'file:///document.crv'
   const heading = analyzeCarve('{#same}\n# One\n\n{#same}\n# Two\n', { uri })
-  const headingDuplicate = heading.diagnostics.find((item) => item.code === 'duplicate-heading-id')
+  // 0.2 lint-rules.json: `duplicate-heading-id` is renamed `duplicate-id` (C2-A-039).
+  const headingDuplicate = heading.diagnostics.find((item) => item.code === 'duplicate-id')
   assert.deepEqual(headingDuplicate?.relatedInformation, [{
     location: { uri, range: { start: { line: 0, character: 2 }, end: { line: 0, character: 6 } } },
     message: 'First declaration is here.',
@@ -525,6 +552,19 @@ test('duplicate diagnostics point back to the first declaration', () => {
   const footnote = analyzeCarve('[^same]: one\n\n[^same]: two\n', { uri })
   assert.equal(footnote.diagnostics.find((item) => item.code === 'duplicate-footnote-definition')
     ?.relatedInformation?.[0]?.location.range.start.line, 0)
+})
+
+test('every repeat of an id or footnote points back to the same first declaration', () => {
+  const uri = 'file:///document.crv'
+  const source = ['{#same}', '# One', '', '[^n]: one', '', '{#same}', '# Two', '', '[^n]: two', '', '{#same}', '# Three', ''].join('\r\n')
+  const related = analyzeCarve(source, { uri }).diagnostics
+    .filter((item) => item.code === 'duplicate-id' || item.code === 'duplicate-footnote-definition')
+    .map((item) => [item.code, item.relatedInformation?.[0]?.location.range.start])
+  assert.deepEqual(related, [
+    ['duplicate-id', { line: 0, character: 2 }],
+    ['duplicate-footnote-definition', { line: 3, character: 2 }],
+    ['duplicate-id', { line: 0, character: 2 }],
+  ])
 })
 
 test('diagnostic severity overrides can promote or suppress individual rules', () => {
@@ -538,6 +578,7 @@ test('diagnostic severity overrides can promote or suppress individual rules', (
 test('a bare empty definition resolves its reference in the diagnostics too (carve#2878)', () => {
   // Completion and semantic tokens read `[r]:` as a definition; the engine has
   // to agree, which needs carve-js 0.1.12 or later.
+  // 0.2 C2-B-083: `[r]:` with no destination is text and defines no link, so `[t][r]` is unresolved.
   const result = analyzeCarve('[t][r]\n\n[r]:\n')
-  assert.deepEqual(result.diagnostics.map((d) => [d.code, d.range.start.line]), [['empty-reference-definition', 2]])
+  assert.deepEqual(result.diagnostics.map((d) => [d.code, d.range.start.line]), [['unresolved-reference-link', 0], ['empty-reference-definition', 2]])
 })

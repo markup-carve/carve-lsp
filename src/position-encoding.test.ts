@@ -15,8 +15,11 @@ import {
   probeEndColumn,
 } from './position.js'
 import { pathToFileURL } from 'node:url'
+import { stringOffsetOfByte } from './engine.js'
 import type { IncludeResolved, IncludeResolver } from './include-path.js'
 import type { Hover } from 'vscode-languageserver/node.js'
+
+// 0.2 C2-N-013: a target the resolver does not find reports `include-not-found` (0.1 `include-unresolved`).
 
 function hoverText(hover: Hover): string {
   const contents = hover.contents as { value?: string }
@@ -206,7 +209,7 @@ const childResolver: IncludeResolver = (includePath): IncludeResolved => {
 
 function includeDiagnostic(source: string, resolver: IncludeResolver) {
   return analyzeCarve(source, { includes: { resolver } }).diagnostics.find(
-    (entry) => entry.code === 'include-unresolved',
+    (entry) => entry.code === 'include-not-found',
   )
 }
 
@@ -232,12 +235,11 @@ test("a warning's own line and column stay in the parser's unit", () => {
   // The range above is UTF-16, because a client indexes that way. These are
   // the parser's numbers, and converting them here would leave the two halves
   // of the same warning measured differently.
+  // 0.2 C2-N-002: there is no inline include, so a directive after an emoji on
+  // its own line is text and reports nothing.
   const line = '\u{1F600} {{ missing.crv }}\n'
-  const warning = resolveIncludes(line, { resolver: refusing, sourcePath: '/book/main.crv' })
-    .warnings[0]
-  assert.equal(warning?.line, 1)
-  assert.equal(warning?.column, [...line.slice(0, line.indexOf('{{'))].length + 1)
-  assert.equal(includeDiagnostic(line, refusing)?.range.start.character, line.indexOf('{{'))
+  assert.equal(resolveIncludes(line, { resolver: refusing, sourcePath: '/book/main.crv' }).warnings[0], undefined)
+  assert.equal(includeDiagnostic(line, refusing), undefined)
 
   // An emoji on an EARLIER line moves the line number rather than the column,
   // so the line table has to be counted in the offsets' own unit too.
@@ -248,15 +250,14 @@ test("a warning's own line and column stay in the parser's unit", () => {
   assert.equal(later?.line, DIRECTIVE_LINE + 1)
 })
 
-test('both parser readings map the same offset to the same string index', () => {
-  // `LINE` opens with one emoji: two code units, one codepoint. Only one branch
-  // is live with the installed engine, so the other is driven explicitly.
+// 0.2 C2-A-141: tree offsets count UTF-8 bytes, so the column unit no longer changes them.
+test('a byte offset maps to the same string index under either column reading', () => {
+  // `LINE` opens with one emoji: four UTF-8 bytes, two code units.
   try {
     setEngineColumnUnit('codepoint')
-    assert.equal(astOffsetToIndex(LINE, 1), 2)
-
+    assert.equal(astOffsetToIndex(LINE, 4), 2)
     setEngineColumnUnit('utf16')
-    assert.equal(astOffsetToIndex(LINE, 1), 1)
+    assert.equal(astOffsetToIndex(LINE, 4), 2)
   } finally {
     setEngineColumnUnit(undefined)
   }
@@ -270,8 +271,10 @@ test('the line table is counted in the same unit as the offsets looked up in it'
     setEngineColumnUnit('codepoint')
     assert.deepEqual(lineStarts(source), [0, [...LINE].length + 1])
 
+    // The include warnings still come from the 0.1 helpers (markup-carve/carve-js#5056), which count
+    // codepoints whatever the tree's column unit, so the table does too.
     setEngineColumnUnit('utf16')
-    assert.deepEqual(lineStarts(source), [0, LINE.length + 1])
+    assert.deepEqual(lineStarts(source), [0, [...LINE].length + 1])
   } finally {
     setEngineColumnUnit(undefined)
   }
@@ -280,37 +283,28 @@ test('the line table is counted in the same unit as the offsets looked up in it'
 test('an offset past the end keeps its distance instead of collapsing', () => {
   // An end offset is exclusive, so a construct ending the document reports one
   // past the last character. Clamping it would invert the range.
-  assert.equal(astOffsetToIndex(LINE, [...LINE].length + 1), LINE.length + 1)
+  // 0.2 C2-A-141: the offset counts UTF-8 bytes.
+  assert.equal(astOffsetToIndex(LINE, Buffer.byteLength(LINE) + 1), LINE.length + 1)
 })
 
-test('offset conversion matches a codepoint walk across astral, lone-surrogate and plain text', () => {
+test('offset conversion matches the engine byte walk across astral, lone-surrogate and plain text', () => {
+  // The engine's own conversion is the reference; the table must agree at every byte, mid-character included.
   const reference = (source: string, offset: number): number => {
-    let index = 0
-    let counted = 0
-    while (index < source.length && counted < offset) {
-      index += (source.codePointAt(index) ?? 0) > 0xffff ? 2 : 1
-      counted += 1
-    }
-    return index + Math.max(0, offset - counted)
+    const total = Buffer.byteLength(source)
+    return offset > total ? source.length + (offset - total) : stringOffsetOfByte(source, Math.max(0, offset))
   }
-  try {
-    setEngineColumnUnit('codepoint')
-    for (const source of ['', 'plain ascii', `${LINE}\nmid 😀 line\n𝒳𝒴 end`, 'lone \ud83d high', 'äöü 😀']) {
-      for (let offset = -1; offset <= [...source].length + 2; offset += 1) {
-        assert.equal(astOffsetToIndex(source, offset), reference(source, offset), `${JSON.stringify(source)} @ ${offset}`)
-      }
+  for (const source of ['', 'plain ascii', `${LINE}\nmid 😀 line\n𝒳𝒴 end`, 'lone \ud83d high', 'äöü 😀 €']) {
+    for (let offset = -1; offset <= Buffer.byteLength(source) + 2; offset += 1) {
+      assert.equal(astOffsetToIndex(source, offset), reference(source, offset), `${JSON.stringify(source)} @ ${offset}`)
     }
-  } finally {
-    setEngineColumnUnit(undefined)
   }
 })
 
 test('offset conversion stays linear on a large document', () => {
   const source = `${'😀 word '.repeat(50_000)}`
   try {
-    setEngineColumnUnit('codepoint')
     const started = performance.now()
-    for (let offset = 0; offset < 100_000; offset += 7) astOffsetToIndex(source, offset)
+    for (let offset = 0; offset < 400_000; offset += 7) astOffsetToIndex(source, offset)
     assert.ok(performance.now() - started < 1_000, 'per-call cost must not depend on the offset')
   } finally {
     setEngineColumnUnit(undefined)

@@ -37,9 +37,11 @@ import {
   type DocumentSymbol,
   type SymbolInformation,
   type TextEdit,
+  LSPErrorCodes,
+  ResponseError,
 } from 'vscode-languageserver/node.js'
 import { TextDocument } from 'vscode-languageserver-textdocument'
-import { carveToCarve } from '@markup-carve/carve'
+import { encodeTree, format, parse } from './engine.js'
 import { analyzeCarve, type Analysis } from './analyze.js'
 import { previewHtml, previewMarkdown } from './preview.js'
 import { EXPORT_KIND, exportCodeActions, exportSupport, pdfCodeAction, resolveExportAction, type ExportFormat, type ExportSupport } from './export-actions.js'
@@ -64,6 +66,7 @@ import { alignTableCodeAction, alignTablesInDocument, tableAlignmentEdits } from
 import { tableConversionCodeActions } from './table-conversion.js'
 import { hoverAt } from './hover.js'
 import { migrationCodeActions } from './migration-actions.js'
+import { planUpgrade, reviewSummary, upgradeCodeAction, upgradeEdit, UPGRADE_COMMAND, UPGRADE_KIND, wantsUpgrade, type UpgradePlan } from './upgrade-action.js'
 import { lintCodeActions } from './lint-actions.js'
 import { prepareRename, renameEdits } from './rename.js'
 import { DiagnosticScheduler } from './diagnostic-scheduler.js'
@@ -76,6 +79,7 @@ import {
   semanticTokenTypes,
   updateSemanticTokens,
 } from './semantic.js'
+import { grammarTokens } from './grammar-tokens.js'
 import { documentLinks } from './document-links.js'
 import { documentHighlights } from './document-highlights.js'
 import { inlayHints } from './inlay-hints.js'
@@ -108,11 +112,38 @@ let includeSettings: IncludeSettings = DEFAULT_INCLUDE_SETTINGS
 let carveSettings: CarveSettings = DEFAULT_CARVE_SETTINGS
 let workspaceTrusted = false
 let exportClient: ExportSupport = { createFile: false, resolveEdit: false }
+let codeActionDisabledSupport = false
+let documentChangesSupport = false
+const upgradePlans = new Map<string, { version: number, plan: Promise<UpgradePlan> }>()
+
+/** The upgrade plan of the document as it is now, and the version it was made from when the client can pin edits to one. */
+async function upgradePlan(document: TextDocument): Promise<{ plan: UpgradePlan, version: number | undefined }> {
+  const version = document.version
+  let cached = upgradePlans.get(document.uri)
+  if (cached?.version !== version) {
+    cached = { version, plan: planUpgrade(document.getText()) }
+    upgradePlans.set(document.uri, cached)
+  }
+  const plan = await cached.plan
+  // A change that arrived while the plan was computed makes it stale: plan the current text instead.
+  const current = documents.get(document.uri)
+  if (current && current.version !== version) return upgradePlan(current)
+  return { plan, version: documentChangesSupport ? version : undefined }
+}
 let pdfOptions: PdfOptions = {}
+let pdfExportCommand = false
 let workspaceRoots: string[] = []
 // The last `carve` section the client sent; its keys override `.carverc.json` one by one.
 let clientCarveSection: Record<string, unknown> | undefined
 let semanticTokensRefreshSupported = false
+// A client that pulls keeps pulled reports in their own collection, so pushing
+// the same findings as well shows each one twice. Pull needs refresh support:
+// without it, a change in an included file could never reach the client.
+let pullDiagnostics = false
+// The result id each open document's last pulled report carried.
+const pulledIds = new Map<string, string>()
+// Pulls waiting on the debounced run that the client has not cancelled.
+const livePulls = new Map<string, number>()
 const includeCache = new IncludeSourceCache()
 const includeParseCache = new IncludeParseCache()
 const dependencyIndex = new DependencyIndex()
@@ -141,9 +172,13 @@ function logIncludeSettings(message: string): void {
 
 connection.onInitialize((params) => {
   semanticTokensRefreshSupported = params.capabilities.workspace?.semanticTokens?.refreshSupport === true
+  pullDiagnostics = params.capabilities.textDocument?.diagnostic !== undefined
+    && params.capabilities.workspace?.diagnostics?.refreshSupport === true
   includeSettings = readIncludeSettings(params.initializationOptions, logIncludeSettings)
   workspaceTrusted = readWorkspaceTrusted(params.initializationOptions)
   exportClient = exportSupport(params.capabilities)
+  codeActionDisabledSupport = params.capabilities.textDocument?.codeAction?.disabledSupport === true
+  documentChangesSupport = params.capabilities.workspace?.workspaceEdit?.documentChanges === true
   // Every folder, not just the first: a multi-root session roots each document
   // at the folder it actually lives in.
   const folders = (params.workspaceFolders ?? []).map((folder) => fsPath(folder.uri))
@@ -151,6 +186,7 @@ connection.onInitialize((params) => {
   workspaceRoots = [...folders, legacyRoot].filter((root): root is string => root !== undefined)
   clientCarveSection = carveSection(params.initializationOptions)
   pdfOptions = readPdfOptions(clientCarveSection)
+  pdfExportCommand = clientCarveSection?.pdfExportCommand === true
   carveSettings = resolveCarveSettings()
 
   return {
@@ -160,7 +196,7 @@ connection.onInitialize((params) => {
       workspaceSymbolProvider: true,
       hoverProvider: true,
       codeActionProvider: {
-        codeActionKinds: [CodeActionKind.QuickFix, CodeActionKind.SourceFixAll, CodeActionKind.RefactorRewrite, EXPORT_KIND],
+        codeActionKinds: [CodeActionKind.QuickFix, CodeActionKind.SourceFixAll, CodeActionKind.RefactorRewrite, EXPORT_KIND, UPGRADE_KIND],
         resolveProvider: true,
       },
       documentFormattingProvider: true,
@@ -176,7 +212,7 @@ connection.onInitialize((params) => {
       executeCommandProvider: { commands: [
         'carve.previewHtml', 'carve.showAst', 'carve.workspaceGraph',
         'carve.backlinks', 'carve.generatedNavigation', 'carve.rebuildImpact',
-        'carve.listIndent', 'carve.exportPdf',
+        'carve.listIndent', UPGRADE_COMMAND, ...(pdfExportCommand ? ['carve.exportPdf'] : []),
       ] },
       referencesProvider: true,
       renameProvider: { prepareProvider: true },
@@ -214,6 +250,8 @@ connection.onInitialized(() => {
   connection.client.register(DidChangeWatchedFilesNotification.type, {
     watchers: [{ globPattern: '**/*.crv' }, { globPattern: '**/.carverc.json' }],
   }).catch(warnUnregistered('file watchers'))
+  // Compiling the highlighting grammar takes about half a second; do it before the first token request.
+  setTimeout(() => grammarTokens(''), 0)
 })
 
 connection.onDidChangeConfiguration((change) => {
@@ -267,7 +305,9 @@ documents.onDidChangeContent((event) => {
 })
 documents.onDidClose((event) => {
   editedLines.delete(event.document.uri)
+  upgradePlans.delete(event.document.uri)
   diagnostics.cancel(event.document.uri)
+  pulledIds.delete(event.document.uri)
   // Closing an editor buffer must not make an on-disk workspace document
   // disappear from cross-file navigation.
   const target = fsPath(event.document.uri)
@@ -281,7 +321,7 @@ documents.onDidClose((event) => {
   invalidateIncludedParse(event.document.uri)
   semanticBuilders.delete(event.document.uri)
   if (dependencyIndex.remove(event.document.uri)) refreshWatchers()
-  connection.sendDiagnostics({ uri: event.document.uri, diagnostics: [] })
+  if (!pullDiagnostics) connection.sendDiagnostics({ uri: event.document.uri, diagnostics: [] })
   revalidateIncludingDocuments(event.document.uri)
 })
 
@@ -332,13 +372,46 @@ connection.onRequest(DocumentSymbolRequest.type, (params) => {
 
 connection.onRequest(WorkspaceSymbolRequest.type, (params) => workspaceIndex.symbols(params.query))
 
-connection.languages.diagnostics.on((params) => {
-  const document = documents.get(params.textDocument.uri)
-  return {
-    kind: DocumentDiagnosticReportKind.Full,
-    items: document ? analysisFor(document).diagnostics : [],
+connection.languages.diagnostics.on(async (params, token) => {
+  // vscode-languageclient pulls on every change. Waiting for the debounced
+  // run turns a burst of pulls into one analysis; a pull the client gives up
+  // on (it cancels it on the next change) is answered as cancelled, unanalyzed.
+  const uri = params.textDocument.uri
+  // Cancelled before dispatch: the token's listener would never fire, and the
+  // pull must not count as one that will deliver the next report.
+  if (token.isCancellationRequested) throw new ResponseError(LSPErrorCodes.RequestCancelled, 'superseded by a newer change')
+  livePulls.set(uri, (livePulls.get(uri) ?? 0) + 1)
+  let live = true
+  const release = () => {
+    if (!live) return
+    live = false
+    const count = (livePulls.get(uri) ?? 1) - 1
+    if (count > 0) livePulls.set(uri, count)
+    else livePulls.delete(uri)
   }
+  // A cancelled pull no longer counts as one that will deliver the next report.
+  const subscription = token.onCancellationRequested(release)
+  try {
+    await diagnostics.settled(uri)
+  } finally {
+    subscription.dispose()
+    release()
+  }
+  if (token.isCancellationRequested) throw new ResponseError(LSPErrorCodes.RequestCancelled, 'superseded by a newer change')
+  const document = documents.get(params.textDocument.uri)
+  const items = document ? analysisFor(document).diagnostics : []
+  const resultId = reportId(items)
+  if (document) pulledIds.set(document.uri, resultId)
+  return params.previousResultId === resultId
+    ? { kind: DocumentDiagnosticReportKind.Unchanged, resultId }
+    : { kind: DocumentDiagnosticReportKind.Full, resultId, items }
 })
+
+// Result ids hash the report itself: a report can change without a new version
+// (an included file or a setting changed), so the version cannot stand in.
+function reportId(items: unknown[]): string {
+  return createHash('sha1').update(JSON.stringify(items)).digest('base64url')
+}
 
 // Clients re-pull as soon as a reply arrives, so a reply that is neither
 // "unchanged" nor held open turns into a busy loop over the whole workspace.
@@ -379,7 +452,7 @@ connection.languages.diagnostics.onWorkspace(async (params, token) => {
   return {
     items: [...removed, ...current.map((document): WorkspaceDocumentDiagnosticReport => {
       const items = workspaceIndex.diagnostics(document.uri)
-      const resultId = createHash('sha1').update(JSON.stringify(items)).digest('base64url')
+      const resultId = reportId(items)
       reportedIds.set(document.uri, resultId)
       return known.get(document.uri) === resultId
         ? { uri: document.uri, version: null, kind: DocumentDiagnosticReportKind.Unchanged, resultId }
@@ -433,17 +506,47 @@ connection.onRequest(ExecuteCommandRequest.type, async (params) => {
       return null
     }
   }
+  if (params.command === UPGRADE_COMMAND) return upgradeCommand(uri, params.arguments?.[1])
   if (params.command === 'carve.workspaceGraph') return workspaceGraph(workspaceIndex)
   if (params.command === 'carve.backlinks') return uri ? backlinks(workspaceIndex, uri) : []
   if (params.command === 'carve.generatedNavigation') return generatedNavigation(workspaceIndex, uri)
   if (params.command === 'carve.rebuildImpact') return uri ? rebuildImpact(workspaceIndex, uri) : []
   const document = uri ? documents.get(uri) : undefined
   if (!document) return null
-  const engine = await import('@markup-carve/carve')
   if (params.command === 'carve.previewHtml') return previewHtml(document.getText(), previewIncludeOptions(document))
-  if (params.command === 'carve.showAst') return engine.carveToAstJson(document.getText())
+  if (params.command === 'carve.showAst') return encodeTree(parse(document.getText()))
   return null
 })
+
+/**
+ * `carve.upgrade` with `[uri]`: rewrites the open document from Carve 0.1 to 0.2
+ * as one edit and shows what the upgrade left for a person. A document the
+ * upgrade would render differently is not touched. With `[uri, { review }]`
+ * (the follow-up of the source action) it only shows that text.
+ */
+async function upgradeCommand(uri: string | undefined, options: unknown) {
+  const review = (options as { review?: unknown } | undefined)?.review
+  if (typeof review === 'string') {
+    if (review) void connection.window.showWarningMessage(`Carve 0.2 upgrade, left for review:\n${review}`)
+    return null
+  }
+  const document = uri ? documents.get(uri) : undefined
+  if (!document) return null
+  const { plan, version } = await upgradePlan(document)
+  const result = { applied: false, check: plan.check, records: plan.records }
+  if (!plan.writable) {
+    void connection.window.showWarningMessage(`Not upgraded: Carve 0.2 would render this document differently. Rewrite these lines by hand:\n${reviewSummary(plan)}`)
+    return result
+  }
+  if (plan.edits.length === 0) {
+    if (plan.review.length) void connection.window.showWarningMessage(`Nothing to rewrite, but left for review:\n${reviewSummary(plan)}`)
+    else void connection.window.showInformationMessage('Nothing to upgrade: Carve 0.2 reads this document as it is.')
+    return result
+  }
+  const applied = (await connection.workspace.applyEdit({ label: 'Upgrade to Carve 0.2', edit: upgradeEdit(document.uri, plan, version) }))?.applied === true
+  if (applied && plan.review.length) void connection.window.showWarningMessage(`Upgraded to Carve 0.2. Left for review:\n${reviewSummary(plan, true)}`)
+  return { ...result, applied }
+}
 
 /**
  * `carve.listIndent` with `{ uri, line, direction }`: the edits for that
@@ -462,10 +565,13 @@ connection.onRequest(HoverRequest.type, (params) => {
   return document ? hoverAt(document.getText(), params.position) : null
 })
 
-connection.onRequest(CodeActionRequest.type, (params) => {
+connection.onRequest(CodeActionRequest.type, async (params) => {
   const document = documents.get(params.textDocument.uri)
+  const planned = document && wantsUpgrade(params.context.only) ? await upgradePlan(document) : null
+  const upgrade = planned ? upgradeCodeAction(params.textDocument.uri, planned.plan, codeActionDisabledSupport, planned.version) : null
   return document
     ? [
+        ...(upgrade ? [upgrade] : []),
         ...migrationCodeActions(params.textDocument.uri, document.getText(), params.context.diagnostics),
         ...lintCodeActions(params.textDocument.uri, document.getText(), params.context.diagnostics),
         ...(!params.context.only || params.context.only.some(kind => CodeActionKind.RefactorRewrite === kind || CodeActionKind.RefactorRewrite.startsWith(kind + '.'))
@@ -473,7 +579,7 @@ connection.onRequest(CodeActionRequest.type, (params) => {
               ...tableConversionCodeActions(params.textDocument.uri, document.getText(), params.range.start.line)].filter(action => action !== null)
           : []),
         ...(carveSettings.exportActions ? exportCodeActions(params.textDocument.uri, exportClient, params.context.only, (format) => renderExport(document, format), readExportTarget) : []),
-        ...(carveSettings.exportActions ? [pdfCodeAction(params.textDocument.uri, params.context.only)].filter(action => action !== null) : []),
+        ...(carveSettings.exportActions && pdfExportCommand ? [pdfCodeAction(params.textDocument.uri, params.context.only)].filter(action => action !== null) : []),
       ]
     : []
 })
@@ -515,7 +621,7 @@ connection.onRequest(DocumentFormattingRequest.type, (params) => {
   if (!document) return []
   const text = document.getText()
   const formatted = carveSettings.formatter === 'migration'
-    ? (carveSettings.formatAlignTables ? alignTablesInDocument(carveToCarve(text)) : carveToCarve(text))
+    ? format(text, { alignTables: carveSettings.formatAlignTables === true })
     : formatDocument(carveSettings.formatAlignTables ? alignTablesInDocument(text) : text)
   if (formatted === text) return []
   return [
@@ -651,10 +757,20 @@ function validate(document: TextDocument) {
     ),
   )
   if (changed) refreshWatchers()
-  connection.sendDiagnostics({
-    uri: document.uri,
-    diagnostics: analysis.diagnostics,
-  })
+  if (!pullDiagnostics) {
+    connection.sendDiagnostics({
+      uri: document.uri,
+      diagnostics: analysis.diagnostics,
+    })
+    return
+  }
+  // The client pulls on its own edits and on open; ask it to re-pull only when
+  // a report it already holds changed under it (an included file, a setting).
+  // A pull waiting on this run will carry the new report itself.
+  const pulled = pulledIds.get(document.uri)
+  if (pulled !== undefined && !livePulls.has(document.uri) && pulled !== reportId(analysis.diagnostics)) {
+    connection.languages.diagnostics.refresh()
+  }
 }
 
 function analysisFor(document: TextDocument, includes = includeOptions(document)): Analysis {
@@ -663,6 +779,7 @@ function analysisFor(document: TextDocument, includes = includeOptions(document)
     lint: {
       platforms: carveSettings.platforms,
       extensions: carveSettings.extensions,
+      upgrade: carveSettings.lintUpgrade,
       severities: carveSettings.severities,
     },
     ...(includes ? { includes } : {}),

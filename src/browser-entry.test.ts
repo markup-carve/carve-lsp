@@ -5,7 +5,8 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // Packages the browser entry may reach: the engine and the transport-free protocol helpers.
-const BROWSER_SAFE = new Set(['@markup-carve/carve', 'vscode-languageserver-types', 'vscode-languageserver-textdocument'])
+// The engine root, `/extensions` and `/export` are browser-safe; Node file access is `/node`.
+const BROWSER_SAFE = new Set(['@markup-carve/carve', '@markup-carve/carve/extensions', '@markup-carve/carve/export', 'vscode-languageserver-types', 'vscode-languageserver-textdocument'])
 
 function importGraph(entry: string): { modules: string[]; external: string[] } {
   const seen = new Set<string>()

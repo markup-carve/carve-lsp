@@ -4,6 +4,39 @@ Language server (LSP) for [Carve](https://markup-carve.github.io/carve/) markup 
 Provides editor intelligence for `.crv` files via the
 [Language Server Protocol](https://microsoft.github.io/language-server-protocol/).
 
+## Carve 0.2
+
+This branch serves Carve 0.2. Every engine call goes through the 0.2 API
+(`@markup-carve/carve`), pinned to a carve-js `next2` commit. What an editor
+user notices:
+
+- Diagnostics use the 0.2 lint catalog. Renamed rules keep their meaning under
+  the new id, for example `duplicate-id` (was `duplicate-heading-id`).
+- The 0.1 migration findings (`deprecated-bare-underline`,
+  `deprecated-continuation-marker`, `deprecated-cell-alignment`,
+  `thematic-break-spelling` and the rest of the engine's upgrade rules) are
+  upgrade help and stay off until the `lint.upgrade` setting is on. A `+` line
+  is text in 0.2, so the "Escape the `+`" quick fix is gone.
+- Opt-in 0.2 rules, such as `djot-plus-bullet`, stay off until the `severities`
+  setting names them.
+- Shapes 0.2 reads differently are followed as the engine reads them: a
+  definition inside a quote is text, a tilde run opens no code fence, a GFM
+  separator row is an ordinary table row, and an id in two included files is a
+  duplicate rather than renamed. `spec/0.2/UPGRADING.md` in the Carve
+  repository lists every change.
+- *Export as Markdown* writes through the `markdown` writer that the engine's
+  `@markup-carve/carve/export` entry registers.
+- `carve.showAst` returns the 0.2 tree. Its positions count UTF-8 bytes in
+  `startOffset` and `endOffset` and code points in columns.
+- The `semantic-span` extension colors its span names and reaches lint through
+  the engine's `semanticSpan` extension, so `samp`, `var`, `cite` and `dfn`
+  outside a span report `semantic-attribute-outside-span`.
+
+Include expansion goes through the engine's `includes` option, region
+selection through `includeRegion`. The migration quick fixes and *Fix all Carve
+migration collisions* apply the rewrites of `carve lint --fix` through the
+engine's `fixEdits` and `fix`.
+
 ## Install
 
 ```bash
@@ -28,13 +61,13 @@ The server communicates over **stdio** (`--stdio` flag).
 | Completion | Container kinds (admonitions, placement markers, extension containers), code fence languages, attributes, semantic spans, citations, references, heading titles as `[Heading][]` links, workspace anchors, and contained include paths, sections and options |
 | Navigation | Document links, go-to-definition, highlights, and references for anchors, captions, footnotes, citations, and link labels |
 | Rename | Namespace-aware rename: anchors, captions and citation keys across the workspace, footnote and link labels within their document; generated heading ids become explicit when renamed |
-| Code actions | Migration and lint quick-fixes, table marker repair, table conversion, creation of missing definitions, and export to Markdown or HTML |
+| Code actions | Migration and lint quick-fixes, table marker repair, table conversion, creation of missing definitions, export to Markdown or HTML, and the Carve 0.1 to 0.2 upgrade (`source.upgrade`) |
 | Code lens | Reference counts for anchors, captions, citations, footnotes, and link labels |
 | Selection and folding | Syntax-aware selection expansion and folding, with tolerant fallbacks during incomplete edits |
 | Formatting | Conservative document/range formatting, on-type continuation (see below), or explicit migration formatting |
-| Semantic tokens | Full, ranged, and delta token updates, including table structure and alignment metadata |
+| Semantic tokens | Full, ranged, and delta token updates, read from the carve-grammars TextMate grammar, so the server and an editor using that grammar color a line the same way; the document tree adds the attribute keys a block consumes and the semantic span names |
 | Inlay hints | Generated heading ids, colon-fence closers, and a `list item` / `task` hint after a bare list marker on the line being edited (configurable) |
-| Commands | Preview/AST output, list indent/outdent (`carve.listIndent`), workspace graph, backlinks, generated navigation, and transitive rebuild impact |
+| Commands | Preview/AST output, list indent/outdent (`carve.listIndent`), the 0.1 to 0.2 upgrade (`carve.upgrade`), workspace graph, backlinks, generated navigation, and transitive rebuild impact |
 | File inclusion | Resolves `{{ path }}` directives, watches dependencies, and reports failures as diagnostics - **off by default**, see below |
 
 ### Table code actions
@@ -47,11 +80,10 @@ Use **Align table** to line up pipe table cells. **Convert to pipe table** chang
 |---|---|
 | `blockquote-marker-without-space` | Insert the space after `>` |
 | `table-marker-run-padding` | Insert the space that ends a table cell's marker run |
-| `deprecated-cell-alignment` | Rewrite a 0.1.13 alignment prefix in the braced spelling, `\|=>` as `\|={>}` |
+| `deprecated-cell-alignment` | Rewrite a 0.1.13 alignment prefix in the braced spelling, `\|=>` as `\|={>}` (upgrade mode only, see `lint.upgrade`) |
 | `colon-fence-length-mismatch` | Resize the colon run, or keep it as literal text |
 | `unresolved-footnote`, `unresolved-reference-link` | Append the missing definition |
-| `continuation-marker-refused`, `refused-continuation-marker` | Escape the `+` as text, offered only when the output stays the same |
-| `list-marker-below-content-column` | Indent the marker to nest it, or outdent it to the item's own column |
+| `list-marker-below-content-column` | Indent the marker to the deeper list's column, or outdent it to the outer list's column |
 | `description-separator-below-content-column` | Indent the separator to continue the definition list |
 | `consumed-key-near-miss` | Replace the misspelled key with the one the engine suggests |
 
@@ -115,6 +147,32 @@ The heading list stays empty until the text after `[` matches a heading, so
 ordinary link text and bracketed prose get no popup. `![`, `[[`, `\[`, `[^`
 and `[@` are left to their own completions.
 
+## Upgrade from Carve 0.1
+
+*Upgrade to Carve 0.2* (kind `source.upgrade`) rewrites a Carve 0.1 document
+with the engine's upgrade tool (`upgrade` from `@markup-carve/carve/upgrade`)
+and applies the changes as one edit. It is listed among the source actions
+when the upgrade would change the document; a request without `only`, such as
+a cursor move, does not run the upgrade. The `carve.upgrade` command does the
+same for a host that binds it to a menu entry:
+
+```json
+{ "command": "carve.upgrade", "arguments": ["file:///notes.crv"] }
+```
+
+It returns `{ applied, check, records }`, the engine's check and upgrade
+records.
+
+- What the upgrade cannot decide for you (a `report` entry such as a tab
+  without a title, or an `unverified explanation`) is not applied; the action
+  title counts those places and a message lists them by line after the edit.
+- When the engine's self-check finds that 0.2 would render the document
+  differently (`check: mismatch`), nothing is applied: the action is shown
+  disabled with the reason where the client supports that, and the command
+  shows the lines to rewrite by hand.
+- The input is read as Carve 0.1. Running the upgrade on text that already
+  uses 0.2-only syntax, such as `= Heading`, escapes it.
+
 ## List indent and outdent
 
 Hosts indent a line by a fixed amount, but Carve nests a list item only when
@@ -149,18 +207,19 @@ Clients can send these under `carve` in initialization options or
 `.carverc.json` in the workspace roots and watches it for changes. Settings
 merge key by key: a key the client sends wins, a key it leaves out comes from
 `.carverc.json`, and anything set in neither uses the default. Object
-settings (`format`, `severities`, `inlayHints`) merge one level deeper, so a
+settings (`format`, `lint`, `severities`, `inlayHints`) merge one level deeper, so a
 client severity for one code keeps the project severities for the others.
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `platforms` | `[]` | Extra platform lint profiles. Currently supports `"github"`. |
-| `extensions` | `[]` | Enabled extension names. `"semantic-span"` colors `samp`, `var`, `cite`, and `dfn` as keywords in span attributes. |
+| `extensions` | `[]` | Enabled extension names. `"semantic-span"` colors `samp`, `var`, `cite`, and `dfn` as keywords in span attributes. It also turns on the lint rules for those attributes, such as `semantic-attribute-outside-span`. |
 | `inlayHints` | `true` | Show inlay hints: generated heading identifiers, colon-fence closers, and the bare list marker hint. `false` turns all of them off; an object such as `{ "bareListMarkers": false }` keeps the others and turns that one off. |
-| `exportActions` | `true` | Offer the *Export as Markdown*, *Export as HTML*, and *Export as PDF* source actions. Editors with their own export commands can turn this off. |
+| `exportActions` | `true` | Offer the *Export as Markdown* and *Export as HTML* source actions, plus *Export as PDF* when the client opts in to its server command. Editors with their own export commands can turn this off. |
 | `formatter` | `"conservative"` | Use whitespace-only conservative formatting; `"migration"` opts into canonical whole-document conversion. |
 | `format.alignTables` | `false` | Align table cells in document, range, and on-type formatting. The *Align table* action works without this setting. |
-| `severities` | `{}` | Override a diagnostic code with `"error"`, `"warning"`, `"information"`, `"hint"`, or `"off"`. |
+| `lint.upgrade` | `false` | Lint upgrade mode: run the 0.1 migration rules (`deprecated-*`, `thematic-break-spelling` and the other upgrade rules) and offer their quick fixes. Turn it on while moving a 0.1 document to 0.2. A document whose line-1 frontmatter declares Carve 0.1 gets these findings without it. |
+| `severities` | `{}` | Override a diagnostic code with `"error"`, `"warning"`, `"information"`, `"hint"`, or `"off"`. Any value but `"off"` also turns an opt-in 0.2 rule on, and `"off"` turns a rule off in the engine. |
 
 When table alignment is enabled, the selected table uses canonical Carve cell spelling before padding. Other source remains in the conservative formatter's form.
 
@@ -174,6 +233,7 @@ Example `.carverc.json`:
     "inlayHints": { "bareListMarkers": true },
     "formatter": "conservative",
     "format": { "alignTables": true },
+    "lint": { "upgrade": false },
     "severities": { "table-width-total": "error" }
   }
 }
@@ -241,8 +301,9 @@ ordinary layout. Remote URLs are never fetched. Recursion depth and total
 expanded bytes are both bounded, so a file that includes another many times
 cannot amplify without limit.
 
-A target that is simply missing produces an `include-unresolved` diagnostic on
-the directive. A target that was REFUSED produces `include-denied` instead, and
+A target that is simply missing produces an `include-not-found` diagnostic on
+the directive, and a resolver that fails produces `include-unreadable`. A
+target that was REFUSED produces `include-denied` instead, and
 says which policy refused it - outside the include root, an absolute path, or a
 remote URL - because being told a file "could not be resolved" when it is
 sitting right there sends an author looking for a typo that is not there. A
@@ -280,13 +341,21 @@ same limits as diagnostics, so a refused or over-budget directive stays literal
 in the preview. Without `includeRoot` the preview renders the source as
 written, with every directive literal.
 
-The source actions *Export as Markdown*, *Export as HTML*, and *Export as PDF*
-(kind `source.export`) write next to the source: `notes.crv` becomes `notes.md`,
+The source actions *Export as Markdown* and *Export as HTML*, plus *Export as PDF*
+when enabled by the client, write next to the source (kind `source.export`):
+`notes.crv` becomes `notes.md`,
 `notes.html`, or `notes.pdf`. The text exports expand includes on the same terms as
 the preview. A missing target is created, an existing one is replaced as a
 whole. The text actions are offered only to clients that support creating files
 in a workspace edit. All three can be turned off with the `exportActions`
 setting. Most editors apply text edits to a buffer and leave saving to the user.
+
+The PDF command id `carve.exportPdf` may also be registered by an editor
+extension. To avoid registering it twice, the server does not advertise the
+command or offer its PDF action by default. A client that can safely route the
+server command can set `initializationOptions.carve.pdfExportCommand` to `true`.
+This option is read at initialization, not from `.carverc.json` or a later
+configuration change.
 
 *Export as PDF* runs `crv2pdf` from `PATH` first, using the current document
 buffer, or the executable set in the `carve.pdf.crv2pdfPath` initialization
@@ -296,7 +365,7 @@ installed Chrome, Chromium, or Edge browser in headless mode. Set
 under `carve` in LSP initialization options, for example:
 
 ```json
-{ "carve": { "pdf": { "crv2pdfPath": "/path/to/crv2pdf", "browserPath": "/path/to/chromium" } } }
+{ "carve": { "pdfExportCommand": true, "pdf": { "crv2pdfPath": "/path/to/crv2pdf", "browserPath": "/path/to/chromium" } } }
 ```
 
 The PDF action runs as a server command, so it works even when the client does

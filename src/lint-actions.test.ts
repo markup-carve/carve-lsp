@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { carveToHtml } from '@markup-carve/carve'
+import { render } from './engine.js'
 import { analyzeCarve } from './analyze.js'
 import { lintCodeActions } from './lint-actions.js'
 
@@ -53,8 +53,11 @@ test('a created definition is separated from a trailing paragraph', () => {
   assert.equal(newText('Some text[^x]\r\n', 'unresolved-footnote'), '\r\n[^x]: ')
 })
 
+// C2-W-156: the `deprecated-*` migration rules fire only in lint upgrade mode.
+const UPGRADE = { lint: { upgrade: true } }
+
 function applyFirst(source: string, title?: string): string | undefined {
-  const diagnostics = analyzeCarve(source).diagnostics
+  const diagnostics = analyzeCarve(source, UPGRADE).diagnostics
   const actions = lintCodeActions('file:///a.crv', source, diagnostics)
   const action = title ? actions.find((candidate) => candidate.title.startsWith(title)) : actions[0]
   const edit = action?.edit?.changes?.['file:///a.crv']?.[0]
@@ -65,19 +68,11 @@ function applyFirst(source: string, title?: string): string | undefined {
   return lines.join('\n')
 }
 
-// carve#5736: own-line refusals report `refused-continuation-marker`, first-block ones keep the old code.
-const isRefusal = (code: unknown) => code === 'continuation-marker-refused' || code === 'refused-continuation-marker'
-
-test('escapes a refused continuation marker without changing the output', () => {
-  for (const source of ['[^n]: a\n+\n']) {
-    const fixed = applyFirst(source, 'Escape the +')
-    assert.ok(fixed, source)
-    assert.equal(carveToHtml(fixed), carveToHtml(source))
-    assert.deepEqual(analyzeCarve(fixed).diagnostics.filter((d) => isRefusal(d.code)), [])
-  }
-  // A refused `+` that renders nothing (carve#4409) would gain a character, so no escape is offered.
-  for (const source of ['- a\n+\n- b\n', '- a\n+\n\n- b\n', '- +\n  a\n']) {
-    assert.ok(analyzeCarve(source).diagnostics.some((d) => isRefusal(d.code)), source)
+// 0.2 C2-B-059: the `+` continuation marker is gone; a `+` line is text and
+// `deprecated-continuation-marker` replaces the 0.1 refusal codes, with no escape to offer.
+test('a 0.2 plus line is text and gets no escape action', () => {
+  for (const source of ['[^n]: a\n+\n', '- a\n+\n- b\n', '- a\n+\n\n- b\n']) {
+    assert.ok(analyzeCarve(source, UPGRADE).diagnostics.some((d) => d.code === 'deprecated-continuation-marker'), source)
     assert.equal(applyFirst(source, 'Escape the +'), undefined, source)
   }
 })
@@ -86,40 +81,45 @@ test('rewrites a deprecated alignment prefix in the braced spelling (carve#5091 
   for (const [source, expected] of [
     ['|=> Price |= Name |\n| 1 | a |\n', '|={>} Price |= Name |\n| 1 | a |\n'],
     ['|= Price |= Name |\n| 1 |> a |\n', '|= Price |= Name |\n| 1 |{>} a |\n'],
-    ['|=~{.x} Mid |\n', '|={~ .x} Mid |\n'],
     ['> |=<v Top |\n', '> |={<v} Top |\n'],
   ] as const) {
     const fixed = applyFirst(source, 'Write the alignment')
     assert.equal(fixed, expected, source)
-    assert.equal(carveToHtml(fixed!), carveToHtml(source), source)
-    assert.deepEqual(analyzeCarve(fixed!).diagnostics.filter((d) => d.code === 'deprecated-cell-alignment'), [], source)
+    // 0.2 C2-B-171, C2-B-182: the old prefix is cell text, so the rewrite restores the 0.1 alignment
+    // and the rendering changes; it no longer matches the unfixed source.
+    assert.notEqual(render(fixed!), render(source), source)
+    assert.deepEqual(analyzeCarve(fixed!, UPGRADE).diagnostics.filter((d) => d.code === 'deprecated-cell-alignment'), [], source)
   }
 })
 
-test('terminates any table cell marker run the engine reports', () => {
-  for (const [source, expected] of [
-    ['|=>x |= b |\n', '|=> x |= b |\n'],
-    ['|={>}x |= b |\n', '|={>} x |= b |\n'],
-    ['|=x |= b |\n', '|= x |= b |\n'],
-    ['| a |{.a}x |\n', '| a |{.a} x |\n'],
-  ] as const) assert.equal(applyFirst(source, 'Terminate'), expected, source)
+test('rewrites a deprecated alignment run with a glued brace block', () => {
+  assert.equal(applyFirst('|=~{.x} Mid |\n', 'Write the alignment'), '|={~ .x} Mid |\n')
+})
+
+// 0.2 C2-B-171: a cell's text starts right after its prefix, so these runs are no findings
+// and `table-marker-run-padding` reports only a block glued to an alignment mark.
+test('a cell run glued to its text is no 0.2 finding and gets no action', () => {
+  for (const source of ['|=>x |= b |\n', '|={>}x |= b |\n', '|=x |= b |\n', '| a |{.a}x |\n']) {
+    assert.equal(applyFirst(source, 'Terminate'), undefined, source)
+  }
 })
 
 test('moves a list marker below the content column to either column the engine names', () => {
-  assert.equal(applyFirst('- a\n\n - b\n', 'Indent'), '- a\n\n  - b\n')
-  assert.equal(applyFirst('- a\n\n - b\n', 'Outdent'), '- a\n\n- b\n')
-  assert.equal(applyFirst('> - a\n>\n>  - b\n', 'Indent'), '> - a\n>\n>   - b\n')
-  assert.equal(applyFirst('> - a\n>\n>  - b\n', 'Outdent'), '> - a\n>\n> - b\n')
-  assert.equal(applyFirst('10. a\n\n  - b\n', 'Indent'), '10. a\n\n    - b\n')
-  for (const fixed of ['- a\n\n  - b\n', '- a\n\n- b\n', '> - a\n>\n>   - b\n', '> - a\n>\n> - b\n']) {
+  // 0.2 C2-B-025/C2-B-027: a marker short of the item's text with no nested list open is item
+  // body (`list-item-body-below-content-column`), so the finding needs a nested list to sit between.
+  assert.equal(applyFirst('- a\n  - b\n - c\n', 'Indent'), '- a\n  - b\n  - c\n')
+  assert.equal(applyFirst('- a\n  - b\n - c\n', 'Outdent'), '- a\n  - b\n- c\n')
+  assert.equal(applyFirst('> - a\n>   - b\n>  - c\n', 'Indent'), '> - a\n>   - b\n>   - c\n')
+  assert.equal(applyFirst('> - a\n>   - b\n>  - c\n', 'Outdent'), '> - a\n>   - b\n> - c\n')
+  for (const fixed of ['- a\n  - b\n  - c\n', '- a\n  - b\n- c\n', '> - a\n>   - b\n>   - c\n', '> - a\n>   - b\n> - c\n']) {
     assert.deepEqual(analyzeCarve(fixed).diagnostics.filter((d) => d.code === 'list-marker-below-content-column'), [], fixed)
   }
 })
 
 test('indents a description separator below its list to the column the engine names', () => {
-  assert.equal(applyFirst('- a\n  :: term\n : detail\n', 'Indent'), '- a\n  :: term\n  : detail\n')
-  assert.equal(applyFirst('- a\n  :: term\n: detail\n', 'Indent'), '- a\n  :: term\n  : detail\n')
-  assert.deepEqual(analyzeCarve('- a\n  :: term\n  : detail\n').diagnostics.filter((d) => d.code === 'description-separator-below-content-column'), [])
+  assert.equal(applyFirst('- a\n\n  :: term\n : detail\n', 'Indent'), '- a\n\n  :: term\n  : detail\n')
+  assert.equal(applyFirst('- a\n\n  :: term\n: detail\n', 'Indent'), '- a\n\n  :: term\n  : detail\n')
+  assert.deepEqual(analyzeCarve('- a\n\n  :: term\n  : detail\n').diagnostics.filter((d) => d.code === 'description-separator-below-content-column'), [])
 })
 
 test('replaces a near-miss consumed key with the key the engine suggests', () => {

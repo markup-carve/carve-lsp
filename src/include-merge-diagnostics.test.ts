@@ -38,7 +38,8 @@ test('the clamp names the level it asked for and the level it got', () => {
   const result = resolveIncludes('{{ a @shift:+3 }}', {
     resolver: virtualResolver({ a: '##### Deep\n' }),
   })
-  assert.match(result.warnings[0]?.message ?? '', /8 was clamped to 6/)
+  // 0.2 C2-N-048: the engine's `include-heading-clamp` wording names the kept level.
+  assert.match(result.warnings[0]?.message ?? '', /kept at level 6/)
 })
 
 test('a shift that stays inside the range clamps nothing', () => {
@@ -69,14 +70,14 @@ test('a clamp carries the position inside the child it happened in', () => {
 
 // --- a heading id the parent already claimed ------------------------------
 
-test('an id the parent already claimed is reported as renamed', () => {
+test('an id the parent already claimed is reported as renamed', { skip: '0.2 C2-N-057: nothing is renamed, `duplicate-id` reports it (C2-N-058)' }, () => {
   const result = resolveIncludes('{#intro}\n# Parent\n\n{{ a }}\n', {
     resolver: virtualResolver({ a: '{#intro}\n# Child\n' }),
   })
   assert.deepEqual(rules(result.warnings), ['include-id-rename'])
 })
 
-test('the rename names both the taken id and the one it was given', () => {
+test('the rename names both the taken id and the one it was given', { skip: '0.2 C2-N-057: nothing is renamed' }, () => {
   const result = resolveIncludes('{#intro}\n# Parent\n\n{{ a }}\n', {
     resolver: virtualResolver({ a: '{#intro}\n# Child\n' }),
   })
@@ -92,14 +93,14 @@ test('an id nothing else claims is left alone', () => {
 
 // --- a footnote label the parent already defined --------------------------
 
-test('a footnote label the parent already defined is reported as renamed', () => {
+test('a footnote label the parent already defined is reported as renamed', { skip: '0.2 C2-N-055: two files may each define a footnote key, no rename' }, () => {
   const result = resolveIncludes('Parent[^a].\n\n[^a]: Parent note.\n\n{{ a }}\n', {
     resolver: virtualResolver({ a: 'Child[^a].\n\n[^a]: Child note.\n' }),
   })
   assert.deepEqual(rules(result.warnings), ['include-footnote-rename'])
 })
 
-test('a footnote rename is attributed to the child that carried the label', () => {
+test('a footnote rename is attributed to the child that carried the label', { skip: '0.2 C2-N-055: no footnote rename' }, () => {
   const result = resolveIncludes('Parent[^a].\n\n[^a]: Parent note.\n\n{{ a }}\n', {
     resolver: virtualResolver({ a: 'Child[^a].\n\n[^a]: Child note.\n' }),
     sourcePath: '/root.crv',
@@ -116,7 +117,7 @@ test('a label nothing else defines is left alone', () => {
 
 // --- block content at an inline position ----------------------------------
 
-test('an inline directive resolving to block content is reported', () => {
+test('an inline directive resolving to block content is reported', { skip: '0.2 C2-N-002: there is no inline include' }, () => {
   const result = resolveIncludes('See {{ a }} here.\n', {
     resolver: virtualResolver({ a: '# Heading\n\nBody.\n' }),
   })
@@ -139,7 +140,7 @@ test('the same block child at a BLOCK position is fine', () => {
   assert.deepEqual(result.warnings, [])
 })
 
-test('a block-in-inline warning is anchored on the directive, not the sentence', () => {
+test('a block-in-inline warning is anchored on the directive, not the sentence', { skip: '0.2 C2-N-002: there is no inline include' }, () => {
   const source = 'See {{ a }} here.\n'
   const result = resolveIncludes(source, {
     resolver: virtualResolver({ a: '# Heading\n\nBody.\n' }),

@@ -1,4 +1,4 @@
-import { parse } from '@markup-carve/carve'
+import { parse } from './engine.js'
 
 /**
  * Converts between the units Carve positions and LSP positions count.
@@ -174,54 +174,55 @@ export function characterToAstColumn(lineText: string, character: number): numbe
 }
 
 /**
- * An OFFSET as the installed parser reports it, to the index a JavaScript
- * string is sliced by.
- *
- * The same divergence as the column pair above, one axis over: an offset into
- * the whole document rather than into a line. It is the conversion a position
- * computed by slicing the source needs, and only for offsets the PARSER
- * produced - `djotMigrationWarnings` reports UTF-16 offsets, and passing one
- * through here would move it.
+ * A tree OFFSET, which counts UTF-8 bytes in Carve 0.2 (C2-A-140), to the index
+ * a JavaScript string is sliced by. An offset past the end keeps its distance.
  */
 export function astOffsetToIndex(source: string, offset: number): number {
-  if (engineColumnUnit() !== 'codepoint') return offset
+  const { table, bytes } = byteIndex(source)
+  if (offset >= bytes) return source.length + (offset - bytes)
   if (offset <= 0) return 0
-
-  const { table, codepoints } = codepointIndex(source)
-  // An offset past the end keeps its distance rather than collapsing onto it,
-  // for the same reason the column conversion does: an end offset is exclusive.
-  if (offset >= codepoints) return source.length + (offset - codepoints)
   return table === null ? offset : table[offset]!
 }
 
-// Callers convert every node of one document in turn, so rescanning from the
-// start per call made each document quadratic (seconds per large file).
+// Callers convert every node of one document in turn, so encoding and walking
+// the source per call made each document quadratic (seconds per large file).
 let indexedSource: string | undefined
-let indexedTable: { table: Uint32Array | null; codepoints: number } = { table: null, codepoints: 0 }
+let indexedBytes: { table: Uint32Array | null; bytes: number } = { table: null, bytes: 0 }
 
-function codepointIndex(source: string): { table: Uint32Array | null; codepoints: number } {
-  if (source === indexedSource) return indexedTable
-
-  let astral = false
-  let codepoints = 0
-  for (let index = 0; index < source.length; codepoints += 1) {
-    const wide = (source.codePointAt(index) ?? 0) > 0xffff
-    if (wide) astral = true
-    index += wide ? 2 : 1
-  }
-
-  let table: Uint32Array | null = null
-  if (astral) {
-    table = new Uint32Array(codepoints + 1)
-    let index = 0
-    for (let counted = 0; counted < codepoints; counted += 1) {
-      table[counted] = index
-      index += (source.codePointAt(index) ?? 0) > 0xffff ? 2 : 1
-    }
-    table[codepoints] = index
-  }
-
+/** Byte offset to the string index of the character that byte falls in, as `stringOffsetOfByte` maps it. */
+function byteIndex(source: string): { table: Uint32Array | null; bytes: number } {
+  if (source === indexedSource) return indexedBytes
   indexedSource = source
-  indexedTable = { table, codepoints }
-  return indexedTable
+  if (!/[^\x00-\x7f]/.test(source)) return (indexedBytes = { table: null, bytes: source.length })
+
+  const bytes = utf8LengthOf(source)
+  const table = new Uint32Array(bytes + 1)
+  let byte = 0
+  for (let index = 0; index < source.length;) {
+    const point = source.codePointAt(index)!
+    const pair = point > 0xffff
+    const width = pair ? 4 : point < 0x80 ? 1 : point < 0x800 ? 2 : 3
+    table.fill(index, byte, byte + width)
+    byte += width
+    index += pair ? 2 : 1
+  }
+  table[bytes] = source.length
+  return (indexedBytes = { table, bytes })
+}
+
+function utf8LengthOf(source: string): number {
+  return new TextEncoder().encode(source).length
+}
+
+/**
+ * A CODEPOINT offset, as `IncludeWarning` reports it, to a string index.
+ */
+export function codepointOffsetToIndex(source: string, offset: number): number {
+  let index = 0
+  let counted = 0
+  while (index < source.length && counted < offset) {
+    index += (source.codePointAt(index) ?? 0) > 0xffff ? 2 : 1
+    counted += 1
+  }
+  return index + Math.max(0, offset - counted)
 }

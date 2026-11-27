@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { carveToHtml } from '@markup-carve/carve'
+import { render } from './engine.js'
 import { continuationEdits, continuationPrefix, formatDocument, formatRange, listContinuationEdits } from './format.js'
 
 test('adds a missing final line ending', () => {
@@ -68,16 +68,16 @@ test('inserts a matching closer after a code fence opener', () => {
   for (const [before, closer] of [
     ['```js', '\n```'],
     ['```', '\n```'],
-    ['~~~', '\n~~~'],
     ['````js', '\n````'],
-    ['~~~~ py "title" [lbl]', '\n~~~~'],
     ['```js "t"', '\n```'],
     ['``` =html', '\n```'],
     ['::: note\n```js', '\n```'],
     ['- a\n\n  ```js', '\n  ```'],
   ] as const) assert.equal(prefixAfter(before), closer, before)
+  // 0.2 U-116: a tilde run opens no fence, so no closer follows it.
+  for (const before of ['~~~', '~~~~ py "title" [lbl]']) assert.equal(prefixAfter(before), '', before)
   // The closer lands as the block's own closing fence.
-  const html = carveToHtml('```js\nx' + prefixAfter('```js') + '\n')
+  const html = render('```js\nx' + prefixAfter('```js') + '\n')
   assert.equal(html, '<pre><code class="language-js">x\n</code></pre>')
 })
 
@@ -127,7 +127,7 @@ test('a colon fence opened in a container writes the lead before the cursor and 
     assert.equal(prefixAfter(before), expected, before)
     // The body typed at the cursor lands inside the container.
     const [lead, closer] = expected.split('\n')
-    const html = carveToHtml(`x[^1]\n\n${before}\n${lead}body\n${closer}\n`)
+    const html = render(`x[^1]\n\n${before}\n${lead}body\n${closer}\n`)
     assert.match(html, /<aside[^>]*>\s*<p>body<\/p>\s*<\/aside>/, before)
   }
   // Already closed: only the lead.
@@ -140,16 +140,16 @@ test('list continuation leaves a colon fence on a marker line to the fence conti
 })
 
 test('keeps a missing final line ending missing when adding it changes the render', () => {
-  assert.equal(formatDocument('```\nx'), '```\nx')
+  // 0.2 C2-B-222: an unclosed fence's last line keeps its line feed, so adding one no longer changes the render.
+  assert.equal(formatDocument('```\nx'), '```\nx\n')
   assert.equal(formatDocument('```\nx\n```'), '```\nx\n```\n')
 })
 
-test('formatting stays render-equivalent when a corpus document loses its final newline', async () => {
-  const { readdirSync, readFileSync } = await import('node:fs')
-  const dir = new URL('../tests/spec/tests/corpus/', import.meta.url)
-  for (const name of readdirSync(dir).filter((entry) => entry.endsWith('.crv'))) {
-    const source = readFileSync(new URL(name, dir), 'utf8').replace(/\r?\n$/, '')
-    assert.equal(carveToHtml(formatDocument(source)), carveToHtml(source), name)
+test('formatting stays render-equivalent when a spec example loses its final newline', async () => {
+  const { specDocuments } = await import('./spec-examples.js')
+  for (const { name, source: whole } of specDocuments()) {
+    const source = whole.replace(/\r?\n$/, '')
+    assert.equal(render(formatDocument(source)), render(source), name)
   }
 })
 

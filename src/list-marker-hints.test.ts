@@ -46,7 +46,8 @@ test('hints a bare marker in a list inside a container', () => {
   assert.deepEqual(labels('- first\r- ', 1), ['list item'])
   assert.deepEqual(labels('> - [x] done\n> - [ ] ', 1), ['task'])
   assert.deepEqual(labels('> > - a\n> > - ', 1), ['list item'])
-  assert.deepEqual(labels('- item\n  > - a\n  > - ', 2), ['list item'])
+  // 0.2 U-006: a quote directly under item text is text, so a blank line opens it.
+  assert.deepEqual(labels('- item\n\n  > - a\n  > - ', 3), ['list item'])
   assert.deepEqual(labels('> ::: note\n> - a\n> - ', 2), ['list item'])
   assert.deepEqual(labels(':: term\n: - first\n  - ', 2), ['list item'])
   assert.deepEqual(labels('[^a]:   - first\n  - ', 1), ['list item'])

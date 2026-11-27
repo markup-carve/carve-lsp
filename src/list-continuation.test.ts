@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
-import { carveToHtml } from '@markup-carve/carve'
+import { render } from './engine.js'
 import { BARE_CONTINUATION_MARKER, listContinuationEdits } from './format.js'
 import { listDelim } from './list-items.js'
 import { LspStdioClient } from './lsp-stdio-client.js'
@@ -53,7 +53,8 @@ test('the next marker follows the list, not the letter', () => {
   assert.equal(inserted('iv.  one'), 'v.   ')
   assert.equal(inserted('z.  last'), null)
   assert.equal(inserted('007. item'), '008. ')
-  assert.equal(inserted('999999999. item'), '1000000000. ')
+  // 0.2 U-025: a ten-digit ordered marker is text, so the list offers no next marker.
+  assert.equal(inserted('999999999. item'), null)
 })
 
 test('the content column stays put when the marker changes width', () => {
@@ -123,7 +124,8 @@ test('a list inside a container continues after the container prefix', () => {
     ['> - [x] done', '> - [ ] '],
     ['> - a\n>   - nested', '>   - '],
     ['> > - a', '> > - '],
-    ['- item\n  > - a', '  > - '],
+    // 0.2 U-006: a quote directly under item text is text, so a blank line opens it.
+    ['- item\n\n  > - a', '  > - '],
     ['- a\n\n  > - b', '  > - '],
     ['> ::: note\n> - a', '> - '],
     // A footnote body continues at the two-space body indent, whatever the label's width.
@@ -132,11 +134,12 @@ test('a list inside a container continues after the container prefix', () => {
     ['[^😀]: - first', '  - '],
     ['[^a]: - first\n  - second', '  - '],
     ['[^a]: 1. first', '  2. '],
-    ['> [^a]: - first', '>   - '],
     // A description body continues at its content column.
     [':: term\n: - first', '  - '],
     [':: term\n:   1. first', '    2. '],
   ] as const) assert.equal(inserted(before), next, before)
+  // 0.2 C2-B-081: a definition inside a quote is text, so no list opens there.
+  assert.equal(inserted('> [^a]: - first'), null)
 })
 
 test('the container prefix and the marker are one edit', () => {
@@ -152,7 +155,7 @@ test('Enter on a content-less marker in a container ends the list and keeps the 
   for (const [before, kept, cursor] of [
     ['> - a\n> - ', '>', '> '],
     ['> > - a\n> > - ', '> >', '> > '],
-    ['- item\n  > - a\n  > - ', '  >', '  > '],
+    ['- item\n\n  > - a\n  > - ', '  >', '  > '],
     ['> ::: note\n> - a\n> - ', '>', '> '],
   ] as const) {
     const markerLine = before.split('\n').length - 1
@@ -251,7 +254,7 @@ test('an item with attributes continues with a plain marker', () => {
     ['- a\n-{.c} b', '- '],
   ] as const) assert.equal(inserted(before), next, before)
   // The plain marker joins the attributed item's list.
-  assert.equal(carveToHtml(`${applied('1.{.c} a')}b\n`), '<ol>\n  <li class="c">a</li>\n  <li>b</li>\n</ol>')
+  assert.equal(render(`${applied('1.{.c} a')}b\n`), '<ol>\n  <li class="c">a</li>\n  <li>b</li>\n</ol>')
 })
 
 test('a description term or definition continues with a definition marker', () => {
@@ -266,7 +269,7 @@ test('a description term or definition continues with a definition marker', () =
     ['- a\n\n  :: t\n  : d', '  : '],
   ] as const) assert.equal(inserted(before), next, before)
   for (const before of [':: term', ':: t\n: def', '> :: t\n> : d']) {
-    const html = carveToHtml(`${applied(before)}more\n`)
+    const html = render(`${applied(before)}more\n`)
     assert.match(html, /<dd>more<\/dd>/, before)
   }
 })
@@ -306,7 +309,7 @@ test('Enter on a content-less quote line drops one quote level', () => {
     { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } }, newText: '>' },
     { range: { start: { line: 1, character: 0 }, end: { line: 1, character: 0 } }, newText: '> ' },
   ])
-  assert.equal(carveToHtml(`${applied('> > q\n> > ')}x\n`), '<blockquote>\n  <blockquote><p>q</p></blockquote>\n  <p>x</p>\n</blockquote>')
+  assert.equal(render(`${applied('> > q\n> > ')}x\n`), '<blockquote>\n  <blockquote><p>q</p></blockquote>\n  <p>x</p>\n</blockquote>')
 })
 
 test('quote lines with content, or a bare `>`, are not ended', () => {

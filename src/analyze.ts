@@ -8,23 +8,26 @@ import {
   type Range,
 } from 'vscode-languageserver-types'
 import {
-  djotMigrationWarnings,
-  lintCarve,
+  CarveOptionError,
+  lint,
   parse,
-  resolve,
+  semanticSpan,
   type BlockNode,
+  type CaptionNode,
   type Document,
+  type EngineDiagnostic,
   type Heading,
+  type IncludeConfig,
   type InlineNode,
-  type LintPlatform,
-} from '@markup-carve/carve'
+  type LintOptions,
+} from './engine.js'
 import { portableIncludePaths, type IncludePaths } from './include-paths.js'
 import { smartPunctuationText } from './inline-text.js'
 import { panelLetter } from './captions.js'
 import { includeDenialCode } from './include-denial.js'
 import {
-  engineIncludeResolver,
   resolveIncludes,
+  v2IncludeConfig,
   type IncludeDependency,
   type IncludeOptions,
   type IncludeResolution,
@@ -33,17 +36,20 @@ import {
 import type { IncludeParseCache } from './include-cache.js'
 import { tableDiagnostics } from './table-diagnostics.js'
 import { colonFenceStructure } from './colon-fences.js'
-import { astOffsetToIndex, sourceLines } from './position.js'
+import { astOffsetToIndex, codepointOffsetToIndex, sourceLines } from './position.js'
 import { walkNodes } from './ast-walk.js'
 import { headingSections } from './folding.js'
 import { resolvedDocument } from './parse-cache.js'
+import { captionInlines, isFigure, ownStartLine } from './tree.js'
 
 export interface AnalyzeOptions {
   /** URI used for diagnostic related-information locations. */
   uri?: string
   lint?: {
-    platforms?: readonly LintPlatform[]
+    platforms?: readonly 'github'[]
     extensions?: readonly string[]
+    /** Run the 0.1 migration rules (`deprecated-*`, C2-W-156), which 0.2 lint keeps off by default. */
+    upgrade?: boolean
     severities?: Readonly<Record<string, 'error' | 'warning' | 'information' | 'hint' | 'off'>>
   }
   /**
@@ -70,6 +76,8 @@ export interface Analysis {
 }
 
 export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Analysis {
+  sourceOfLastAnalysis = source
+  linesOfLastAnalysis = undefined
   const diagnostics: Diagnostic[] = []
   let doc: Document | null = null
 
@@ -85,84 +93,48 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
     })
   }
 
-  // warning.start/end are offsets into the line-ending-normalized source;
-  // positionAt over that same text yields the precise multi-character range
-  // for every rule (including `+` bullets, which the old fix-range lookup
-  // could not cover).
   const norm = source.replace(/\r\n?/g, '\n')
-  // Diagnostics target hand-written Carve, so surface only the migration
-  // constructs that actually mis-render in Carve (`carve-breakage`). Djot
-  // semantic shifts that are valid Carve — `_x_` (underline), `~x~`
-  // (strikethrough), `{=x=}` (highlight) — are intentional here, not mistakes,
-  // so they must not raise editor diagnostics. Their quick fixes remain
-  // available through `migrationCodeActions` for anyone migrating from Djot.
-  for (const warning of djotMigrationWarnings(source)) {
-    if (warning.category !== 'carve-breakage') continue
-    diagnostics.push({
-      severity: DiagnosticSeverity.Warning,
-      range: {
-        start: positionAt(norm, warning.start),
-        end: positionAt(norm, warning.end),
-      },
-      source: 'carve',
-      code: warning.rule,
-      message: `${warning.message} Suggestion: ${warning.suggestion}`,
-    })
-  }
-
-  // Silent-failure lint: markup that parses but renders as the wrong thing
-  // (broken cross-references, duplicate heading ids, trailing heading
-  // attributes, legacy raw fences, leaked block markers).
-  const lintExtensions = (options.lint?.extensions ?? []).map((name) =>
-    name === 'semantic-span'
-      ? { name, semanticSpanNames: [...SEMANTIC_SPAN_EXTENSION_NAMES] }
-      : { name })
-  const lintResolver = engineIncludeResolver(options.includes ?? {})
-  const lintOptions = {
-    platforms: options.lint?.platforms,
-    extensions: lintExtensions,
-    ...(lintResolver ? { includes: {
-      resolve: lintResolver,
-      sourcePath: options.includes?.sourcePath,
-      maxDepth: options.includes?.maxDepth,
-      maxBytes: options.includes?.maxBytes,
-      maxResolverCalls: options.includes?.maxResolverCalls,
-    } } : {}),
-  }
   const includes = resolveIncludes(norm, options.includes ?? {})
   const paths = options.includes?.paths ?? portableIncludePaths
-  type IncludedLintWarning = ReturnType<typeof lintCarve>[number] & {
-    file?: string
-    includedBy?: Array<{ start: number; end: number }>
+  const includeConfig = v2IncludeConfig(options.includes ?? {})
+  let lintDiagnostics: EngineDiagnostic[] = []
+  const lintOptions = {
+    ...(options.lint?.platforms?.length ? { platforms: options.lint.platforms } : {}),
+    ...(options.lint?.extensions?.includes('semantic-span') ? { extensions: semanticSpan().extensions } : {}),
+    ...(includeConfig ? { includes: includeConfig } : {}),
   }
-  for (const warning of lintCarve(source, lintOptions) as IncludedLintWarning[]) {
-    if (warning.rule.startsWith('include-')) continue
-    const site = warning.includedBy?.[0]
-    const child = warning.file === undefined ? undefined : includes.documents.find((document) => document.id === warning.file)
-    const childName = warning.file === undefined ? undefined : safeChildName(warning.file, options.includes, paths)
-    // `start`/`end` are UTF-16 offsets into the source as given; `column` counts codepoints.
+  const rules = lintRules(options.lint?.severities)
+  const engineOptions: LintOptions = rules ? { ...lintOptions, rules: rules as LintOptions['rules'] } : lintOptions
+  try {
+    lintDiagnostics = lintWithUpgrade(source, engineOptions, options.lint?.upgrade === true)
+  } catch (error) {
+    if (!(error instanceof CarveOptionError)) throw error
+  }
+  // Include findings are published from the include pass below, anchored on the root.
+  const included = includeConfig && lintDiagnostics.some((entry) => entry.file !== undefined)
+    ? safeParse(source, v2IncludeConfig(options.includes ?? {})!)
+    : undefined
+  const declarations = new DeclarationIndex(norm)
+  for (const entry of lintDiagnostics) {
+    if (entry.code.startsWith('include-')) continue
+    const site = entry.file === undefined || !included ? undefined : includeSiteOf(included, entry.path)
+    const child = entry.file === undefined ? undefined : includes.documents.find((document) => document.id === entry.file)
+    const childName = entry.file === undefined ? undefined : safeChildName(entry.file, options.includes, paths)
+    const range = entry.range && entry.file === undefined
+      ? byteRange(source, entry.range.startOffset, entry.range.endOffset)
+      : site ?? rangeAt(source, 0, 0)
     const diagnostic: Diagnostic = {
-      severity: ENGINE_SEVERITY[(warning as typeof warning & { severity?: string }).severity ?? ''] ?? DiagnosticSeverity.Warning,
-      range: {
-        start: site ? positionAt(source, astOffsetToIndex(source, site.start)) : positionAt(source, warning.start),
-        end: site ? positionAt(source, astOffsetToIndex(source, site.end)) : positionAt(source, Math.max(warning.start + 1, warning.end)),
-      },
+      severity: ENGINE_SEVERITY[entry.severity] ?? DiagnosticSeverity.Warning,
+      range,
       source: 'carve',
-      code: warning.rule,
-      message: childName ? `${warning.message} (in ${childName}:${warning.line})` : warning.message,
-      data: (warning as typeof warning & { data?: unknown }).data,
+      code: entry.code,
+      message: childName ? `${entry.message} (in ${childName}${childLineSuffix(child?.source, entry.range?.startOffset)})` : entry.message,
     }
-    if (site && child?.watch !== undefined) diagnostic.relatedInformation = [{
-      location: {
-        uri: paths.toUri(child.watch),
-        range: {
-          start: positionAt(child.source, warning.start),
-          end: positionAt(child.source, Math.max(warning.start + 1, warning.end)),
-        },
-      },
-      message: warning.message,
+    if (child?.watch !== undefined && entry.range) diagnostic.relatedInformation = [{
+      location: { uri: paths.toUri(child.watch), range: byteRange(child.source, entry.range.startOffset, entry.range.endOffset) },
+      message: entry.message,
     }]
-    const related = !site && options.uri ? firstDuplicateDeclaration(source, warning.rule, warning.message, warning.line - 1) : null
+    const related = entry.file === undefined && options.uri ? firstDuplicateDeclaration(declarations, entry.code, entry.message, range.start.line) : null
     if (options.uri && related) diagnostic.relatedInformation = [{
       location: { uri: options.uri, range: related },
       message: 'First declaration is here.',
@@ -189,8 +161,8 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
     diagnostics.push({
       severity: DiagnosticSeverity.Warning,
       range: {
-        start: positionAt(norm, astOffsetToIndex(norm, warning.start)),
-        end: positionAt(norm, astOffsetToIndex(norm, warning.end)),
+        start: positionAt(norm, codepointOffsetToIndex(norm, warning.start)),
+        end: positionAt(norm, codepointOffsetToIndex(norm, warning.end)),
       },
       source: 'carve',
       // A refusal publishes its own code, so an author whose include was
@@ -219,7 +191,45 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
 }
 
 // `LintWarning.severity`; a finding without one is a warning.
-const ENGINE_SEVERITY: Readonly<Record<string, DiagnosticSeverity>> = { Hint: DiagnosticSeverity.Hint, warning: DiagnosticSeverity.Warning, error: DiagnosticSeverity.Error }
+const ENGINE_SEVERITY: Readonly<Record<string, DiagnosticSeverity>> = { hint: DiagnosticSeverity.Hint, warning: DiagnosticSeverity.Warning, error: DiagnosticSeverity.Error }
+
+function byteRange(source: string, start: number, end: number): Range {
+  const from = astOffsetToIndex(source, start)
+  const to = Math.max(from + 1, astOffsetToIndex(source, end))
+  return { start: positionAt(source, from), end: positionAt(source, Math.min(to, Math.max(from, source.length))) }
+}
+
+function safeParse(source: string, includes: IncludeConfig): Document | undefined {
+  try {
+    return parse(source, { includes })
+  } catch {
+    return undefined
+  }
+}
+
+/** The root range of the outermost include node on the way to `pointer`. */
+function includeSiteOf(document: Document, pointer: string | undefined): Range | undefined {
+  if (!pointer) return undefined
+  let node: unknown = document
+  for (const step of pointer.split('/').slice(1)) {
+    if (!node || typeof node !== 'object') return undefined
+    node = (node as Record<string, unknown>)[step.replace(/~1/g, '/').replace(/~0/g, '~')]
+    const typed = node as { type?: string; pos?: { startOffset: number; endOffset: number } } | undefined
+    if (typed?.type === 'include' && typed.pos) {
+      const source = sourceOfLastAnalysis
+      if (source === undefined) return undefined
+      const range = byteRange(source, typed.pos.startOffset, typed.pos.endOffset)
+      // The directive's own line, below any attribute lines its span starts at (C2-A-148).
+      linesOfLastAnalysis ??= source.split(/\r\n?|\n/)
+      const line = ownStartLine({ startLine: range.start.line + 1, endLine: range.end.line + 1 }, linesOfLastAnalysis)
+      return line === range.start.line ? range : { start: { line, character: range.start.character }, end: range.end }
+    }
+  }
+  return undefined
+}
+let sourceOfLastAnalysis: string | undefined
+// Split once per analysis, not once per included finding.
+let linesOfLastAnalysis: string[] | undefined
 
 function configuredDiagnostics(
   diagnostics: Diagnostic[],
@@ -259,27 +269,48 @@ export function tolerantHeadingSymbols(source: string): DocumentSymbol[] {
   return symbols
 }
 
-function firstDuplicateDeclaration(source: string, rule: string, message: string, repeatedLine: number): Range | null {
-  const headingKey = rule === 'duplicate-heading-id' ? /heading id "([^"]+)"/.exec(message)?.[1] : undefined
-  const footnoteKey = rule === 'duplicate-footnote-definition' ? /\[\^([^\]]+)\]/.exec(message)?.[1] : undefined
-  const key = headingKey ?? footnoteKey
-  if (!key) return null
-  const lines = source.replace(/\r\n?/g, '\n').split('\n')
-  const declarations: Range[] = []
-  for (let line = 0; line < lines.length; line += 1) {
-    const text = lines[line]!
-    const match = headingKey
-      ? /^\{[^}]*#([^\s}]+)[^}]*\}\s*$/.exec(text)
-      : /^(?: {0,3})\[\^([^\]]+)\]:/.exec(text)
-    if (!match || match[1] !== key) continue
-    const character = text.indexOf(match[1]!)
-    if (line >= repeatedLine - 1) break
-    declarations.push({
-      start: { line, character },
-      end: { line, character: character + match[1]!.length },
-    })
+// Built on the first duplicate finding and reused for the rest: scanning the
+// source once per finding made a document with many duplicates quadratic.
+class DeclarationIndex {
+  readonly #source: string
+  #ids?: Map<string, Range>
+  #footnotes?: Map<string, Range>
+
+  constructor(normalizedSource: string) {
+    this.#source = normalizedSource
   }
-  return declarations[0] ?? null
+
+  /** The first line that declares `key`, as an authored id or a footnote label. */
+  first(kind: 'id' | 'footnote', key: string): Range | undefined {
+    if (!this.#ids || !this.#footnotes) this.#build()
+    return (kind === 'id' ? this.#ids : this.#footnotes)!.get(key)
+  }
+
+  #build(): void {
+    const ids = new Map<string, Range>()
+    const footnotes = new Map<string, Range>()
+    const lines = this.#source.split('\n')
+    for (let line = 0; line < lines.length; line += 1) {
+      const text = lines[line]!
+      for (const [map, pattern] of [[ids, /^\{[^}]*#([^\s}]+)[^}]*\}\s*$/], [footnotes, /^(?: {0,3})\[\^([^\]]+)\]:/]] as const) {
+        const key = pattern.exec(text)?.[1]
+        if (key === undefined || map.has(key)) continue
+        const character = text.indexOf(key)
+        map.set(key, { start: { line, character }, end: { line, character: character + key.length } })
+      }
+    }
+    this.#ids = ids
+    this.#footnotes = footnotes
+  }
+}
+
+function firstDuplicateDeclaration(index: DeclarationIndex, rule: string, message: string, repeatedLine: number): Range | null {
+  const headingKey = rule === 'duplicate-id' ? /authored id "([^"]+)"/.exec(message)?.[1] : undefined
+  const footnoteKey = rule === 'duplicate-footnote-definition' ? /\[\^([^\]]+)\]/.exec(message)?.[1] : undefined
+  const first = headingKey !== undefined ? index.first('id', headingKey)
+    : footnoteKey !== undefined ? index.first('footnote', footnoteKey) : undefined
+  // Only a declaration above the repeated one counts as the first.
+  return first !== undefined && first.start.line < repeatedLine - 1 ? first : null
 }
 
 function includedSymbols(
@@ -292,7 +323,7 @@ function includedSymbols(
     let document = child.version === undefined ? undefined : cache?.get(child.id, child.version)
     if (!document) {
       try {
-        document = resolve(parse(child.source))
+        document = parse(child.source)
       } catch {
         continue
       }
@@ -341,8 +372,8 @@ function childLocation(
   return {
     uri: paths.toUri(child.watch),
     range: {
-      start: positionAt(child.source, astOffsetToIndex(child.source, within.start)),
-      end: positionAt(child.source, astOffsetToIndex(child.source, within.end)),
+      start: positionAt(child.source, codepointOffsetToIndex(child.source, within.start)),
+      end: positionAt(child.source, codepointOffsetToIndex(child.source, within.end)),
     },
   }
 }
@@ -419,7 +450,7 @@ type OutlineEntry = Heading | Extract<BlockNode, { type: 'figure_group' }>
  */
 function walkOutline(doc: Document): OutlineEntry[] {
   const entries: OutlineEntry[] = []
-  walkNodes([doc.children, doc.footnoteDefs], (node) => {
+  walkNodes(doc.children, (node) => {
     if (node.type === 'heading' || node.type === 'figure_group') entries.push(node as unknown as OutlineEntry)
     return node.type !== 'heading' && node.type !== 'paragraph'
   })
@@ -428,14 +459,14 @@ function walkOutline(doc: Document): OutlineEntry[] {
 
 /** A group's panels are its direct `figure` and `table` children (§4c). */
 function isPanel(node: BlockNode): boolean {
-  return node.type === 'figure' || node.type === 'table'
+  return isFigure(node) || node.type === 'table'
 }
 
 function figureGroupSymbol(group: Extract<BlockNode, { type: 'figure_group' }>, lines: readonly string[]): DocumentSymbol {
   const range = blockRange(group, lines)
   const panels = group.children.filter(isPanel)
   return {
-    name: (group.caption ? plainText(group.caption) : '') || 'Composite figure',
+    name: plainText(captionInlines(group.caption)) || 'Composite figure',
     detail: panels.length === 1 ? '1 panel' : `${panels.length} panels`,
     kind: SymbolKind.Struct,
     range,
@@ -450,10 +481,10 @@ function figureGroupSymbol(group: Extract<BlockNode, { type: 'figure_group' }>, 
  * the panel does not have.
  */
 function panelSymbol(panel: BlockNode, index: number, lines: readonly string[]): DocumentSymbol {
-  const caption = (panel as { caption?: InlineNode[] }).caption
+  const caption = (panel as { caption?: CaptionNode }).caption
   const range = blockRange(panel, lines)
   return {
-    name: (caption ? plainText(caption) : '') || `Panel ${panelLetter(index)}`,
+    name: plainText(captionInlines(caption)) || `Panel ${panelLetter(index)}`,
     kind: panel.type === 'table' ? SymbolKind.Array : SymbolKind.Object,
     range,
     selectionRange: range,
@@ -479,7 +510,7 @@ function lineSpan(lines: readonly string[], start: number, end: number): Range {
 /** `range` spans the section when `sectionEnd` is known; `selectionRange` is the heading's own lines. */
 function headingSymbol(heading: Heading, lines: readonly string[], sectionEnd?: number): DocumentSymbol {
   const selectionRange = heading.pos
-    ? lineSpan(lines, heading.pos.startLine - 1, heading.pos.endLine - 1)
+    ? lineSpan(lines, ownStartLine(heading.pos, lines), heading.pos.endLine - 1)
     : { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }
   const range = heading.pos && sectionEnd !== undefined && sectionEnd >= selectionRange.end.line
     ? lineSpan(lines, selectionRange.start.line, sectionEnd)
@@ -502,13 +533,13 @@ function plainText(nodes: InlineNode[]): string {
     } else if (node.type === 'code') out += node.value
     // An inline literal (§27) renders as visible prose, so it contributes its
     // verbatim content to the outline symbol name just as a code span does.
-    else if (node.type === 'literal_inline') out += node.content
+    else if (node.type === 'literal_inline') out += node.value
     // A caption's resolved number. Without it a composite figure appeared in
     // the outline as "Figure : Group caption", with the gap where the number
     // the reader is looking for should be.
     else if (node.type === 'caption_number') out += String(node.n)
     else if (node.type === 'symbol') out += `:${node.name}:`
-    else if (node.type === 'mention') out += `@${node.user}`
+    else if (node.type === 'mention') out += `@${node.target}`
     else if (node.type === 'tag') out += `#${node.name}`
     else out += smartPunctuationText(node)
   }
@@ -544,4 +575,51 @@ function rangeAt(source: string, index: number, length: number): Range {
     start: { line, character },
     end: { line, character: character + length },
   }
+}
+
+/**
+ * 0.2 lint switches rules by id and keeps opt-in rules off by default. A
+ * configured severity turns its rule on, and `off` turns it off.
+ */
+function lintRules(severities: NonNullable<AnalyzeOptions['lint']>['severities']): Record<string, 'on' | 'off'> | undefined {
+  if (!severities) return undefined
+  const entries = Object.entries(severities)
+  // A severity for a code that is no 0.2 rule (an include or table finding of the server) is not passed on.
+  const known = entries.filter(([id]) => isLintRule(id))
+  if (known.length === 0) return undefined
+  return Object.fromEntries(known.map(([id, severity]) => [id, severity === 'off' ? 'off' : 'on']))
+}
+
+// An engine without the `upgrade` option predates C2-W-156 and runs the migration rules unasked.
+function lintWithUpgrade(source: string, options: LintOptions, upgrade: boolean): EngineDiagnostic[] {
+  if (!upgrade) return lint(source, options)
+  try {
+    return lint(source, { ...options, upgrade: true } as LintOptions)
+  } catch (error) {
+    if (error instanceof CarveOptionError && error.option === 'upgrade') return lint(source, options)
+    throw error
+  }
+}
+
+const lintRuleIds = new Map<string, boolean>()
+
+function isLintRule(id: string): boolean {
+  let known = lintRuleIds.get(id)
+  if (known === undefined) {
+    try {
+      lint('', { rules: { [id]: 'on' } as LintOptions['rules'] })
+      known = true
+    } catch (error) {
+      if (!(error instanceof CarveOptionError)) throw error
+      known = false
+    }
+    lintRuleIds.set(id, known)
+  }
+  return known
+}
+
+/** `:line` of a byte offset in an included file, 1-based, when the file was read. */
+function childLineSuffix(source: string | undefined, byteOffset: number | undefined): string {
+  if (source === undefined || byteOffset === undefined) return ''
+  return `:${byteRange(source, byteOffset, byteOffset).start.line + 1}`
 }

@@ -1,13 +1,10 @@
 import { SemanticTokensBuilder, type SemanticTokens } from 'vscode-languageserver/node.js'
-import {
-  type BlockNode,
-  type Document,
-  type InlineNode,
-  type Position,
-} from '@markup-carve/carve'
-import { astColumnToCharacter } from './position.js'
+import { type Document, type Position } from './engine.js'
+import { grammarTokens, type GrammarToken } from './grammar-tokens.js'
 import { resolvedDocument } from './parse-cache.js'
+import { astColumnToCharacter } from './position.js'
 import { SEMANTIC_SPAN_EXTENSION_NAMES } from './semantic-span-names.js'
+import { delimitedTableFormat, ownPos } from './tree.js'
 
 export const semanticTokenTypes = [
   'keyword',
@@ -65,292 +62,212 @@ function fillBuilder(builder: SemanticTokensBuilder, tokens: Token[]): void {
   }
 }
 
-// PART 2: `---`, an optional space, an optional format token (`--- toml`, `---yaml`).
-const FRONTMATTER_OPEN = /^---(?: ?[\p{L}\p{N}]+)?[ \t]*$/u
-
 export interface SemanticOptions {
   extensions?: readonly string[]
 }
 
+/*
+ * Semantic tokens come from the carve-grammars TextMate grammar (carve-lsp#651),
+ * pinned in carve-grammar.ts, so the editor grammar and the server color a line
+ * the same way. The tree adds only what a line grammar cannot know: which
+ * attribute keys a block consumes, and which span names are semantic under the
+ * enabled extensions. Those become `keyword` inside the grammar's `property` run.
+ */
 export function semanticTokens(source: string, options: SemanticOptions = {}): Token[] {
+  const tokens = fromGrammar(source)
+  let keywords: Token[] = []
   try {
-    return astSemanticTokens(resolvedDocument(source), source, options)
+    keywords = treeKeywords(resolvedDocument(source), source, options)
   } catch {
-    return lexicalSemanticTokens(source)
-  }
-}
-
-function astSemanticTokens(doc: Document, source: string, options: SemanticOptions): Token[] {
-  const spanNames = options.extensions?.includes('semantic-span')
-    ? ['kbd', 'abbr', 'time', ...SEMANTIC_SPAN_EXTENSION_NAMES]
-    : ['kbd', 'abbr', 'time']
-  const tokens: Token[] = []
-  const keywords: Token[] = []
-  const lines = source.replace(/\r\n?/g, '\n').split('\n')
-  for (const node of doc.children) collectBlock(tokens, lines, node, keywords, spanNames)
-  for (const body of Object.values(doc.footnoteDefs ?? {})) {
-    for (const node of body) collectBlock(tokens, lines, node, keywords, spanNames)
-  }
-  const codeBlock = codeBlockLines(doc)
-
-  // Emit frontmatter tokens. The AST stores the parsed YAML in doc.frontmatter
-  // but has no position info for the --- delimiters, so we walk source lines.
-  let inFrontmatter = doc.frontmatter !== undefined
-
-  for (let i = 0; i < lines.length; i++) {
-    const text = lines[i]!
-
-    if (inFrontmatter) {
-      const close = i > 0 && text.trim() === '---'
-      pushRun(tokens, i, text, 'string')
-      if (close) inFrontmatter = false
-      continue
-    }
-
-    if (codeBlock.has(i)) continue
-
-    const commentStart = findTrailingComment(text)
-    if (commentStart !== -1) {
-      push(tokens, i, commentStart, text.length - commentStart, 'comment')
-    }
-    // Scan lines for constructs that the AST resolves away or treats as plain text.
-    const scanText = commentStart !== -1 ? text.slice(0, commentStart) : text
-    scanAstGaps(tokens, i, scanText)
-    // A block attribute line: the AST keeps no position for it.
-    scan(tokens, i, scanText, /^[ \t]*\{[^}\n]+\}[ \t]*$/g, 'property')
+    // A source the engine refuses still gets the grammar's tokens.
   }
   return withoutOverlaps(
     splitProperties(tokens, keywords).sort((a, b) => a.line - b.line || a.character - b.character || b.length - a.length),
   )
 }
 
-function collectBlock(tokens: Token[], lines: string[], node: BlockNode, keywords: Token[], spanNames: string[]): void {
-  const names = node.type === 'table'
-    ? ('sourceFormat' in node && node.sourceFormat ? ['table'] : ['header-rows', 'footer-rows', 'header-cols', 'aligns', 'valigns', 'widths'])
-    : node.type === 'list' || node.type === 'definition_list' ? ['loose'] : []
-  if (names.length && node.pos?.startLine !== undefined) {
-    for (let line = node.pos.startLine - 2; line >= 0; line--) {
-      const value = lines[line]!.trim()
-      if (!value) continue
-      if (!/^\{[^}\n]+\}$/.test(value)) break
-      collectAttributeKeywords(keywords, line, lines[line]!, names)
-    }
+type Mapped = { type: TokenType; modifiers?: TokenModifier[] } | null
+
+const has = (scopes: string[], prefix: string) => scopes.some((scope) => scope.startsWith(prefix))
+
+/**
+ * The token type of one grammar token, from its scopes (outermost first). A
+ * construct is colored as one run, as the tree path colored the node: a link,
+ * its brackets and its destination are one `string`.
+ */
+export function tokenTypeOf(scopes: string[], text = ''): Mapped {
+  // A code body carries no token: a semantic token overrides the editor grammar,
+  // and one `string` over the body would flatten the fence language.
+  if (has(scopes, 'markup.raw.code') || (has(scopes, 'markup.fenced_code') && has(scopes, 'meta.embedded'))) return null
+  if (has(scopes, 'meta.frontmatter')) return { type: 'string' }
+  if (has(scopes, 'comment.') || has(scopes, 'markup.deleted')) return { type: 'comment' }
+  if (has(scopes, 'markup.raw.inline') || has(scopes, 'markup.math') || has(scopes, 'punctuation.definition.raw') ||
+    has(scopes, 'punctuation.definition.literal') || has(scopes, 'punctuation.definition.math')) {
+    return { type: 'string' }
   }
-  switch (node.type) {
-    case 'heading': {
-      const first = tokens.length
-      pushLinePrefix(tokens, lines, node.pos, /^#{1,6}/, 'operator')
-      collectInline(tokens, lines, node.children, keywords, spanNames)
-      pushHeadingTitle(tokens, lines, node.pos, first)
-      break
-    }
-    case 'paragraph':
-      collectInline(tokens, lines, node.children, keywords, spanNames)
-      break
-    case 'code_block':
-    case 'raw_block':
-      pushFenceLines(tokens, lines, node.pos)
-      break
-    case 'comment':
-      pushPosition(tokens, lines, node.pos, 'comment')
-      break
-    case 'block_quote':
-      if ((node as { fenced?: boolean }).fenced) {
-        pushLinePrefix(tokens, lines, node.pos, /^\s*:{3,}/, 'operator')
-        pushLinePrefix(tokens, lines, node.pos, /(?<=^\s*:{3,}\s*)>/, 'operator')
-        pushFenceCloser(tokens, lines, node.pos)
-      } else {
-        pushQuoteMarkers(tokens, lines, node.pos)
-      }
-      for (const child of node.children) collectBlock(tokens, lines, child, keywords, spanNames)
-      break
-    case 'list':
-      for (const item of node.items) {
-        pushMarker(tokens, lines, item.pos, LIST_MARKER_ONLY, 'operator')
-        for (const child of item.children) collectBlock(tokens, lines, child, keywords, spanNames)
-      }
-      break
-    case 'admonition':
-      pushLinePrefix(tokens, lines, node.pos, /^\s*:{3,}\s*[A-Za-z][\w-]*/, 'type')
-      pushFenceCloser(tokens, lines, node.pos)
-      for (const child of node.children) collectBlock(tokens, lines, child, keywords, spanNames)
-      if (node.title) collectInline(tokens, lines, node.title, keywords, spanNames)
-      break
-    case 'div':
-      pushLinePrefix(tokens, lines, node.pos, /^\s*:{3,}/, 'operator')
-      pushFenceCloser(tokens, lines, node.pos)
-      for (const child of node.children) collectBlock(tokens, lines, child, keywords, spanNames)
-      break
-    case 'definition_list':
-      for (const item of node.items) {
-        for (const term of item.terms) collectInline(tokens, lines, term, keywords, spanNames)
-        for (const definition of item.definitions) {
-          for (const child of definition) collectBlock(tokens, lines, child, keywords, spanNames)
-        }
-      }
-      break
-    case 'figure':
-      collectFigureTarget(tokens, lines, node.target, keywords, spanNames)
-      collectInline(tokens, lines, node.caption, keywords, spanNames)
-      break
-    // A composite figure (PART 9 §4c): one figure of ordered panels, opened by a
-    // BARE `::: figure` fence. Its opener carries the reserved kind word, so the
-    // prefix is scoped `type` exactly as an admonition's is - the two are the
-    // same shape on the line and a client colouring one should colour the other.
-    // The caption is the group's, and it sits AFTER the closing fence rather than
-    // inside the container, which is why it is collected here beside the children
-    // and not from any one of them.
-    case 'figure_group':
-      pushLinePrefix(tokens, lines, node.pos, /^\s*:{3,}\s*figure/, 'type')
-      for (const child of node.children) collectBlock(tokens, lines, child, keywords, spanNames)
-      if (node.caption) collectInline(tokens, lines, node.caption, keywords, spanNames)
-      break
-    case 'table':
-      if (node.sourceFormat) {
-        pushFenceLines(tokens, lines, node.pos)
-        if (node.caption) collectInline(tokens, lines, node.caption, keywords, spanNames)
-        break
-      }
-      if (node.pos) {
-        for (let line = node.pos.startLine - 1; line < node.pos.endLine; line += 1) {
-          scanTableLine(tokens, line, lines[line] ?? '')
-        }
-      }
-      if (node.caption) collectInline(tokens, lines, node.caption, keywords, spanNames)
-      for (const row of node.rows) {
-        // A cell carries EITHER inline children or imported `blocks` (carve-js#1980), never both.
-        // Carve source always yields the inline half, and this server only ever parses source.
-        for (const cell of row.cells) collectInline(tokens, lines, cell.children ?? [], keywords, spanNames)
-      }
-      break
-    case 'image':
-      pushPosition(tokens, lines, node.pos, 'string')
-      break
-    case 'thematic_break':
-      pushPosition(tokens, lines, node.pos, 'operator')
-      break
-    case 'abbreviation_def':
-      pushPosition(tokens, lines, node.pos, 'property')
-      break
+  if (has(scopes, 'markup.inserted')) return { type: 'type' }
+  if (has(scopes, 'keyword.operator.table.alignment')) return { type: 'keyword' }
+  if (has(scopes, 'meta.link.reference.def')) {
+    if (has(scopes, 'constant.other.reference')) return { type: 'type' }
+    if (has(scopes, 'markup.underline.link')) return { type: 'string' }
+    if (has(scopes, 'punctuation.')) return { type: 'operator' }
+    return null
   }
+  if (has(scopes, 'meta.abbreviation')) return { type: 'property' }
+  if (has(scopes, 'meta.figure-group') && (has(scopes, 'punctuation.definition.figure-group') || has(scopes, 'entity.name.tag.figure-group'))) {
+    return { type: 'type' }
+  }
+  // A div sigil such as the `>` of a quote fence is a marker, not a kind word.
+  if (has(scopes, 'entity.name.tag.admonition') && !/\w/.test(text)) return { type: 'operator' }
+  if (has(scopes, 'meta.attributes') || has(scopes, 'punctuation.definition.attributes') ||
+    has(scopes, 'punctuation.definition.span')) {
+    return { type: 'property' }
+  }
+  if (has(scopes, 'variable.other.mention') || has(scopes, 'variable.other.tag') ||
+    has(scopes, 'punctuation.definition.mention') || has(scopes, 'punctuation.definition.tag') ||
+    has(scopes, 'constant.other.footnote') || has(scopes, 'punctuation.definition.footnote') || has(scopes, 'string.other.footnote') ||
+    has(scopes, 'constant.language.symbol') || has(scopes, 'punctuation.definition.symbol')) {
+    return { type: 'variable', modifiers: ['readonly'] }
+  }
+  if (has(scopes, 'markup.underline.link') || has(scopes, 'string.other.link') || has(scopes, 'string.other.image') ||
+    has(scopes, 'punctuation.definition.link') || has(scopes, 'punctuation.definition.image')) {
+    return { type: 'string' }
+  }
+  if (has(scopes, 'entity.name.section')) return { type: 'type', modifiers: ['definition'] }
+  if (has(scopes, 'fenced_code.block.language') || has(scopes, 'entity.name.tag') || has(scopes, 'entity.name.type')) return { type: 'type' }
+  if (has(scopes, 'constant.language.checkbox') || has(scopes, 'punctuation.definition.checkbox')) return { type: 'keyword' }
+  if (has(scopes, 'keyword.operator') || has(scopes, 'constant.character.escape') || has(scopes, 'meta.separator') ||
+    has(scopes, 'punctuation.separator') || has(scopes, 'punctuation.definition.heading') ||
+    has(scopes, 'punctuation.definition.fenced') || has(scopes, 'punctuation.definition.admonition') ||
+    has(scopes, 'punctuation.definition.list') || has(scopes, 'punctuation.definition.quote') ||
+    has(scopes, 'punctuation.definition.caption')) {
+    return { type: 'operator' }
+  }
+  if (has(scopes, 'markup.bold.table')) return null
+  if (has(scopes, 'markup.bold') || has(scopes, 'markup.italic') || has(scopes, 'markup.strikethrough') ||
+    has(scopes, 'markup.highlight') || has(scopes, 'markup.superscript') || has(scopes, 'markup.subscript') ||
+    has(scopes, 'markup.underline') || has(scopes, 'markup.changed') || has(scopes, 'punctuation.definition.')) {
+    return { type: 'keyword' }
+  }
+  if (has(scopes, 'constant.numeric')) return { type: 'number' }
+  if (has(scopes, 'keyword.')) return { type: 'keyword' }
+  return null
 }
 
-function scanTableLine(tokens: Token[], line: number, text: string): void {
-  for (const pipe of text.matchAll(/\|/g)) push(tokens, line, pipe.index!, 1, 'operator')
-  for (const marker of text.matchAll(/\|=?\s*([<>~^v]{1,2})(?=\{| )/g)) {
-    const run = marker[1]!
-    push(tokens, line, marker.index! + marker[0].indexOf(run), run.length, 'keyword')
+// tokenTypeOf depends on the text only through `\w`, so that bit joins the scopes in the key.
+const mappedTypes = new Map<string, Mapped>()
+function mappedType(scopes: string[], text: string): Mapped {
+  const key = (/\w/.test(text) ? 'w ' : '_ ') + scopes.join(' ')
+  let mapped = mappedTypes.get(key)
+  if (mapped === undefined) {
+    mapped = tokenTypeOf(scopes, text)
+    mappedTypes.set(key, mapped)
   }
-  // The braced spelling leads the cell's attribute block (carve#5091 D3): `|={>}`, `|{<v .x}`.
-  for (const marker of text.matchAll(/(?<!\\)\|=?\{([<>~^v]{1,2})(?=[ }])/g)) {
-    push(tokens, line, marker.index! + marker[0].length - marker[1]!.length, marker[1]!.length, 'keyword')
-  }
-  for (const attr of text.matchAll(/\b(aligns|valigns|widths|footer-rows|header-rows|header-cols)=/g)) {
-    push(tokens, line, attr.index!, attr[1]!.length, 'property')
-  }
+  return mapped
 }
 
-function collectFigureTarget(tokens: Token[], lines: string[], node: BlockNode, keywords: Token[], spanNames: string[]): void {
-  if (node.type === 'image') pushPosition(tokens, lines, node.pos, 'string')
-  else collectBlock(tokens, lines, node, keywords, spanNames)
-}
-
-function collectInline(tokens: Token[], lines: string[], nodes: InlineNode[], keywords: Token[], spanNames: string[]): void {
-  for (const node of nodes) {
-    // carve-js renamed this AST type from `critic-comment` to `critic_comment`,
-    // completing the kebab-to-snake vocabulary convergence (carve#401). The
-    // rename is not published yet and this package pins `^0.1.2`, whose types
-    // only know the hyphenated name - so the new spelling cannot be a `case`
-    // arm without a compile error, and the old one cannot simply be replaced
-    // without breaking against the version actually installed.
-    //
-    // Handling it here accepts both, so neither publish order produces a silent
-    // break - and the break really would be silent: without this the node falls
-    // through to the generic brace handling and comes out as a `keyword` token,
-    // a mis-colored comment rather than a crash.
-    //
-    // Drop this once the pin is raised past the release carrying the rename.
-    // That cleanup is self-enforcing: at that point the hyphenated `case` arm
-    // below stops compiling, because the type union no longer contains it.
-    // carve-js split `footnote` into `footnote_ref` (`[^a]`) and
-    // `inline_footnote` (`^[…]`), because one identifier named both of those
-    // AND the block definition type (carve#405). Same situation as the
-    // `critic_comment` rename below: the pinned `^0.1.2` still emits the old
-    // name, and the new ones cannot be `case` arms until the pin moves, so all
-    // three are accepted and either release order is safe.
-    //
-    // Without this the split node falls through to the default and loses its
-    // token entirely - a footnote marker stops being highlighted, silently.
-    if ((node.type as string) === 'footnote_ref' || (node.type as string) === 'inline_footnote') {
-      pushPosition(tokens, lines, (node as { pos?: Position }).pos, 'variable', ['readonly'])
+function fromGrammar(source: string): Token[] {
+  const lines = source.replace(/\r\n?/g, '\n').split('\n')
+  const pieces = grammarTokens(source)
+  const runs: Token[] = []
+  for (let index = 0; index < pieces.length; index++) {
+    const token = pieces[index]!
+    const text = lines[token.line]!.slice(token.start, token.end)
+    const definition = footnoteDefinition(pieces, index, lines)
+    if (definition) {
+      push(runs, token.line, token.start, 2, 'operator')
+      push(runs, token.line, token.start + 2, definition.label, 'type')
+      push(runs, token.line, token.start + 2 + definition.label, 2, 'operator')
+      index = definition.next - 1
       continue
     }
-    if ((node.type as string) === 'critic_comment') {
-      pushPosition(tokens, lines, (node as { pos?: Position }).pos, 'comment')
+    const mapped = mappedType(token.scopes, text)
+    if (!mapped) continue
+    const previous = runs[runs.length - 1]
+    // Adjacent pieces of one construct merge into one token, also across a space the construct owns.
+    const gap = previous && previous.line === token.line ? lines[token.line]!.slice(previous.character + previous.length, token.start) : undefined
+    if (previous && gap !== undefined && (gap === '' || (mapped.type !== 'operator' && /^[ \t]+$/.test(gap) && sameConstruct(pieces, index))) &&
+      previous.type === mapped.type && (previous.modifiers ?? []).join() === (mapped.modifiers ?? []).join()) {
+      previous.length = token.end - previous.character
       continue
     }
-    switch (node.type) {
-      case 'text':
-      case 'soft_break':
-      case 'hard_break':
-        break
-      case 'code':
-      case 'math':
-      case 'literal_inline':
-      case 'raw_inline':
-      case 'link':
-      case 'image':
-      case 'autolink':
-      case 'heading_ref':
-        pushPosition(tokens, lines, node.pos, 'string')
-        break
-      case 'mention':
-      case 'tag':
-      case 'symbol':
-      case 'footnote_ref':
-      case 'inline_footnote':
-      case 'abbreviation':
-        pushPosition(tokens, lines, node.pos, 'variable', ['readonly'])
-        break
-      case 'span':
-        pushPosition(tokens, lines, node.pos, 'property')
-        if (node.pos?.endLine !== undefined && node.pos.endColumn !== undefined) {
-          const line = node.pos.endLine - 1
-          const text = lines[line] ?? ''
-          const end = astColumnToCharacter(text, node.pos.endColumn)
-          const attrs = /\{[^}\n]+\}$/.exec(text.slice(0, end))
-          if (attrs) collectAttributeKeywords(keywords, line, attrs[0], spanNames, end - attrs[0].length)
-        }
-        break
-      case 'inline_extension':
-        pushPosition(tokens, lines, node.pos, 'property')
-        break
-      case 'insert':
-        pushPosition(tokens, lines, node.pos, 'type')
-        break
-      case 'delete':
-      case 'critic_comment':
-        pushPosition(tokens, lines, node.pos, 'comment')
-        break
-      case 'substitution':
-        pushPosition(tokens, lines, node.pos, 'keyword')
-        break
-      case 'comment':
-        // An inline (trailing `%%`) comment node. Its span includes the
-        // consumed separator whitespace; the line scan (findTrailingComment)
-        // already emits the `%% ...` comment token from the marker, so defer to
-        // it here rather than emitting an overlapping (and mistyped) token.
-        break
-      default:
-        pushPosition(tokens, lines, node.pos, 'keyword')
-        break
-    }
-
-    const children = (node as { children?: InlineNode[] }).children
-    if (Array.isArray(children)) collectInline(tokens, lines, children, keywords, spanNames)
-    const content = (node as { content?: InlineNode[] }).content
-    if (Array.isArray(content)) collectInline(tokens, lines, content, keywords, spanNames)
+    push(runs, token.line, token.start, token.end - token.start, mapped.type, mapped.modifiers)
   }
+  // Spaces and tabs at either end of a run carry no color: a fence closer's indent is no part of its marker.
+  const tokens: Token[] = []
+  for (const run of runs) {
+    const text = lines[run.line]!.slice(run.character, run.character + run.length)
+    const start = run.character + text.length - text.trimStart().length
+    push(tokens, run.line, start, text.trim().length, run.type, run.modifiers)
+  }
+  return tokens
+}
+
+// The whitespace piece before pieces[index] lies inside a construct (a meta scope) the piece shares.
+function sameConstruct(pieces: GrammarToken[], index: number): boolean {
+  const space = pieces[index - 1]
+  if (!space) return false
+  const meta = space.scopes.filter((scope) => scope.startsWith('meta.'))
+  return meta.length > 0 && meta.every((scope) => pieces[index]!.scopes.includes(scope))
+}
+
+/*
+ * The grammar scopes a footnote definition `[^label]:` like a reference `[^label]`
+ * plus a `:` separator. At the start of a line that is the definition, colored as
+ * a link definition is: `[^` and `]:` markers around a `type` label.
+ */
+function footnoteDefinition(pieces: GrammarToken[], index: number, lines: string[]): { label: number; next: number } | undefined {
+  const first = pieces[index]!
+  const line = lines[first.line]!
+  if (!has(first.scopes, 'punctuation.definition.footnote') || line.slice(0, first.start).trim() !== '') return undefined
+  const match = /^\[\^([^\]\n]+)\]:/.exec(line.slice(first.start))
+  if (!match) return undefined
+  const end = first.start + match[0].length
+  let next = index
+  while (next < pieces.length && pieces[next]!.line === first.line && pieces[next]!.start < end) next++
+  if (!pieces.slice(index, next).some((piece) => has(piece.scopes, 'punctuation.separator'))) return undefined
+  return { label: match[1]!.length, next }
+}
+
+// Attribute keys a block consumes, and span names, from the tree.
+function treeKeywords(doc: Document, source: string, options: SemanticOptions): Token[] {
+  const spanNames = options.extensions?.includes('semantic-span')
+    ? ['kbd', 'abbr', 'time', ...SEMANTIC_SPAN_EXTENSION_NAMES]
+    : ['kbd', 'abbr', 'time']
+  const lines = source.replace(/\r\n?/g, '\n').split('\n')
+  const keywords: Token[] = []
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item)
+      return
+    }
+    if (value === null || typeof value !== 'object') return
+    const node = value as { type?: string; pos?: Position }
+    if (node.type === 'table' || node.type === 'list' || node.type === 'definition_list') {
+      const pos = ownPos(node.pos, lines)
+      const names = node.type === 'table'
+        ? (delimitedTableFormat(node as never, lines) ? ['table'] : ['header-rows', 'footer-rows', 'header-cols', 'aligns', 'valigns', 'widths'])
+        : ['loose']
+      if (pos?.startLine !== undefined) {
+        for (let line = pos.startLine - 2; line >= 0; line--) {
+          const value = lines[line]!.trim()
+          if (!value) continue
+          if (!/^\{[^}\n]+\}$/.test(value)) break
+          collectAttributeKeywords(keywords, line, lines[line]!, names)
+        }
+      }
+    }
+    if (node.type === 'span' && node.pos?.endLine !== undefined && node.pos.endColumn !== undefined) {
+      const line = node.pos.endLine - 1
+      const text = lines[line] ?? ''
+      const end = astColumnToCharacter(text, node.pos.endColumn)
+      const attrs = /\{[^}\n]+\}$/.exec(text.slice(0, end))
+      if (attrs) collectAttributeKeywords(keywords, line, attrs[0], spanNames, end - attrs[0].length)
+    }
+    for (const key of Object.keys(node)) if (key !== 'pos') visit((node as Record<string, unknown>)[key])
+  }
+  visit(doc.children)
+  return keywords
 }
 
 function collectAttributeKeywords(tokens: Token[], line: number, text: string, names: string[], offset = 0): void {
@@ -383,146 +300,6 @@ function splitProperties(tokens: Token[], keywords: Token[]): Token[] {
   return result
 }
 
-// A code body is left without tokens: a semantic token overrides the editor's
-// grammar, and a single `string` over the body hid its language highlighting.
-function pushFenceLines(tokens: Token[], lines: string[], pos: Position | undefined): void {
-  if (pos?.startLine === undefined || pos.endLine === undefined) return
-  const opener = lines[pos.startLine - 1] ?? ''
-  const open = /(`{3,}|~{3,})[ \t]*(=?[^\s`~{"[]+)?/.exec(opener)
-  if (!open) return
-  push(tokens, pos.startLine - 1, open.index, open[1]!.length, 'operator')
-  if (open[2]) push(tokens, pos.startLine - 1, open.index + open[0].lastIndexOf(open[2]), open[2].length, 'type')
-  if (pos.endLine === pos.startLine) return
-  const closer = lines[pos.endLine - 1] ?? ''
-  const close = new RegExp(`(${escapeRegExp(open[1]![0]!)}{${open[1]!.length},})[ \t]*$`).exec(closer)
-  if (close && closer.slice(0, close.index).trim().replace(/^[>\s]*/, '') === '') {
-    push(tokens, pos.endLine - 1, close.index, close[1]!.length, 'operator')
-  }
-}
-
-// Zero-based lines of fenced blocks, fences included, at any nesting depth.
-// pushFenceLines owns their tokens; the generic scanners must not add to them.
-function codeBlockLines(doc: Document): Set<number> {
-  const body = new Set<number>()
-  const visit = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      for (const item of value) visit(item)
-      return
-    }
-    if (value === null || typeof value !== 'object') return
-    const node = value as { type?: unknown; pos?: Position }
-    if ((node.type === 'code_block' || node.type === 'raw_block' || (node.type === 'table' && 'sourceFormat' in node && node.sourceFormat)) && node.pos?.startLine !== undefined && node.pos.endLine !== undefined) {
-      for (let line = node.pos.startLine - 1; line < node.pos.endLine; line++) body.add(line)
-      return
-    }
-    for (const key of Object.keys(node)) if (key !== 'pos') visit((node as Record<string, unknown>)[key])
-  }
-  visit(doc.children)
-  visit(Object.values(doc.footnoteDefs ?? {}))
-  return body
-}
-
-function pushPosition(
-  tokens: Token[],
-  lines: string[],
-  pos: Position | undefined,
-  type: TokenType,
-  modifiers: TokenModifier[] = [],
-): void {
-  if (
-    pos?.startLine === undefined ||
-    pos.endLine === undefined ||
-    pos.startColumn === undefined ||
-    pos.endColumn === undefined
-  ) {
-    return
-  }
-  for (let line = pos.startLine; line <= pos.endLine; line++) {
-    const text = lines[line - 1] ?? ''
-    // The node's columns count codepoints; a token's character and length count
-    // UTF-16 code units, so both ends convert against the line they sit on. A
-    // line the node merely passes through is covered from its start to its end,
-    // which is already a UTF-16 length.
-    const start =
-      line === pos.startLine ? astColumnToCharacter(text, pos.startColumn) : 0
-    const end = line === pos.endLine ? astColumnToCharacter(text, pos.endColumn) : text.length
-    push(tokens, line - 1, start, Math.max(0, end - start), type, modifiers)
-  }
-}
-
-function pushLinePrefix(
-  tokens: Token[],
-  lines: string[],
-  pos: Position | undefined,
-  pattern: RegExp,
-  type: TokenType,
-): void {
-  if (!pos?.startLine) return
-  const line = lines[pos.startLine - 1] ?? ''
-  const match = pattern.exec(line)
-  if (!match) return
-  push(tokens, pos.startLine - 1, match.index, match[0].length, type)
-}
-
-// `first` is where this heading's own tokens begin in `tokens`.
-// The `>` run opening each line of a marker quote; the first line's run starts at the node's column.
-function pushQuoteMarkers(tokens: Token[], lines: string[], pos: Position | undefined): void {
-  if (pos?.startLine === undefined || pos.endLine === undefined) return
-  for (let line = pos.startLine; line <= pos.endLine; line++) {
-    const text = lines[line - 1] ?? ''
-    const from = line === pos.startLine && pos.startColumn !== undefined ? astColumnToCharacter(text, pos.startColumn) : 0
-    const prefix = /^(?:[ \t]*>)+/.exec(text.slice(from))
-    if (!prefix) continue
-    for (const marker of prefix[0].matchAll(/>+/g)) push(tokens, line - 1, from + marker.index!, marker[0].length, 'operator')
-  }
-}
-
-// A marker at the node's own start column, which need not be the start of the line.
-function pushMarker(tokens: Token[], lines: string[], pos: Position | undefined, pattern: RegExp, type: TokenType): void {
-  if (pos?.startLine === undefined || pos.startColumn === undefined) return
-  const text = lines[pos.startLine - 1] ?? ''
-  const from = astColumnToCharacter(text, pos.startColumn)
-  const match = pattern.exec(text.slice(from))
-  if (match) push(tokens, pos.startLine - 1, from + match.index, match[0].length, type)
-}
-
-function pushFenceCloser(tokens: Token[], lines: string[], pos: Position | undefined): void {
-  if (pos?.startLine === undefined || pos.endLine === undefined || pos.endLine === pos.startLine) return
-  const closer = /^([ \t>]*)(:{3,})[ \t]*$/.exec(lines[pos.endLine - 1] ?? '')
-  if (closer) push(tokens, pos.endLine - 1, closer[1]!.length, closer[2]!.length, 'operator')
-}
-
-function pushHeadingTitle(tokens: Token[], lines: string[], pos: Position | undefined, first: number): void {
-  if (!pos?.startLine) return
-  const lineNumber = pos.startLine - 1
-  const line = lines[lineNumber] ?? ''
-  const match = /^(?:[ \t]*> )*[ \t]*#{1,6} +/.exec(line)
-  if (!match) return
-  const comment = findTrailingComment(line)
-  const end = comment === -1 ? line.length : comment
-  let cursor = match[0].length
-  const occupied = tokens.slice(first).filter((token) => token.line === lineNumber)
-    .sort((a, b) => a.character - b.character)
-  for (const token of occupied) {
-    if (token.character >= end) break
-    if (token.character > cursor) {
-      push(tokens, lineNumber, cursor, token.character - cursor, 'type', ['definition'])
-    }
-    cursor = Math.max(cursor, token.character + token.length)
-  }
-  if (cursor < end) push(tokens, lineNumber, cursor, end - cursor, 'type', ['definition'])
-}
-
-/**
- * Scan a single line for constructs the AST path misses:
- * - Reference definitions [label]: url  (resolved away, never appear in children)
- * - Footnote definitions  [^label]: ... (same)
- * - {= ... =} critic annotation (parsed as plain text by the AST)
- * - $...$ and $$...$$ math (parsed as plain text by the AST)
- *
- * Called from astSemanticTokens after AST tokens are already collected;
- * withoutOverlaps will drop any that land on already-covered spans.
- */
 /*
  * MARKER SEPARATORS ARE A LITERAL SPACE.
  *
@@ -575,193 +352,6 @@ export const LIST_MARKER_ONLY = /^[ \t]*(?:[-*]|\.(?= |$)|\(?[0-9A-Za-z]+[.)])/
 
 export const LIST_PREFIX = /^([ \t]*)([-*]|\(?[0-9]+[.)]|\(?[A-Za-z][.)]) +(\[[ xX\-_>\/!?]\] +(?=\S))?/
 
-function scanAstGaps(tokens: Token[], line: number, text: string): void {
-  // footnote definition: [^label]: content — must be checked before reference def
-  const fnDef = new RegExp(String.raw`^(\[\^)([^\]\n]+)(` + DEF_SEPARATOR + String.raw`)(.*)`).exec(text)
-  if (fnDef) {
-    push(tokens, line, fnDef.index, 2, 'operator')
-    push(tokens, line, fnDef.index + 2, fnDef[2]!.length, 'type')
-    push(tokens, line, fnDef.index + 2 + fnDef[2]!.length, fnDef[3]!.length, 'operator')
-    return
-  }
-
-  // reference definition: [label]: url
-  const refDef = new RegExp(String.raw`^(\[)([^\]\n]+)(` + REF_SEPARATOR + String.raw`)(\S*)`).exec(text)
-  if (refDef && (refDef[4] || !/^[\^@]/.test(refDef[2]!))) {
-    push(tokens, line, refDef.index, 1, 'operator')
-    push(tokens, line, refDef.index + 1, refDef[2]!.length, 'type')
-    push(tokens, line, refDef.index + 1 + refDef[2]!.length, refDef[3]!.length, 'operator')
-    push(tokens, line, refDef.index + refDef[0].length - refDef[4]!.length, refDef[4]!.length, 'string')
-    return
-  }
-
-  // inline patterns the AST treats as plain text
-  scan(tokens, line, text, /\{=[^=\n]*=\}/g, 'keyword')
-  scan(tokens, line, text, /\$\$[^$\n]+\$\$/g, 'string')
-  scan(tokens, line, text, /\$[^$\n]+\$/g, 'string')
-}
-
-function lexicalSemanticTokens(source: string): Token[] {
-  const tokens: Token[] = []
-  const lines = source.replace(/\r\n?/g, '\n').split('\n')
-  let inFence: { marker: string; type: 'string' | 'comment' } | undefined
-  let inFrontmatter = FRONTMATTER_OPEN.test(lines[0] ?? '')
-
-  for (let line = 0; line < lines.length; line++) {
-    const text = lines[line]!
-
-    if (inFrontmatter) {
-      const close = line > 0 && text.trim() === '---'
-      pushRun(tokens, line, text, 'string')
-      if (close) inFrontmatter = false
-      continue
-    }
-
-    if (inFence) {
-      const closes = new RegExp(`^\\s*${escapeRegExp(inFence.marker)}\\s*$`).test(text)
-      if (inFence.type === 'comment') pushRun(tokens, line, text, 'comment')
-      else if (closes) push(tokens, line, text.indexOf(inFence.marker), inFence.marker.length, 'operator')
-      if (closes) inFence = undefined
-      continue
-    }
-
-    const commentBlock = /^%{3,}\s*$/.exec(text)
-    if (commentBlock) {
-      pushRun(tokens, line, text, 'comment')
-      inFence = { marker: commentBlock[0].trim(), type: 'comment' }
-      continue
-    }
-
-    if (/^%%/.test(text)) {
-      pushRun(tokens, line, text, 'comment')
-      continue
-    }
-
-    const trailingCommentStart = findTrailingComment(text)
-    const scanText = trailingCommentStart !== -1 ? text.slice(0, trailingCommentStart) : text
-    if (trailingCommentStart !== -1) {
-      push(tokens, line, trailingCommentStart, text.length - trailingCommentStart, 'comment')
-    }
-
-    const codeFence = /^(\s*)(`{3,}|~{3,})(?:\s+([A-Za-z0-9_-]+))?/.exec(scanText)
-    if (codeFence) {
-      push(tokens, line, codeFence[1]!.length, codeFence[2]!.length, 'operator')
-      if (codeFence[3]) {
-        push(tokens, line, codeFence.index + codeFence[0].lastIndexOf(codeFence[3]), codeFence[3].length, 'type')
-      }
-      inFence = { marker: codeFence[2]!, type: 'string' }
-      continue
-    }
-
-    const rawFence = /^(\s*)(%{3,})(?:\s+([A-Za-z0-9_-]+))?/.exec(scanText)
-    if (rawFence) {
-      push(tokens, line, rawFence[1]!.length, rawFence[2]!.length, 'operator')
-      if (rawFence[3]) {
-        push(tokens, line, rawFence.index + rawFence[0].lastIndexOf(rawFence[3]), rawFence[3].length, 'type')
-      }
-      inFence = { marker: rawFence[2]!, type: 'string' }
-      continue
-    }
-
-    const heading = /^(#{1,6})(\s+)(.+)$/.exec(scanText)
-    if (heading) {
-      push(tokens, line, 0, heading[1]!.length, 'operator')
-      push(tokens, line, heading[1]!.length + heading[2]!.length, heading[3]!.length, 'type', ['definition'])
-      scanInline(tokens, line, scanText)
-      continue
-    }
-
-    const div = /^(\s*)(:{3,})(?:\s+([A-Za-z][\w-]*|>(?=\s*$)))?/.exec(scanText)
-    if (div) {
-      push(tokens, line, div[1]!.length, div[2]!.length, 'operator')
-      if (div[3]) push(tokens, line, div[0].lastIndexOf(div[3]), div[3].length, div[3] === '>' ? 'operator' : 'type')
-    }
-
-    const list = LIST_PREFIX.exec(scanText)
-    if (list) {
-      push(tokens, line, list[1]!.length, list[2]!.length, 'operator')
-      if (list[3]) push(tokens, line, list[1]!.length + list[2]!.length + 1, list[3].trimEnd().length, 'keyword')
-    }
-
-    const quote = QUOTE_PREFIX.exec(scanText)
-    if (quote) push(tokens, line, quote[1]!.search(/>/), quote[1]!.trimStart().length, 'operator')
-
-    // footnote definition: [^label]: content — must be checked before reference def
-    const fnDef = new RegExp(String.raw`^(\[\^)([^\]\n]+)(` + DEF_SEPARATOR + String.raw`)(.*)`).exec(scanText)
-    if (fnDef) {
-      push(tokens, line, fnDef.index, 2, 'operator')
-      push(tokens, line, fnDef.index + 2, fnDef[2]!.length, 'type')
-      push(tokens, line, fnDef.index + 2 + fnDef[2]!.length, fnDef[3]!.length, 'operator')
-      continue
-    }
-
-    // reference definition: [label]: url
-    const refDef = new RegExp(String.raw`^(\[)([^\]\n]+)(` + REF_SEPARATOR + String.raw`)(\S*)`).exec(scanText)
-    if (refDef && (refDef[4] || !/^[\^@]/.test(refDef[2]!))) {
-      push(tokens, line, refDef.index, 1, 'operator')
-      push(tokens, line, refDef.index + 1, refDef[2]!.length, 'type')
-      push(tokens, line, refDef.index + 1 + refDef[2]!.length, refDef[3]!.length, 'operator')
-      push(tokens, line, refDef.index + refDef[0].length - refDef[4]!.length, refDef[4]!.length, 'string')
-      continue
-    }
-
-    // abbreviation definition: *[ABBR]: expansion
-    const abbrDef = new RegExp(String.raw`^(\*\[)([^\]\n]+)(` + DEF_SEPARATOR + String.raw`)(.*)`).exec(scanText)
-    if (abbrDef) {
-      push(tokens, line, abbrDef.index, 2, 'operator')
-      push(tokens, line, abbrDef.index + 2, abbrDef[2]!.length, 'property')
-      push(tokens, line, abbrDef.index + 2 + abbrDef[2]!.length, abbrDef[3]!.length, 'operator')
-      continue
-    }
-
-    scanInline(tokens, line, scanText)
-  }
-
-  return withoutOverlaps(
-    tokens.sort((a, b) => a.line - b.line || a.character - b.character || b.length - a.length),
-  )
-}
-
-function scanInline(tokens: Token[], line: number, text: string): void {
-  scan(tokens, line, text, /`[^`\n]+`/g, 'string')
-  // display math $$...$$ must come before single-$ inline math
-  scan(tokens, line, text, /\$\$[^$\n]+\$\$/g, 'string')
-  scan(tokens, line, text, /\$[^$\n]+\$/g, 'string')
-  scan(tokens, line, text, /!\[[^\]\n]*\]\([^\s)]+(?:\s+"[^"]*")?\)/g, 'string')
-  scan(tokens, line, text, /\[[^\]\n]+\]\([^\s)]+(?:\s+"[^"]*")?\)/g, 'string')
-  scan(tokens, line, text, /\[\^[^\]\n]+\]/g, 'variable')
-  scan(tokens, line, text, /(?<![\w.])@[A-Za-z0-9_][A-Za-z0-9_-]*/g, 'variable', ['readonly'])
-  scan(tokens, line, text, /(?<!\w)#[A-Za-z0-9_][A-Za-z0-9_-]*/g, 'variable', ['readonly'])
-  scan(tokens, line, text, /:[A-Za-z0-9_+-]+:/g, 'variable')
-  // critic/editorial markup — more specific patterns before the generic {…} catch-all
-  scan(tokens, line, text, /\{\+[^+\n]*\+\}/g, 'type')
-  scan(tokens, line, text, /\{-[^-\n]*-\}/g, 'comment')
-  scan(tokens, line, text, /\{~[^~\n]*~>[^~\n]*~\}/g, 'keyword')
-  scan(tokens, line, text, /\{=[^=\n]*=\}/g, 'keyword')
-  scan(tokens, line, text, /\{#[^#\n]*#\}/g, 'comment')
-  scan(tokens, line, text, /\{[^}\n]+\}/g, 'property')
-  scan(tokens, line, text, /\\./g, 'operator')
-  scan(tokens, line, text, /(\*\*\*[^*\n]+\*\*\*|\*[^*\n]+\*|\/[^/\n]+\/|_[^_\n]+_|~[^~\n]+~|\+\+[^+\n]+\+\+|--[^-\n]+--|(?<![\w=])=(?=\S)[^=\n]+?(?<=\S)=(?![\w=])|\^[^^\n]+\^|(?<![\w,]),(?=\S)[^,\n]+?(?<=\S),(?![\w,]))/g, 'keyword')
-}
-
-function scan(
-  tokens: Token[],
-  line: number,
-  text: string,
-  pattern: RegExp,
-  type: TokenType,
-  modifiers: TokenModifier[] = [],
-): void {
-  for (const match of text.matchAll(pattern)) {
-    if (match.index === undefined || match[0].length === 0) continue
-    push(tokens, line, match.index, match[0].length, type, modifiers)
-  }
-}
-
-function pushRun(tokens: Token[], line: number, text: string, type: TokenType): void {
-  if (text.length > 0) push(tokens, line, 0, text.length, type)
-}
-
 function push(
   tokens: Token[],
   line: number,
@@ -781,49 +371,6 @@ function modifierMask(modifiers: TokenModifier[]): number {
     if (index !== undefined) mask |= 1 << index
   }
   return mask
-}
-
-/**
- * Returns the index of the first trailing `%%` comment marker on a line, or -1.
- *
- * A trailing comment is triggered when `%%` is preceded by a space or tab
- * (not other whitespace), is not escaped by a backslash, and is not inside
- * an inline backtick code span.
- */
-function findTrailingComment(text: string): number {
-  let codeWidth = 0
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i]!
-    if (codeWidth === 0 && ch === '\\') {
-      i++
-      continue
-    }
-    if (ch === '`') {
-      let end = i + 1
-      while (text[end] === '`') end++
-      const width = end - i
-      if (codeWidth === 0) codeWidth = width
-      else if (codeWidth === width) codeWidth = 0
-      i = end - 1
-      continue
-    }
-    if (codeWidth !== 0) continue
-    if (ch === '\\') {
-      i++ // skip the escaped character
-      continue
-    }
-    if (ch === '%' && text[i + 1] === '%') {
-      const prev = i > 0 ? text[i - 1] : ''
-      if (prev === ' ' || prev === '\t') {
-        return i
-      }
-    }
-  }
-  return -1
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function withoutOverlaps(tokens: Token[]): Token[] {

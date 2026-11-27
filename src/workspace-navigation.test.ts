@@ -215,7 +215,8 @@ test('document links come from the links the parser built', () => {
     '',
   ].join('\n')
   const links = documentLinks('file:///docs/a.crv', source)
-  assert.deepEqual(links.map((link) => link.target), ['http://x.org/a_(b)', 'ftp://f.example/x', 'http://q.example/x'])
+  // 0.2 C2-B-081: a definition inside a quote is text, so `> [q]: ...` yields no link.
+  assert.deepEqual(links.map((link) => link.target), ['http://x.org/a_(b)', 'ftp://f.example/x'])
   assert.deepEqual(links[0]!.range, { start: { line: 0, character: 4 }, end: { line: 0, character: 22 } })
 })
 
