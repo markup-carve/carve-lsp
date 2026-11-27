@@ -37,13 +37,14 @@
     "access": "public"
   },
   "scripts": {
+    "bench:edits": "node tools/bench-edits.mjs",
     "build": "tsc",
     "prepare": "npm run build",
     "test": "node --test dist/*.test.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@markup-carve/carve": "github:markup-carve/carve-js#a5a7bbd2c474873b82c3cc01bda2e6948adb3473",
+    "@markup-carve/carve": "github:markup-carve/carve-js#5e42377b25432f094fe4da9c96fd518afb77d5e9",
     "@shikijs/core": "^4.6.0",
     "@shikijs/engine-javascript": "^4.6.0",
     "vscode-languageserver": "^9.0.1",

@@ -4,7 +4,7 @@ import { walkNodes, type AstNode } from './ast-walk.js'
 import { astOffsetToIndex } from './position.js'
 import { headingId, ownStartLine } from './tree.js'
 
-export type SiteKind = 'heading' | 'caption' | 'footnote' | 'linkref'
+export type SiteKind = 'heading' | 'caption' | 'footnote' | 'linkref' | 'snippet'
 
 /**
  * One navigable construct, read off the parsed document rather than the raw
@@ -12,7 +12,7 @@ export type SiteKind = 'heading' | 'caption' | 'footnote' | 'linkref'
  */
 export interface ReferenceSite {
   kind: SiteKind
-  /** Heading/caption id, footnote label, or normalized link-reference label. */
+  /** Heading/caption id, footnote label, normalized link-reference label, or snippet name without `$`. */
   key: string
   declaration: boolean
   /** The whole construct: `</#id>`, `[text](#id)`, `[^n]`, a heading line. */
@@ -138,6 +138,25 @@ export function referenceModel(source: string): ReferenceModel {
         const keyStart = at.start + 2
         const written = text.slice(keyStart, keyStart + id.length) === id
         sites.push({ kind: 'footnote', key: id, declaration: false, node, range: range(at.start, at.end), keyRange: written ? range(keyStart, keyStart + id.length) : null })
+        return
+      }
+      case 'snippet_definition': {
+        const name = node.name
+        if (typeof name !== 'string') return
+        // The marker is the last line of the span; an attribute line above it is part of the node (C2-B-236).
+        const lineIndex = positionAt(at.end).line
+        const lineStart = lineStarts[lineIndex]!
+        if (!text.startsWith(`{$${name}`, lineStart)) return
+        const keyStart = lineStart + 2
+        sites.push({ kind: 'snippet', key: name, declaration: true, node, range: range(lineStart, at.end), keyRange: range(keyStart, keyStart + name.length) })
+        return
+      }
+      case 'snippet_use': {
+        const name = node.name
+        if (typeof name !== 'string') return
+        const keyStart = text.indexOf('$', at.start) + 1
+        const written = keyStart > at.start && text.startsWith(name, keyStart)
+        sites.push({ kind: 'snippet', key: name, declaration: false, node, range: range(at.start, at.end), keyRange: written ? range(keyStart, keyStart + name.length) : null })
         return
       }
       case 'link_reference_definition': {

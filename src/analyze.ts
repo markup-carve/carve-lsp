@@ -11,6 +11,7 @@ import {
   CarveOptionError,
   lint,
   parse,
+  renderWithDiagnostics,
   semanticSpan,
   type BlockNode,
   type CaptionNode,
@@ -110,6 +111,7 @@ export function analyzeCarve(source: string, options: AnalyzeOptions = {}): Anal
   } catch (error) {
     if (!(error instanceof CarveOptionError)) throw error
   }
+  lintDiagnostics.push(...snippetRenderFindings(source, includes.documents, includeConfig))
   // Include findings are published from the include pass below, anchored on the root.
   const included = includeConfig && lintDiagnostics.some((entry) => entry.file !== undefined)
     ? safeParse(source, v2IncludeConfig(options.includes ?? {})!)
@@ -197,6 +199,21 @@ function byteRange(source: string, start: number, end: number): Range {
   const from = astOffsetToIndex(source, start)
   const to = Math.max(from + 1, astOffsetToIndex(source, end))
   return { start: positionAt(source, from), end: positionAt(source, Math.min(to, Math.max(from, source.length))) }
+}
+
+/** The expansion findings of C2-N-093, which only a render reports. */
+const SNIPPET_RENDER_CODES = new Set(['snippet-unresolved', 'snippet-cycle', 'snippet-depth', 'snippet-node-budget'])
+const SNIPPET_USE = /\{\{ +\$/
+
+function snippetRenderFindings(source: string, children: ReadonlyArray<{ source: string }>, includes: IncludeConfig | undefined): EngineDiagnostic[] {
+  // Rendering costs a whole pass, so a document with no use anywhere skips it.
+  if (!SNIPPET_USE.test(source) && !children.some((child) => SNIPPET_USE.test(child.source))) return []
+  try {
+    const rendered = renderWithDiagnostics(source, includes ? { includes } : {})
+    return rendered.diagnostics.filter((entry) => SNIPPET_RENDER_CODES.has(entry.code))
+  } catch {
+    return []
+  }
 }
 
 function safeParse(source: string, includes: IncludeConfig): Document | undefined {
