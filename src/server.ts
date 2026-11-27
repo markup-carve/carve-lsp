@@ -423,7 +423,7 @@ let reportedIds = new Map<string, string>()
 connection.languages.diagnostics.onWorkspace(async (params, token) => {
   const known = new Map(params.previousResultIds.map((previous) => [previous.uri, previous.value]))
   // Hold only a re-pull from a client that already has every current report.
-  const uris = new Set([...known.keys(), ...workspaceIndex.documents().map((document) => document.uri)])
+  const uris = new Set([...known.keys(), ...workspaceIndex.uris()])
   const repull = reportedGeneration === workspaceIndex.generation
     && [...uris].every((uri) => known.get(uri) === reportedIds.get(uri))
   if (repull && !token.isCancellationRequested) {
@@ -439,8 +439,8 @@ connection.languages.diagnostics.onWorkspace(async (params, token) => {
   }
   reportedGeneration = workspaceIndex.generation
   reportedIds = new Map()
-  const current = workspaceIndex.documents()
-  const indexed = new Set(current.map((document) => document.uri))
+  const current = workspaceIndex.uris()
+  const indexed = new Set(current)
   // An empty report is what clears a deleted file's old entries in the client.
   const removed = [...known.keys()].filter((uri) => !indexed.has(uri))
     .map((uri): WorkspaceDocumentDiagnosticReport => {
@@ -450,13 +450,13 @@ connection.languages.diagnostics.onWorkspace(async (params, token) => {
       return { uri, version: null, kind: DocumentDiagnosticReportKind.Full, resultId, items: [] }
     })
   return {
-    items: [...removed, ...current.map((document): WorkspaceDocumentDiagnosticReport => {
-      const items = workspaceIndex.diagnostics(document.uri)
+    items: [...removed, ...current.map((uri): WorkspaceDocumentDiagnosticReport => {
+      const items = workspaceIndex.diagnostics(uri)
       const resultId = reportId(items)
-      reportedIds.set(document.uri, resultId)
-      return known.get(document.uri) === resultId
-        ? { uri: document.uri, version: null, kind: DocumentDiagnosticReportKind.Unchanged, resultId }
-        : { uri: document.uri, version: null, kind: DocumentDiagnosticReportKind.Full, resultId, items }
+      reportedIds.set(uri, resultId)
+      return known.get(uri) === resultId
+        ? { uri, version: null, kind: DocumentDiagnosticReportKind.Unchanged, resultId }
+        : { uri, version: null, kind: DocumentDiagnosticReportKind.Full, resultId, items }
     })],
   }
 })
