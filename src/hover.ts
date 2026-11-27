@@ -1,4 +1,6 @@
 import { MarkupKind, type Hover, type Position } from 'vscode-languageserver-types'
+import type { IncludeOptions } from './includes.js'
+import { snippetHover } from './snippets.js'
 import {
   type BlockNode,
   type Document,
@@ -76,9 +78,11 @@ const markupRules: HoverRule[] = [
   },
 ]
 
-export function hoverAt(source: string, position: Position): Hover | null {
+export function hoverAt(source: string, position: Position, includes?: IncludeOptions): Hover | null {
   const fence = colonFenceHover(source, position)
   if (fence) return fence
+  const snippet = snippetHover(source, position, includes)
+  if (snippet) return snippet
   const lines = sourceLines(source)
 
   let rules = lexicalRules

@@ -2,7 +2,8 @@ import { SemanticTokensBuilder, type SemanticTokens } from 'vscode-languageserve
 import { type Document, type Position } from './engine.js'
 import { grammarTokens, type GrammarToken } from './grammar-tokens.js'
 import { resolvedDocument } from './parse-cache.js'
-import { astColumnToCharacter } from './position.js'
+import { astColumnToCharacter, astOffsetToIndex } from './position.js'
+import { walkNodes, type AstNode } from './ast-walk.js'
 import { SEMANTIC_SPAN_EXTENSION_NAMES } from './semantic-span-names.js'
 import { delimitedTableFormat, ownPos } from './tree.js'
 
@@ -74,10 +75,12 @@ export interface SemanticOptions {
  * enabled extensions. Those become `keyword` inside the grammar's `property` run.
  */
 export function semanticTokens(source: string, options: SemanticOptions = {}): Token[] {
-  const tokens = fromGrammar(source)
+  let tokens = fromGrammar(source)
   let keywords: Token[] = []
   try {
-    keywords = treeKeywords(resolvedDocument(source), source, options)
+    const doc = resolvedDocument(source)
+    keywords = treeKeywords(doc, source, options)
+    tokens = withSnippets(tokens, doc, source)
   } catch {
     // A source the engine refuses still gets the grammar's tokens.
   }
@@ -230,6 +233,89 @@ function footnoteDefinition(pieces: GrammarToken[], index: number, lines: string
 }
 
 // Attribute keys a block consumes, and span names, from the tree.
+const SNIPPET_TEXT = /\{\$|\{\{ +\$/
+
+/**
+ * The grammar has no snippet scope: it reads a use as an include path and a
+ * definition as text. The tree's snippet nodes replace whatever it gave
+ * those characters: braces and `:` as `operator`, the name as `variable`.
+ */
+function withSnippets(tokens: Token[], doc: Document, source: string): Token[] {
+  if (!SNIPPET_TEXT.test(source)) return tokens
+  const text = source.replace(/\r\n?/g, '\n')
+  const starts = [0]
+  for (let index = 0; index < text.length; index += 1) if (text[index] === '\n') starts.push(index + 1)
+  const lineOf = (index: number): number => {
+    let low = 0
+    let high = starts.length - 1
+    while (low < high) {
+      const mid = (low + high + 1) >> 1
+      if (starts[mid]! <= index) low = mid
+      else high = mid - 1
+    }
+    return low
+  }
+  const snippet: Token[] = []
+  // The whole marker or use, spaces included, which no grammar token keeps.
+  const covers: Token[] = []
+  walkNodes(doc, (node) => {
+    if (node.type !== 'snippet_definition' && node.type !== 'snippet_use') return
+    const name = typeof node.name === 'string' ? node.name : ''
+    if (node.pos?.startOffset === undefined || node.pos.endOffset === undefined || !name) return false
+    const end = astOffsetToIndex(text, node.pos.endOffset)
+    if (node.type === 'snippet_use') {
+      const start = astOffsetToIndex(text, node.pos.startOffset)
+      const line = lineOf(start)
+      const character = start - starts[line]!
+      const dollar = text.indexOf('$', start) - starts[line]!
+      push(snippet, line, character, 2, 'operator')
+      push(snippet, line, dollar, name.length + 1, 'variable')
+      push(snippet, line, end - starts[line]! - 2, 2, 'operator')
+      push(covers, line, character, end - start, 'operator')
+      return false
+    }
+    // The marker is the definition's last line; its value starts after `: `.
+    const line = lineOf(end)
+    const lineStart = starts[line]!
+    if (!text.startsWith(`{$${name}`, lineStart)) return
+    const first = (Array.isArray(node.children) ? node.children as AstNode[] : []).find((child) => child.pos?.startOffset !== undefined)
+    const colon = first ? astOffsetToIndex(text, first.pos!.startOffset!) - 2 - lineStart : -1
+    if (colon < 2 + name.length || text[lineStart + colon] !== ':') return
+    push(covers, line, 0, colon + 1, 'operator')
+    push(snippet, line, 0, 2, 'operator')
+    push(snippet, line, 2, name.length, 'variable', ['declaration'])
+    const tail = text.slice(lineStart + 2 + name.length, lineStart + colon)
+    if (tail === '}') {
+      push(snippet, line, 2 + name.length, 2, 'operator')
+    } else {
+      push(snippet, line, 2 + name.length, tail.length, 'property')
+      push(snippet, line, colon, 1, 'operator')
+    }
+    // The value may hold uses of its own.
+  })
+  if (snippet.length === 0) return tokens
+  const byLine = new Map<number, Token[]>()
+  for (const token of covers) byLine.set(token.line, [...(byLine.get(token.line) ?? []), token])
+  // A grammar run that spans a use (`*a {{ $v }} b*`) keeps its parts on either side.
+  const kept: Token[] = []
+  for (const token of tokens) {
+    let pieces = [token]
+    for (const other of byLine.get(token.line) ?? []) {
+      pieces = pieces.flatMap((piece) => {
+        const end = piece.character + piece.length
+        const otherEnd = other.character + other.length
+        if (piece.character >= otherEnd || other.character >= end) return [piece]
+        const parts: Token[] = []
+        if (piece.character < other.character) parts.push({ ...piece, length: other.character - piece.character })
+        if (otherEnd < end) parts.push({ ...piece, character: otherEnd, length: end - otherEnd })
+        return parts
+      })
+    }
+    kept.push(...pieces)
+  }
+  return [...kept, ...snippet]
+}
+
 function treeKeywords(doc: Document, source: string, options: SemanticOptions): Token[] {
   const spanNames = options.extensions?.includes('semantic-span')
     ? ['kbd', 'abbr', 'time', ...SEMANTIC_SPAN_EXTENSION_NAMES]

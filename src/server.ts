@@ -219,7 +219,7 @@ connection.onInitialize((params) => {
       renameProvider: { prepareProvider: true },
       codeLensProvider: { resolveProvider: false },
       completionProvider: {
-        triggerCharacters: [':', '#', '^', '[', '@', '{'],
+        triggerCharacters: [':', '#', '^', '[', '@', '{', '$'],
       },
       semanticTokensProvider: {
         legend: {
@@ -570,7 +570,7 @@ function listIndent(args: unknown): TextEdit[] | null {
 
 connection.onRequest(HoverRequest.type, (params) => {
   const document = documents.get(params.textDocument.uri)
-  return document ? hoverAt(document.getText(), params.position) : null
+  return document ? hoverAt(document.getText(), params.position, includeOptions(document)) : null
 })
 
 connection.onRequest(CodeActionRequest.type, async (params) => {
@@ -619,7 +619,7 @@ connection.onRequest(CompletionRequest.type, (params) => {
   return document
     ? [
         ...includeCompletions(document.getText(), params.position, includeOptions(document)),
-        ...completionAt(document.getText(), params.position, { workspaceTokens: workspaceIndex.tokens() }),
+        ...completionAt(document.getText(), params.position, { workspaceTokens: workspaceIndex.tokens(), includes: includeOptions(document) }),
       ]
     : []
 })
