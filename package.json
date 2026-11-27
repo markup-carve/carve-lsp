@@ -37,6 +37,7 @@
     "access": "public"
   },
   "scripts": {
+    "bench:edits": "node tools/bench-edits.mjs",
     "build": "tsc",
     "prepare": "npm run build",
     "test": "node --test dist/*.test.js",
