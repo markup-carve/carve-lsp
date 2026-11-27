@@ -26,8 +26,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Pointing a duplicate id or footnote back to its first declaration no longer rescans the document once per duplicate. A 1 MB document full of duplicates analyzes in 1.4 s instead of 3.3 s, the same as one without (#670).
 - A client that pulls diagnostics no longer also receives them pushed. VS Code keeps pulled and pushed reports in separate collections, so every finding showed twice. A change in an included file or a setting now sends `workspace/diagnostic/refresh` instead. Clients that cannot pull, or cannot take a refresh, still get pushed diagnostics.
 - A document pull carries a result id, and a pull whose report has not changed is answered `unchanged` instead of resending every diagnostic.
-- Parser offsets convert to string indices through a per-document table instead of a scan from the start, so indexing and position lookups no longer grow quadratically with file size. Indexing a 2,800-file workspace drops from about 27 s to 3 s.
-- `workspace/diagnostic` answers with result ids, reports unchanged documents as `unchanged`, and holds the request open until the workspace changes. Before, every pull returned a full report for every indexed file, and clients that re-pull right away kept the server busy indefinitely.
+
+## [0.1.17] - 2026-11-26
+
+A patch release that stops the server from keeping a CPU core busy while a large workspace is open.
+
+### Fixed
+
+- Parser offsets convert to string indices through a per-document table instead of a scan from the start, so indexing and position lookups no longer grow quadratically with file size. Indexing a 2,800-file workspace drops from about 27 s to 3 s (#668).
+- `workspace/diagnostic` answers with result ids, reports unchanged documents as `unchanged`, and holds the request open until the workspace changes. Before, every pull returned a full report for every indexed file, and clients that re-pull right away kept the server busy indefinitely (#668).
 
 ## [0.1.16] - 2026-11-12
 
