@@ -27,6 +27,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Pointing a duplicate id or footnote back to its first declaration no longer rescans the document once per duplicate. A 1 MB document full of duplicates analyzes in 1.4 s instead of 3.3 s, the same as one without (#670).
 - A client that pulls diagnostics no longer also receives them pushed. VS Code keeps pulled and pushed reports in separate collections, so every finding showed twice. A change in an included file or a setting now sends `workspace/diagnostic/refresh` instead. Clients that cannot pull, or cannot take a refresh, still get pushed diagnostics.
 - A document pull carries a result id, and a pull whose report has not changed is answered `unchanged` instead of resending every diagnostic.
+- One parse per document version is shared by the analysis passes and the requests: the colon fence and table checks, hover, completion, list, table and include-selection features no longer parse the document again each. An analysis of a 270 KB document takes about 225 ms instead of 272 ms, and a repeated hover on the same version 15 ms instead of 61 ms (#670).
 
 ## [0.1.17] - 2026-11-26
 

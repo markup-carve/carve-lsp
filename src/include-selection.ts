@@ -12,9 +12,10 @@
  * generates perfectly well, and a false diagnostic on a working document is
  * worse than a missing one.
  */
-import { includeRegion, parse, type BlockNode } from './engine.js'
+import { includeRegion, type BlockNode } from './engine.js'
 import { headingId, ownStartLine } from './tree.js'
 import type { Range } from 'vscode-languageserver-types'
+import { resolvedDocument } from './parse-cache.js'
 
 export interface Section {
   id: string
@@ -28,7 +29,7 @@ export function sections(source: string): Section[] {
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   let document
   try {
-    document = parse(source)
+    document = resolvedDocument(source)
   } catch {
     return []
   }

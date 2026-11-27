@@ -5,10 +5,11 @@ import {
   type CompletionItem,
   type Position,
 } from 'vscode-languageserver-types'
-import { parse, type Document } from './engine.js'
+import { type Document } from './engine.js'
 import { captionTargets, type CaptionTarget } from './captions.js'
 import { walkNodes } from './ast-walk.js'
 import type { IndexedToken } from './workspace-index.js'
+import { resolvedDocument } from './parse-cache.js'
 
 /** The eight canonical admonition kinds (grammar PART 9 §12, Tier 1). */
 const ADMONITIONS = ['note', 'tip', 'warning', 'danger', 'info', 'success', 'example', 'quote']
@@ -204,7 +205,7 @@ function insideCodeBlock(source: string, line: number): boolean {
     for (const [name, child] of Object.entries(value)) if (name !== 'pos' && name !== 'attrs') walk(child)
   }
   try {
-    walk(parse(source, { positions: true }).children)
+    walk(resolvedDocument(source).children)
   } catch {
     return false
   }
@@ -219,7 +220,7 @@ function headingTitles(source: string): string[] {
     : ''
   try {
     // The implicit `[Heading][]` index declines headings under a block quote (PART 9R R1).
-    walkNodes(parse(source), (node) => {
+    walkNodes(resolvedDocument(source), (node) => {
       if (node.type === 'block_quote') return false
       if (node.type === 'heading') titles.push(text(node.children).trim())
     })
@@ -232,7 +233,7 @@ function headingTitles(source: string): string[] {
 function headingIds(source: string): string[] {
   const ids: string[] = []
   try {
-    walkNodes(parse(source), (node) => {
+    walkNodes(resolvedDocument(source), (node) => {
       const id = node.type === 'heading' ? headingId(node as { attrs?: { id?: string }; generatedId?: string }) : undefined
       if (id) ids.push(id)
     })
@@ -256,7 +257,7 @@ function headingIds(source: string): string[] {
 function resolvableCaptionIds(source: string): Array<{ id: string; detail: string }> {
   let targets: readonly CaptionTarget[]
   try {
-    targets = captionTargets(parse(source))
+    targets = captionTargets(resolvedDocument(source))
   } catch {
     // Parsing may fail mid-edit; offer no ids rather than throwing.
     return []
@@ -271,7 +272,7 @@ function resolvableCaptionIds(source: string): Array<{ id: string; detail: strin
 
 function footnoteLabels(source: string): string[] {
   try {
-    const doc: Document = parse(source)
+    const doc: Document = resolvedDocument(source)
     return footnoteEntries(doc).map(([label]) => label)
   } catch {
     return []

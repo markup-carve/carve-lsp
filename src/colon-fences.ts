@@ -1,6 +1,6 @@
 import { DiagnosticSeverity, DocumentHighlightKind, InlayHintKind, type Diagnostic, type DocumentHighlight, type Hover, type InlayHint, type Position, type Range } from 'vscode-languageserver-types'
-import { parseWithDiagnostics } from './engine.js'
 import { astColumnToCharacter, astOffsetToIndex } from './position.js'
+import { parsedSource } from './parse-cache.js'
 
 interface UnclosedContainer { kind: string; line: number; column: number; startOffset: number; endOffset: number; fenceWidth: number }
 
@@ -24,7 +24,7 @@ const FENCE_KIND_LABELS: Record<string, string> = { hard_break_block: 'hard-brea
 
 export function colonFenceStructure(source: string): { openers: FenceSite[]; pairs: FencePair[]; diagnostics: Diagnostic[] } {
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
-  const parsed = parseWithDiagnostics(source)
+  const parsed = parsedSource(source)
   const document = parsed.document
   const unclosed = parsed.diagnostics.flatMap((entry) => entry.code === 'unclosed-container-fence' && entry.range
     ? [unclosedSite(source, entry.range.startOffset)]

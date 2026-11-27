@@ -3,7 +3,15 @@ import test from 'node:test'
 import { analyzeCarve } from './analyze.js'
 import { foldingRanges } from './folding.js'
 import { inlayHints } from './inlay-hints.js'
-import { clearParseCache, resolvedDocument } from './parse-cache.js'
+import { colonFenceStructure } from './colon-fences.js'
+import { completionAt } from './completion.js'
+import { hoverAt } from './hover.js'
+import { sections } from './include-selection.js'
+import { listItems, listTree } from './list-items.js'
+import { clearParseCache, parsedSource, resolvedDocument } from './parse-cache.js'
+import { tableAlignmentEdits } from './table-alignment.js'
+import { pipeTableToCsv } from './table-conversion.js'
+import { tableDiagnostics } from './table-diagnostics.js'
 import { semanticTokens } from './semantic.js'
 
 const regions = (source: string) =>
@@ -124,4 +132,24 @@ test('the shared parse is reused and no feature mutates it', () => {
   assert.equal(resolvedDocument(source), doc)
   assert.equal(JSON.stringify(doc), snapshot)
   assert.notEqual(resolvedDocument(`${source}x\n`), doc)
+})
+
+test('the analysis passes and the requests share one parse per source', () => {
+  clearParseCache()
+  const source = '== A {#a}\n\n- item\n- [x] done\n\n| a | b |\n| c |\n\n::: note\nbody\n:::\n\nSee [A](#a) and [^1].\n\n[^1]: note\n'
+  const parsed = parsedSource(source)
+  const snapshot = JSON.stringify(parsed)
+  analyzeCarve(source)
+  colonFenceStructure(source)
+  tableDiagnostics(source)
+  hoverAt(source, { line: 12, character: 5 })
+  completionAt(source, { line: 12, character: 10 })
+  listItems(source)
+  listTree(source)
+  sections(source)
+  tableAlignmentEdits(source)
+  pipeTableToCsv(source, 5)
+  assert.equal(parsedSource(source), parsed)
+  assert.equal(resolvedDocument(source), parsed.document)
+  assert.equal(JSON.stringify(parsed), snapshot)
 })

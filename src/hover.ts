@@ -1,6 +1,5 @@
 import { MarkupKind, type Hover, type Position } from 'vscode-languageserver-types'
 import {
-  parse,
   type BlockNode,
   type Document,
   type InlineNode,
@@ -10,6 +9,7 @@ import { astColumnToCharacter, characterToAstColumn, sourceLines } from './posit
 import { captionTargetById, type CaptionTarget } from './captions.js'
 import { colonFenceHover } from './colon-fences.js'
 import { walkNodes } from './ast-walk.js'
+import { resolvedDocument } from './parse-cache.js'
 
 interface HoverRule {
   pattern: RegExp
@@ -83,7 +83,7 @@ export function hoverAt(source: string, position: Position): Hover | null {
 
   let rules = lexicalRules
   try {
-    const hover = astHoverAt(parse(source), position, lines)
+    const hover = astHoverAt(resolvedDocument(source), position, lines)
     if (hover) return hover
   } catch {
     // Guess at markup only for documents that do not parse.
