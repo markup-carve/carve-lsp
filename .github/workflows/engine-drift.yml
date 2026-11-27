@@ -1,63 +1,10 @@
 name: Engine drift
 
-# This repo does not implement Carve - it calls an engine that is already
-# corpus-gated in its own repository. What can rot here is the DEPENDENCY:
-# nobody notices when the engine stops moving, and CI stays green because
-# hand-written expectations are satisfied by a stale parser exactly as well as
-# by a current one (carve#735).
-#
-# The pin here is a CARET RANGE (`"@markup-carve/carve": "^0.1.9"`). It was
-# exact at 0.1.7 for one release, because the position units moved inside the
-# `0.1.x` line: 0.1.7 reported a line-range include's positions in slice
-# coordinates and this server corrected for that, so a caret would have let a
-# later engine shift them twice (#233). 0.1.8 reports them in file coordinates
-# (carve-js#1862), the correction is gone (#239), and the range is back so an
-# engine fix can reach editors without a release of THIS repo (carve-js#1571,
-# carve-js#1572).
-#
-# The FLOOR is 0.1.9 rather than 0.1.8 on purpose. 0.1.8 reports
-# `unattached-block-attribute` on the canonical `{empty}` sentinel that this
-# server's own formatter writes, so an editor resolving to it sees the server
-# diagnose its own output (carve-js#2408, fixed in carve-js#2409). A lockfile
-# would not protect a dependent, since only `dist` is published.
-#
-# That trade is what makes question 3 below load-bearing rather than
-# informational: a range that moves on its own needs the corpus driven through
-# the built server against the engine that is coming, and CI runs the same check
-# per pull request against the pinned corpus. If position units move again
-# inside `0.1.x`, narrow this back to an exact pin and say so here.
-#
-# It is a REGISTRY pin either way, not a commit: a `github:` spec in
-# `dependencies` makes every consumer clone the engine over git, so the git arm
-# below describes a state that ci.yml rejects on the pull request that would
-# introduce it.
-#
-# THREE QUESTIONS, deliberately kept apart:
-#
-#   1. Where is the pin against the registry, and does the lockfile agree with
-#      it? Cheap, and the answer is a version string. With a range rather than
-#      an exact pin, the lockfile is the thing that says what actually resolved.
-#
-#   2. Where is the registry against carve-js `main`? This is the one that
-#      actually failed: a June engine sat in six repos while every range was
-#      satisfied and every check was green (carve#499). No pin check can see
-#      it, because nothing about the pin is wrong - the PUBLISHED engine had
-#      stopped tracking the source.
-#
-#   3. What does THIS SERVER do with the engine that is coming? A version
-#      distance is a proxy. The analysis switches on AST node types, so a
-#      renamed type is a silently lost token rather than an error - which is
-#      not hypothetical: `footnote` became `footnote_ref` and `critic-comment`
-#      became `critic_comment` inside the `0.1.x` line (carve#405), and both
-#      were found by hand. Question 3 runs the corpus through the built server
-#      twice, once per engine, and prints the difference.
-#
-# 1 and 2 WARN: upstream moving is not a defect here, and a job that goes red
-# for something outside the repository teaches people to ignore it. They fail
-# only when the pin resolves to nothing or the lockfile contradicts it, which
-# means an install here is broken. 3 FAILS when a document throws, because a
-# server that crashes on a document the coming engine emits is this repo's
-# defect and its user sees it as a dead editor.
+# The pinned engine is checked on pull requests. This scheduled job also
+# compares what the built server reports with the pinned engine and carve-js
+# main, using the same 0.2 conformance examples for both runs. Pin and registry
+# checks report how far the dependency is behind; per-example rows reveal lost
+# tokens or diagnostics even when the totals stay equal.
 
 on:
   schedule:
@@ -260,7 +207,7 @@ jobs:
         with:
           node-version: 22
 
-      - name: Check out the corpus from carve main
+      - name: Check out the 0.2 examples from carve main
         uses: actions/checkout@v7
         with:
           repository: markup-carve/carve
@@ -280,7 +227,7 @@ jobs:
           npm ci
           npm run build
 
-      - name: Corpus through the server, pinned engine
+      - name: Spec examples through the server, pinned engine
         id: pinned
         run: |
           set -euo pipefail
@@ -288,12 +235,16 @@ jobs:
           # from both even when one engine throws. The comparison below is what
           # gates it; the script's own exit gates the pull-request check, where
           # there is nothing to compare against.
-          out="$(node tools/corpus-through-server.mjs carve-main/tests/corpus --manifest pinned-manifest.tsv --allow-throws | tee /dev/stderr)"
+          out="$(node tools/examples-through-server.mjs carve-main/spec/0.2/conformance/examples.json --manifest pinned-manifest.tsv --allow-throws | tee /dev/stderr)"
           for key in documents threw tokens diagnostics; do
             printf '%s=%s\n' "${key}" "$(printf '%s\n' "$out" | sed -n "s/^${key}=//p")" >> "${GITHUB_OUTPUT}"
           done
+          if [ "$(printf '%s\n' "$out" | sed -n 's/^threw=//p')" -gt 0 ]; then
+            echo "::error::the pinned engine throws on spec examples"
+            exit 1
+          fi
 
-      - name: Swap in carve-js main and run the corpus again
+      - name: Swap in carve-js main and run the spec examples again
         run: |
           set -euo pipefail
           # dist/ is plain JavaScript, so it is not rebuilt: a `case` arm naming
@@ -322,7 +273,7 @@ jobs:
           # overwrite the engine that was just swapped in.
           cp -r upstream-carve-js/node_modules node_modules/@markup-carve/carve/node_modules
 
-          out="$(node tools/corpus-through-server.mjs carve-main/tests/corpus --manifest current-manifest.tsv --allow-throws | tee /dev/stderr)"
+          out="$(node tools/examples-through-server.mjs carve-main/spec/0.2/conformance/examples.json --manifest current-manifest.tsv --allow-throws | tee /dev/stderr)"
           threw="$(printf '%s\n' "$out" | sed -n 's/^threw=//p')"
           documents="$(printf '%s\n' "$out" | sed -n 's/^documents=//p')"
           tokens="$(printf '%s\n' "$out" | sed -n 's/^tokens=//p')"
@@ -331,13 +282,17 @@ jobs:
           echo "pinned engine : ${{ steps.pinned.outputs.threw }} threw, ${{ steps.pinned.outputs.tokens }} tokens, ${{ steps.pinned.outputs.diagnostics }} diagnostics over ${{ steps.pinned.outputs.documents }} documents"
           echo "carve-js main : ${threw} threw, ${tokens} tokens, ${diagnostics} diagnostics over ${documents} documents"
 
+          if [ "${documents}" -ne "${{ steps.pinned.outputs.documents }}" ]; then
+            echo "::error::the two engine runs processed different numbers of spec examples"
+            exit 1
+          fi
           if [ "${threw}" -gt 0 ]; then
-            echo "::error::the server throws on ${threw} of ${documents} corpus documents with carve-js main - upgrading the pin as it stands would give every editor a dead server on those documents"
+            echo "::error::the server throws on ${threw} of ${documents} spec examples with carve-js main"
             exit 1
           fi
 
           # Compared as SETS OF PER-DOCUMENT ROWS, not as totals. The totals are
-          # sums over the corpus, so a document that loses semantic tokens and
+          # sums over the examples, so a document that loses semantic tokens and
           # another that gains the same number leave both totals identical - and
           # the check would then report that the engine bump changes nothing
           # while the server had in fact stopped tokenizing one construct and
@@ -368,7 +323,7 @@ jobs:
     #
     # What it catches is a TYPE drift, which nothing else here can see. When a
     # property this server reads becomes optional upstream, the running server
-    # keeps working, every corpus document still parses, and the per-document
+    # keeps working, every spec example still parses, and the per-document
     # manifest above is unchanged - so future-engine reports "no document is
     # read differently" and is right. The damage is deferred to the first pin
     # bump, in a repo whose `prepare` script is `npm run build`: the manifest
