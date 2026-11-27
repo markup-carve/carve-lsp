@@ -71,5 +71,31 @@ test('the 0.2 runner rejects duplicate IDs before writing a manifest', () => {
 test('engine drift uses 0.2 examples in both comparison runs', () => {
   const workflow = readFileSync(join(repoRoot, '.github', 'workflows', 'engine-drift.yml'), 'utf8')
   assert.equal((workflow.match(/node tools\/examples-through-server\.mjs carve-main\/spec\/0\.2\/conformance\/examples\.json --manifest/g) ?? []).length, 2)
+  assert.match(workflow, /node tools\/verify-example-population\.mjs carve-main/)
   assert.doesNotMatch(workflow, /node tools\/corpus-through-server\.mjs/)
+})
+
+test('the population check rejects a nonempty truncated 0.2 example set', () => {
+  const root = mkdtempSync(join(tmpdir(), 'example-population-'))
+  const spec = join(repoRoot, 'tests', 'spec')
+  try {
+    mkdirSync(join(root, 'scripts', 'lib'), { recursive: true })
+    mkdirSync(join(root, 'spec', '0.2', 'conformance'), { recursive: true })
+    copyFileSync(join(spec, 'scripts', 'lib', 'spec2-examples.mjs'), join(root, 'scripts', 'lib', 'spec2-examples.mjs'))
+    for (const name of ['syntax-blocks', 'syntax-inline', 'ast', 'html', 'writer', 'source-layout', 'includes', 'extensions', 'import-html', 'tooling']) {
+      copyFileSync(join(spec, 'spec', '0.2', `${name}.md`), join(root, 'spec', '0.2', `${name}.md`))
+    }
+    const data = JSON.parse(readFileSync(join(spec, 'spec', '0.2', 'conformance', 'examples.json'), 'utf8'))
+    data.examples.pop()
+    writeFileSync(join(root, 'spec', '0.2', 'conformance', 'examples.json'), JSON.stringify(data))
+    let status = 0
+    try {
+      execFileSync(process.execPath, [join(repoRoot, 'tools', 'verify-example-population.mjs'), root], { encoding: 'utf8' })
+    } catch (error) {
+      status = (error as { status?: number }).status ?? -1
+    }
+    assert.equal(status, 1)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })

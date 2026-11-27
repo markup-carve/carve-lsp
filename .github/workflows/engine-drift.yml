@@ -213,6 +213,9 @@ jobs:
           repository: markup-carve/carve
           path: carve-main
 
+      - name: Verify the example population against the spec documents
+        run: node tools/verify-example-population.mjs carve-main
+
       - name: Check out and build carve-js main
         run: |
           set -euo pipefail
