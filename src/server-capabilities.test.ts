@@ -96,6 +96,26 @@ test('pulls sent during a burst of edits all wait for the newest version', async
   assert.equal(client.notifications.some((entry) => entry.method === 'workspace/diagnostic/refresh'), false)
 })
 
+test('a pull that outlives an edit answers for the edited text', async (context) => {
+  const client = LspStdioClient.spawnServer(fileURLToPath(new URL('./server.js', import.meta.url)))
+  context.after(() => client.stop())
+  await client.request('initialize', { processId: null, capabilities: pullCapabilities, workspaceFolders: [], initializationOptions: {} })
+  client.notify('initialized', {})
+  const uri = 'untitled:long.crv'
+  // Long enough that its analysis outlasts the debounce of the edit below.
+  let text = '**bold**\n\n'
+  for (let i = 0; text.length < 400_000; i++) text += `== Section ${i} {#s${i}}\n\nParagraph ${i} with _emphasis_ and a footnote[^n${i}].\n\n[^n${i}]: Note ${i}.\n\n`
+  client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'carve', version: 1, text } })
+  // Past the open's debounce, while its analysis still runs; a client that
+  // does not cancel its pull when it edits.
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  const pull = client.request('textDocument/diagnostic', { textDocument: { uri } })
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  client.notify('textDocument/didChange', { textDocument: { uri, version: 2 }, contentChanges: [{ text: 'Clean text.\n' }] })
+  const report = await pull as { kind: string, items: unknown[] }
+  assert.deepEqual([report.kind, report.items], ['full', []])
+})
+
 test('a pull the client cancels during a burst is answered as cancelled', async (context) => {
   const client = await openBroken(pullCapabilities, context)
   const uri = 'untitled:broken.crv'

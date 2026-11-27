@@ -42,16 +42,15 @@ import {
 } from 'vscode-languageserver/node.js'
 import { TextDocument } from 'vscode-languageserver-textdocument'
 import { encodeTree, format, parse } from './engine.js'
-import { analyzeCarve, type Analysis } from './analyze.js'
+import type { Analysis } from './analyze.js'
+import { includesPossible, jobIncludeOptions, newAnalysisCaches, type IncludeGate, type OpenDocument } from './analysis-job.js'
+import { AnalysisRunner, SupersededError } from './analysis-runner.js'
 import { previewHtml, previewMarkdown } from './preview.js'
 import { EXPORT_KIND, exportCodeActions, exportSupport, pdfCodeAction, resolveExportAction, type ExportFormat, type ExportSupport } from './export-actions.js'
 import { exportPdf, readPdfOptions, type PdfOptions } from './pdf-export.js'
 import {
   DEFAULT_INCLUDE_SETTINGS,
   fsPath,
-  includeOptionsFor,
-  previewIncludeOptionsFor,
-  type IncludeGateInput,
   readIncludeSettings,
   readWorkspaceTrusted,
   type IncludeSettings,
@@ -70,7 +69,6 @@ import { planUpgrade, reviewSummary, upgradeCodeAction, upgradeEdit, UPGRADE_COM
 import { lintCodeActions } from './lint-actions.js'
 import { prepareRename, renameEdits } from './rename.js'
 import { DiagnosticScheduler } from './diagnostic-scheduler.js'
-import { IncludeParseCache, IncludeSourceCache } from './include-cache.js'
 import { DependencyIndex, watcherFor } from './dependencies.js'
 import {
   buildSemanticTokens,
@@ -144,12 +142,15 @@ let pullDiagnostics = false
 const pulledIds = new Map<string, string>()
 // Pulls waiting on the debounced run that the client has not cancelled.
 const livePulls = new Map<string, number>()
-const includeCache = new IncludeSourceCache()
-const includeParseCache = new IncludeParseCache()
+const mainCaches = newAnalysisCaches()
 const dependencyIndex = new DependencyIndex()
 const workspaceIndex = new WorkspaceIndex()
 const semanticBuilders = new Map<string, SemanticTokensBuilder>()
-const analysisCache = new VersionedCache<Analysis>()
+const analysisCache = new VersionedCache<Promise<Analysis>>()
+const analysisRunner = new AnalysisRunner({
+  workerUrl: new URL('./analysis-worker.js', import.meta.url),
+  onFallback: (reason) => connection.console.warn(`Analyzing on the main thread: ${reason}`),
+})
 let watcherRegistration: Disposable | undefined
 let watcherRefresh = Promise.resolve()
 
@@ -286,7 +287,7 @@ const diagnostics = new DiagnosticScheduler({
     // Closed between the last edit and the run: nothing to publish, and the
     // close handler has already cleared its diagnostics.
     if (document === undefined) return
-    validate(document)
+    void validate(document)
   },
 })
 
@@ -330,8 +331,9 @@ connection.onDidChangeWatchedFiles((params) => {
   for (const change of params.changes) {
     const target = fsPath(change.uri)
     if (target === undefined) continue
-    includeCache.invalidate(target)
-    includeParseCache.invalidate(target)
+    mainCaches.sources.invalidate(target)
+    mainCaches.parses.invalidate(target)
+    analysisRunner.invalidate(target)
     if (target.endsWith('.carverc.json')) {
       const previousExtensions = carveSettings.extensions
       carveSettings = resolveCarveSettings()
@@ -355,18 +357,17 @@ connection.onDidChangeWatchedFiles((params) => {
     const document = documents.get(uri)
     if (document) {
       analysisCache.remove(uri)
-      validate(document)
+      void validate(document)
     }
   }
 })
 
-connection.onRequest(DocumentSymbolRequest.type, (params) => {
-  const document = documents.get(params.textDocument.uri)
-  if (!document) return []
-  const includes = includeOptions(document)
-  const analysis = analysisFor(document, includes)
+connection.onRequest(DocumentSymbolRequest.type, async (params) => {
+  const uri = params.textDocument.uri
+  const analysis = await currentAnalysis(uri)
+  if (!analysis) return []
   return analysis.includedSymbols.length > 0
-    ? [...flattenSymbols(analysis.symbols, document.uri), ...analysis.includedSymbols]
+    ? [...flattenSymbols(analysis.symbols, uri), ...analysis.includedSymbols]
     : analysis.symbols
 })
 
@@ -391,17 +392,24 @@ connection.languages.diagnostics.on(async (params, token) => {
   }
   // A cancelled pull no longer counts as one that will deliver the next report.
   const subscription = token.onCancellationRequested(release)
+  let analysis: Analysis | undefined
   try {
-    await diagnostics.settled(uri)
+    // Still live while the run finishes, so that run's publish step sees this
+    // pull and sends no refresh. A run that finds it read a stale included
+    // buffer queues another; the pull waits for that one too.
+    do {
+      await diagnostics.settled(uri)
+      if (token.isCancellationRequested) throw new ResponseError(LSPErrorCodes.RequestCancelled, 'superseded by a newer change')
+      analysis = await currentAnalysis(uri)
+    } while (diagnostics.pending(uri))
   } finally {
     subscription.dispose()
     release()
   }
   if (token.isCancellationRequested) throw new ResponseError(LSPErrorCodes.RequestCancelled, 'superseded by a newer change')
-  const document = documents.get(params.textDocument.uri)
-  const items = document ? analysisFor(document).diagnostics : []
+  const items = analysis?.diagnostics ?? []
   const resultId = reportId(items)
-  if (document) pulledIds.set(document.uri, resultId)
+  if (analysis) pulledIds.set(uri, resultId)
   return params.previousResultId === resultId
     ? { kind: DocumentDiagnosticReportKind.Unchanged, resultId }
     : { kind: DocumentDiagnosticReportKind.Full, resultId, items }
@@ -747,9 +755,23 @@ connection.languages.semanticTokens.onRange((params) => {
     : { data: [] }
 })
 
-function validate(document: TextDocument) {
-  const includes = includeOptions(document)
-  const analysis = analysisFor(document, includes)
+async function validate(document: TextDocument): Promise<void> {
+  const pending = analysisFor(document)
+  let analysis: Analysis
+  try {
+    analysis = await pending
+  } catch (error) {
+    if (!(error instanceof SupersededError)) connection.console.error(`Analysis of ${document.uri} failed: ${String(error)}`)
+    return
+  }
+  // Edited, closed or invalidated (settings, an included file) while it ran:
+  // the replacement has its own run.
+  if (!stillCurrent(document, pending)) return
+  if (readStaleBuffers(pending, analysis.dependencies)) {
+    analysisCache.remove(document.uri)
+    diagnostics.schedule(document.uri, document.version)
+    return
+  }
   const changed = dependencyIndex.update(
     document.uri,
     analysis.dependencies.flatMap((dependency) =>
@@ -773,63 +795,101 @@ function validate(document: TextDocument) {
   }
 }
 
-function analysisFor(document: TextDocument, includes = includeOptions(document)): Analysis {
-  return analysisCache.getOrCreate(document.uri, document.version, () => analyzeCarve(document.getText(), {
-    uri: document.uri,
+function analysisFor(document: TextDocument): Promise<Analysis> {
+  const { uri, version } = document
+  const cached = analysisCache.get(uri, version)
+  if (cached) return cached
+  const source = document.getText()
+  // Buffers are copied into the job, so only for text that can include at all.
+  const gate = includeGate(source.includes('{{'))
+  const analysis = analysisRunner.analyze({
+    uri,
+    source,
     lint: {
       platforms: carveSettings.platforms,
       extensions: carveSettings.extensions,
       upgrade: carveSettings.lintUpgrade,
       severities: carveSettings.severities,
     },
-    ...(includes ? { includes } : {}),
-    includedParseCache: includeParseCache,
-  }))
+    includeGate: gate,
+  })
+  analysisCache.set(uri, version, analysis)
+  bufferVersions.set(analysis, new Map(gate.openDocuments.map((open) => [open.path, open.version])))
+  analysis.catch(() => {
+    if (analysisCache.get(uri, version) === analysis) analysisCache.remove(uri)
+  })
+  return analysis
 }
 
-function includeGateInput(document: TextDocument): IncludeGateInput {
+/** The analysis of the newest version of `uri`; undefined once it is closed. */
+async function currentAnalysis(uri: string): Promise<Analysis | undefined> {
+  for (;;) {
+    const document = documents.get(uri)
+    if (!document) return undefined
+    const pending = analysisFor(document)
+    try {
+      const analysis = await pending
+      if (stillCurrent(document, pending)) return analysis
+    } catch (error) {
+      if (!(error instanceof SupersededError)) throw error
+    }
+  }
+}
+
+function stillCurrent(document: TextDocument, analysis: Promise<Analysis>): boolean {
+  return documents.get(document.uri)?.version === document.version
+    && analysisCache.get(document.uri, document.version) === analysis
+}
+
+// The open-buffer versions each analysis read its includes from.
+const bufferVersions = new WeakMap<Promise<Analysis>, Map<string, number>>()
+
+/**
+ * Did an included buffer open, change or close while `analysis` ran? Its
+ * dependencies are recorded only once it resolves, so such a change could not
+ * have scheduled a new run of this document.
+ */
+function readStaleBuffers(analysis: Promise<Analysis>, dependencies: Analysis['dependencies']): boolean {
+  const read = bufferVersions.get(analysis)
+  if (!read || !dependencies.some((dependency) => dependency.resolved)) return false
+  const now = new Map(openDocumentsByPath().map((open) => [open.path, open.version]))
+  return dependencies.some((dependency) => dependency.resolved && read.get(dependency.id) !== now.get(dependency.id))
+}
+
+function includeGate(withBuffers = true): IncludeGate {
   return {
-    uri: document.uri,
     settings: includeSettings,
     workspaceTrusted,
     workspaceRoots,
-    cache: includeCache,
+    openDocuments: withBuffers && includesPossible(includeSettings, workspaceTrusted) ? openDocumentsByPath() : [],
   }
 }
 
-function includeOptions(document: TextDocument) {
-  return withOpenDocuments(includeOptionsFor(includeGateInput(document)))
-}
-
-function previewIncludeOptions(document: TextDocument) {
-  return withOpenDocuments(previewIncludeOptionsFor(includeGateInput(document)))
-}
-
-function withOpenDocuments(options: ReturnType<typeof includeOptionsFor>) {
-  if (!options) return undefined
-  const diskResolver = options.resolver
-  if (!diskResolver) return options
-  const openByPath = new Map<string, TextDocument>()
+function openDocumentsByPath(): OpenDocument[] {
+  const open: OpenDocument[] = []
   for (const document of documents.all()) {
     const target = fsPath(document.uri)
     if (!target) continue
-    try { openByPath.set(realpathSync(target), document) } catch { /* no disk identity */ }
+    try { open.push({ path: realpathSync(target), source: document.getText(), version: document.version }) } catch { /* no disk identity */ }
   }
-  options.resolver = (includePath, context) => {
-    const result = diskResolver(includePath, context)
-    if (!result.ok) return result
-    const open = openByPath.get(result.id)
-    if (!open) return result
-    const source = open.getText()
-    return { ...result, source, bytes: Buffer.byteLength(source), version: `open:${open.version}` }
-  }
-  return options
+  return open
+}
+
+function includeOptions(document: TextDocument) {
+  return jobIncludeOptions(document.uri, includeGate(), mainCaches, false)
+}
+
+function previewIncludeOptions(document: TextDocument) {
+  return jobIncludeOptions(document.uri, includeGate(), mainCaches, true)
 }
 
 function invalidateIncludedParse(uri: string): void {
   const target = fsPath(uri)
   if (!target) return
-  try { includeParseCache.invalidate(realpathSync(target)) } catch { /* no disk identity */ }
+  let canonical: string
+  try { canonical = realpathSync(target) } catch { return }
+  mainCaches.parses.invalidate(canonical)
+  analysisRunner.invalidate(canonical)
 }
 
 function revalidateIncludingDocuments(uri: string): void {
