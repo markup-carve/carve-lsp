@@ -115,3 +115,10 @@ test('a run around a use keeps its color on either side, and code keeps its own'
   assert.deepEqual(tokensOf('*Say {{ $v }} x*\n'), [[0, 0, 5, 'keyword'], [0, 5, 2, 'operator'], [0, 8, 2, 'variable'], [0, 11, 2, 'operator'], [0, 13, 3, 'keyword']])
   assert.deepEqual(tokensOf('`{{ $v }}`\n'), [[0, 0, 10, 'string']])
 })
+
+test('a use inside a definition value gets snippet tokens', () => {
+  assert.deepEqual(tokensOf('{$b}: x {{ $a }}\n'), [
+    [0, 0, 2, 'operator'], [0, 2, 1, 'variable', 'declaration'], [0, 3, 2, 'operator'],
+    [0, 8, 2, 'operator'], [0, 11, 2, 'variable'], [0, 14, 2, 'operator'],
+  ])
+})

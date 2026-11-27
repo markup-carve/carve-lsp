@@ -277,10 +277,10 @@ function withSnippets(tokens: Token[], doc: Document, source: string): Token[] {
     // The marker is the definition's last line; its value starts after `: `.
     const line = lineOf(end)
     const lineStart = starts[line]!
-    if (!text.startsWith(`{$${name}`, lineStart)) return false
+    if (!text.startsWith(`{$${name}`, lineStart)) return
     const first = (Array.isArray(node.children) ? node.children as AstNode[] : []).find((child) => child.pos?.startOffset !== undefined)
     const colon = first ? astOffsetToIndex(text, first.pos!.startOffset!) - 2 - lineStart : -1
-    if (colon < 2 + name.length || text[lineStart + colon] !== ':') return false
+    if (colon < 2 + name.length || text[lineStart + colon] !== ':') return
     push(covers, line, 0, colon + 1, 'operator')
     push(snippet, line, 0, 2, 'operator')
     push(snippet, line, 2, name.length, 'variable', ['declaration'])
@@ -291,7 +291,7 @@ function withSnippets(tokens: Token[], doc: Document, source: string): Token[] {
       push(snippet, line, 2 + name.length, tail.length, 'property')
       push(snippet, line, colon, 1, 'operator')
     }
-    return false
+    // The value may hold uses of its own.
   })
   if (snippet.length === 0) return tokens
   const byLine = new Map<number, Token[]>()
