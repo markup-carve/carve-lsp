@@ -55,14 +55,14 @@ The server communicates over **stdio** (`--stdio` flag).
 
 | Capability | Details |
 |---|---|
-| Diagnostics | Push, document-pull, and workspace-pull diagnostics for syntax, migration hazards, silent failures, include failures, table metadata, dead references, and duplicate declarations |
+| Diagnostics | Push, document-pull, and workspace-pull diagnostics for syntax, migration hazards, silent failures, include failures, table metadata, dead references, duplicate declarations, and snippet expansion findings |
 | Symbols | Nested document outline plus queryable workspace symbols, including included files |
 | Hover | Markup, cross-reference, include, citation, and table-marker explanations |
 | Completion | Container kinds (admonitions, placement markers, extension containers), code fence languages, attributes, semantic spans, citations, references, heading titles as `[Heading][]` links, workspace anchors, and contained include paths, sections and options |
-| Navigation | Document links, go-to-definition, highlights, and references for anchors, captions, footnotes, citations, and link labels |
-| Rename | Namespace-aware rename: anchors, captions and citation keys across the workspace, footnote and link labels within their document; generated heading ids become explicit when renamed |
+| Navigation | Document links, go-to-definition, highlights, and references for anchors, captions, footnotes, citations, link labels, and snippets |
+| Rename | Namespace-aware rename: anchors, captions, citation keys and snippet names across the workspace, footnote and link labels within their document; generated heading ids become explicit when renamed |
 | Code actions | Migration and lint quick-fixes, table marker repair, table conversion, creation of missing definitions, export to Markdown or HTML, and the Carve 0.1 to 0.2 upgrade (`source.upgrade`) |
-| Code lens | Reference counts for anchors, captions, citations, footnotes, and link labels |
+| Code lens | Reference counts for anchors, captions, citations, footnotes, link labels, and snippet definitions |
 | Selection and folding | Syntax-aware selection expansion and folding, with tolerant fallbacks during incomplete edits |
 | Formatting | Conservative document/range formatting, on-type continuation (see below), or explicit migration formatting |
 | Semantic tokens | Full, ranged, and delta token updates, read from the carve-grammars TextMate grammar, so the server and an editor using that grammar color a line the same way; the document tree adds the attribute keys a block consumes and the semantic span names |
@@ -146,6 +146,23 @@ exported `BARE_CONTINUATION_MARKER`.
 The heading list stays empty until the text after `[` matches a heading, so
 ordinary link text and bracketed prose get no popup. `![`, `[[`, `\[`, `[^`
 and `[@` are left to their own completions.
+
+## Snippets
+
+A snippet definition `{$name}: value` and its uses, `{{ $name }}` inside a
+sentence or alone on a line, are read from the engine's tree:
+
+- Go to definition on a use jumps to the definition that wins, the first one
+  of the name. With file inclusion on, that can be a definition an included
+  file contributes.
+- Find references and rename work from the definition or from any use, across
+  the workspace. A new name follows the snippet-name rules (an ASCII letter,
+  digit or `_`, then letters, digits, `_` and `-`); a typed `$` is dropped.
+- Diagnostics are the engine's own: `duplicate-snippet` and `unused-snippet`
+  from lint, and `snippet-unresolved`, `snippet-cycle`, `snippet-depth` and
+  `snippet-node-budget` from the expansion. The server adds none of its own.
+
+A snippet name is never an id, so `</#name>` does not reach a snippet.
 
 ## Upgrade from Carve 0.1
 
