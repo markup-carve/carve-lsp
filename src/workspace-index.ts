@@ -29,7 +29,8 @@ export interface IndexedToken {
 interface IndexedDocument {
   version: number | string
   source: string
-  tokens: IndexedToken[]
+  /** Scanned on first read, so a typing burst parses once per query, not once per keystroke. */
+  tokens?: IndexedToken[]
 }
 
 export interface WorkspaceDocument {
@@ -49,7 +50,12 @@ export interface WorkspaceDocument {
 export class WorkspaceIndex {
   readonly #documents = new Map<string, IndexedDocument>()
   readonly #listeners = new Set<() => void>()
+  readonly #scan: (uri: string, source: string) => IndexedToken[]
   #generation = 0
+
+  constructor(scan: (uri: string, source: string) => IndexedToken[] = scanDocument) {
+    this.#scan = scan
+  }
 
   /** Bumped on every change: a diagnostic in one file can depend on any other. */
   get generation(): number {
@@ -65,7 +71,7 @@ export class WorkspaceIndex {
   update(uri: string, source: string, version: number | string): void {
     const current = this.#documents.get(uri)
     if (current?.version === version && current.source === source) return
-    this.#documents.set(uri, { version, source, tokens: scanDocument(uri, source) })
+    this.#documents.set(uri, { version, source })
     this.#changed()
   }
 
@@ -86,16 +92,24 @@ export class WorkspaceIndex {
   }
 
   tokens(uri?: string): IndexedToken[] {
-    if (uri !== undefined) return [...(this.#documents.get(uri)?.tokens ?? [])]
-    return [...this.#documents.values()].flatMap((document) => document.tokens)
+    if (uri !== undefined) {
+      const document = this.#documents.get(uri)
+      return document ? [...this.#scanned(uri, document)] : []
+    }
+    return [...this.#documents].flatMap(([key, document]) => this.#scanned(key, document))
   }
 
   documents(): WorkspaceDocument[] {
     return [...this.#documents].map(([uri, document]) => ({
       uri,
       source: document.source,
-      tokens: [...document.tokens],
+      tokens: [...this.#scanned(uri, document)],
     }))
+  }
+
+  #scanned(uri: string, document: IndexedDocument): IndexedToken[] {
+    document.tokens ??= this.#scan(uri, document.source)
+    return document.tokens
   }
 
   tokenAt(uri: string, position: Position): IndexedToken | null {

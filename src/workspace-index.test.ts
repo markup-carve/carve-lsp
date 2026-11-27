@@ -21,6 +21,23 @@ test('finds references and renames headings across indexed documents', () => {
   assert.deepEqual(Object.keys(edit?.changes ?? {}).sort(), ['file:///a.crv', 'file:///b.crv'])
 })
 
+test('a typing burst scans the edited document once, on the next query', () => {
+  const scans: string[] = []
+  const index = new WorkspaceIndex((uri, source) => {
+    scans.push(source)
+    return scanDocument(uri, source)
+  })
+  let source = '{#note}\n# Note\n\nSee </#note>.\n'
+  for (let version = 1; version <= 20; version += 1) {
+    source += 'x'
+    index.update('file:///a.crv', source, version)
+  }
+  assert.deepEqual(scans, [])
+  assert.equal(index.references('heading', 'note', true).length, 2)
+  assert.equal(index.tokenAt('file:///a.crv', { line: 3, character: 7 })?.key, 'note')
+  assert.deepEqual(scans, [source])
+})
+
 test('versioned updates replace stale tokens and removal clears them', () => {
   const index = new WorkspaceIndex()
   index.update('file:///a.crv', '[^old]: body\n', 1)
