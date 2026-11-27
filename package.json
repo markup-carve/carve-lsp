@@ -1,6 +1,6 @@
 {
   "name": "@markup-carve/carve-lsp",
-  "version": "0.1.17",
+  "version": "0.2.0",
   "type": "module",
   "description": "Language server for Carve markup documents",
   "license": "MIT",
