@@ -99,6 +99,11 @@ export class WorkspaceIndex {
     return [...this.#documents].flatMap(([key, document]) => this.#scanned(key, document))
   }
 
+  /** Indexed URIs, without scanning any document. */
+  uris(): string[] {
+    return [...this.#documents.keys()]
+  }
+
   documents(): WorkspaceDocument[] {
     return [...this.#documents].map(([uri, document]) => ({
       uri,

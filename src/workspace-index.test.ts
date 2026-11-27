@@ -32,6 +32,7 @@ test('a typing burst scans the edited document once, on the next query', () => {
     source += 'x'
     index.update('file:///a.crv', source, version)
   }
+  assert.deepEqual(index.uris(), ['file:///a.crv'])
   assert.deepEqual(scans, [])
   assert.equal(index.references('heading', 'note', true).length, 2)
   assert.equal(index.tokenAt('file:///a.crv', { line: 3, character: 7 })?.key, 'note')
