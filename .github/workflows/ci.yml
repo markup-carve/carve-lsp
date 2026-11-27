@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, next2]
+    branches: [main]
   pull_request:
-    branches: [main, next2]
+    branches: [main]
 
 # Only PR runs share a group; every other run gets its own so none is dropped.
 concurrency:
@@ -43,6 +43,6 @@ jobs:
 
       # Every input of the pinned spec's 0.2 conformance examples goes through the
       # built server; the 0.1 corpus that corpus-through-server.mjs reads is gone
-      # from carve next2.
+      # from carve main.
       - name: The pinned spec examples go through the server
         run: node tools/examples-through-server.mjs tests/spec/spec/0.2/conformance/examples.json

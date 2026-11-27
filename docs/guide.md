@@ -7,7 +7,7 @@ Provides editor intelligence for `.crv` files via the
 ## Carve 0.2
 
 This branch serves Carve 0.2. Every engine call goes through the 0.2 API
-(`@markup-carve/carve`), pinned to a carve-js `next2` commit. What an editor
+(`@markup-carve/carve`), pinned to a carve-js `main` commit. What an editor
 user notices:
 
 - Diagnostics use the 0.2 lint catalog. Renamed rules keep their meaning under
