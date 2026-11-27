@@ -6,10 +6,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-27
+
+The server reads Carve 0.2 documents, offers a 0.1 to 0.2 upgrade action, and stays responsive on large files.
+
 ### Breaking
 
-- The server runs on the Carve 0.2 engine (`@markup-carve/carve`, carve-js `next2`): diagnostics use the 0.2 lint ids, positions and node shapes, and documents are read as 0.2 reads them (#650).
+- The server runs on the Carve 0.2 engine (`@markup-carve/carve` 0.2): diagnostics use the 0.2 lint ids, positions and node shapes, and documents are read as 0.2 reads them (#650).
 - The "Escape the `+`" quick fix is gone with the 0.2 removal of the continuation marker (#650).
+
+### Fixed
+
+- Analysis runs in a worker thread, so hover, completion and semantic tokens keep answering while a large document is linted. During a burst of 20 keystrokes, the longest event-loop block drops from 387 ms to 2 ms on a 270 KB document and from 1.3 s to 7 ms on 1 MB. A queued analysis is dropped when a newer version of the same document arrives. Without the worker script, analysis runs on the main thread as before (#670, #679).
+- Hover no longer resolves every crossref in the document to answer for the one under the cursor, and caption targets are indexed once per parsed tree instead of walked per lookup. On a 270 KB document with 238 crossrefs, a hover takes 76 ms instead of 2.2 s; on 1 MB, 310 ms instead of 28 s (#670, #674).
+- A diagnostic pull waits for the debounced analysis instead of analyzing at once. vscode-languageclient pulls on every change, so typing ran one full analysis per keystroke and the debounce never applied. A pull the client cancels is answered as cancelled without analysis. Over 20 keystrokes on a 270 KB document, the last report now arrives 0.8 s after the last keystroke instead of 5.2 s (#670, #673).
+- Pointing a duplicate id or footnote back to its first declaration no longer rescans the document once per duplicate. A 1 MB document full of duplicates analyzes in 1.4 s instead of 3.3 s, the same as one without (#670, #672).
+- A client that pulls diagnostics no longer also receives them pushed. VS Code keeps pulled and pushed reports in separate collections, so every finding showed twice. A change in an included file or a setting now sends `workspace/diagnostic/refresh` instead. Clients that cannot pull, or cannot take a refresh, still get pushed diagnostics (#671).
+- A document pull carries a result id, and a pull whose report has not changed is answered `unchanged` instead of resending every diagnostic (#671).
+- One parse per document version is shared by the analysis passes and the requests: the colon fence and table checks, hover, completion, list, table and include-selection handlers no longer parse the document again each. An analysis of a 270 KB document takes about 225 ms instead of 272 ms, and a repeated hover on the same version 15 ms instead of 61 ms (#670, #680).
+- A keystroke no longer reparses the whole document to update the workspace index; the index scans a document the first time a query needs it (#678).
+- The server advertises the shared PDF export command only when the client opts in (#649).
 
 ### Changed
 
@@ -19,16 +35,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Migration quick fixes and *Fix all Carve migration collisions* apply the rewrites of `carve lint --fix`, so a bare strike becomes `{~x~}`. The `carve-legacy` 0.1.17 alias is gone (markup-carve/carve-js#5086).
 - *Export as Markdown* writes through the engine's `markdown` export writer again (markup-carve/carve-js#5057).
 - The `semantic-span` lint extension reaches the lint rules again through the engine's `semanticSpan` extension (markup-carve/carve-js#5060).
+- *Upgrade to Carve 0.2* (`source.upgrade`) and the `carve.upgrade` command rewrite a 0.1 document with the engine's upgrade and list what needs a person; a document the upgrade would render differently is left alone (#662).
+- `lint.upgrade` (default off) runs the 0.1 migration rules and their quick fixes (#666).
+- `render.headingShift` (0 to 5) shifts heading levels in the HTML preview and the HTML and Markdown exports (#685).
+- Named snippets: go to definition, references, rename and expansion diagnostics, completion after `{{ $`, hover with the snippet value, outline symbols and semantic tokens (#683, #684).
+- Semantic tokens come from the carve-grammars 0.2 TextMate grammar, and an edit re-tokenizes only from its first changed line (#663).
 
-### Fixed
-
-- Analysis runs in a worker thread, so hover, completion and semantic tokens keep answering while a large document is linted. During a burst of 20 keystrokes, the longest event-loop block drops from 387 ms to 2 ms on a 270 KB document and from 1.3 s to 7 ms on 1 MB. A queued analysis is dropped when a newer version of the same document arrives. Without the worker script, analysis runs on the main thread as before (#670).
-- Hover no longer resolves every crossref in the document to answer for the one under the cursor, and caption targets are indexed once per parsed tree instead of walked per lookup. On a 270 KB document with 238 crossrefs, a hover takes 76 ms instead of 2.2 s; on 1 MB, 310 ms instead of 28 s (#670).
-- A diagnostic pull waits for the debounced analysis instead of analyzing at once. vscode-languageclient pulls on every change, so typing ran one full analysis per keystroke and the debounce never applied. A pull the client cancels is answered as cancelled without analysis. Over 20 keystrokes on a 270 KB document, the last report now arrives 0.8 s after the last keystroke instead of 5.2 s (#670).
-- Pointing a duplicate id or footnote back to its first declaration no longer rescans the document once per duplicate. A 1 MB document full of duplicates analyzes in 1.4 s instead of 3.3 s, the same as one without (#670).
-- A client that pulls diagnostics no longer also receives them pushed. VS Code keeps pulled and pushed reports in separate collections, so every finding showed twice. A change in an included file or a setting now sends `workspace/diagnostic/refresh` instead. Clients that cannot pull, or cannot take a refresh, still get pushed diagnostics.
-- A document pull carries a result id, and a pull whose report has not changed is answered `unchanged` instead of resending every diagnostic.
-- One parse per document version is shared by the analysis passes and the requests: the colon fence and table checks, hover, completion, list, table and include-selection features no longer parse the document again each. An analysis of a 270 KB document takes about 225 ms instead of 272 ms, and a repeated hover on the same version 15 ms instead of 61 ms (#670).
+**Full Changelog**: https://github.com/markup-carve/carve-lsp/compare/v0.1.17...v0.2.0
 
 ## [0.1.17] - 2026-11-26
 
