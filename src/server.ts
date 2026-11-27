@@ -521,7 +521,7 @@ connection.onRequest(ExecuteCommandRequest.type, async (params) => {
   if (params.command === 'carve.rebuildImpact') return uri ? rebuildImpact(workspaceIndex, uri) : []
   const document = uri ? documents.get(uri) : undefined
   if (!document) return null
-  if (params.command === 'carve.previewHtml') return previewHtml(document.getText(), previewIncludeOptions(document))
+  if (params.command === 'carve.previewHtml') return previewHtml(document.getText(), previewIncludeOptions(document), carveSettings.headingShift)
   if (params.command === 'carve.showAst') return encodeTree(parse(document.getText()))
   return null
 })
@@ -611,7 +611,9 @@ function readExportTarget(target: string): string | null {
 
 function renderExport(document: TextDocument, format: ExportFormat): string {
   const includes = previewIncludeOptions(document)
-  return format === 'html' ? previewHtml(document.getText(), includes) : previewMarkdown(document.getText(), includes)
+  return format === 'html'
+    ? previewHtml(document.getText(), includes, carveSettings.headingShift)
+    : previewMarkdown(document.getText(), includes, carveSettings.headingShift)
 }
 
 connection.onRequest(CompletionRequest.type, (params) => {
