@@ -1,7 +1,7 @@
 /**
  * The inputs of the 0.2 conformance examples in the pinned spec
  * (`spec/0.2/conformance/examples.json`), for gates that run over every
- * document the spec states. They replace the 0.1 corpus, which carve `next2`
+ * document the spec states. They replace the 0.1 corpus, which carve `main`
  * no longer carries. Test-only.
  */
 import { readFileSync } from 'node:fs'

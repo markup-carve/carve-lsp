@@ -2,7 +2,7 @@
 // (`spec/0.2/conformance/examples.json`) through the built server: analysis and
 // semantic tokens. Fails when the server throws on any of them, or when the file
 // states no examples at all. The 0.2 counterpart of corpus-through-server.mjs,
-// whose 0.1 corpus carve `next2` no longer carries.
+// whose 0.1 corpus carve `main` no longer carries.
 import { readFileSync } from 'node:fs'
 import { argv, exit, stdout } from 'node:process'
 
