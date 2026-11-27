@@ -254,7 +254,7 @@ function headingIds(source: string): string[] {
  * caption id that did not would be the one entry that quietly does not work.
  */
 function resolvableCaptionIds(source: string): Array<{ id: string; detail: string }> {
-  let targets: CaptionTarget[]
+  let targets: readonly CaptionTarget[]
   try {
     targets = captionTargets(parse(source))
   } catch {

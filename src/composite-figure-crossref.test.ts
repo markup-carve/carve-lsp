@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { render, lint, parse } from './engine.js'
 import { analyzeCarve } from './analyze.js'
-import { captionTargets, panelLetter } from './captions.js'
+import { captionTargetById, captionTargets, panelLetter } from './captions.js'
 import { completionAt } from './completion.js'
 import { definitionAt } from './definition.js'
 import { hoverAt } from './hover.js'
@@ -327,4 +327,18 @@ test('a well-formed group reports none of them', () => {
   const clean = '::: figure\n![a](a.png)\n^ (a) A\n\n![b](b.png)\n^ (b) B\n:::\n^ Figure #: g\n'
   const codes = analyzeCarve(clean).diagnostics.map((diagnostic) => diagnostic.code)
   assert.deepEqual(codes.filter((code) => String(code).startsWith('figure-group-')), [])
+})
+
+test('a duplicated caption id names its first host, from one index per tree', () => {
+  const source = '{#dup}\n![a](a.png)\n^ Figure #: First\n\n{#dup}\n![b](b.png)\n^ Figure #: Second\n\nSee </#dup>.\n'
+  const doc = parse(source)
+  const first = captionTargetById(doc, 'dup')
+  assert.equal(first?.text, 'Figure 1')
+  assert.equal(captionTargetById(doc, 'dup'), first)
+  assert.equal(captionTargets(doc), captionTargets(doc))
+  assert.equal(captionTargetById(doc, 'missing'), null)
+  // A fresh parse is a fresh tree and indexes its own targets.
+  assert.notEqual(captionTargets(parse(source)), captionTargets(doc))
+  const hover = hoverAt(source, { line: 8, character: 7 })
+  assert.match(String((hover?.contents as { value?: string })?.value), /Figure 1/)
 })
